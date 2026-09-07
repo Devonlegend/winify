@@ -1,0 +1,13 @@
+{{define "title"}}Dashboard &middot; Control Center{{end}}
+{{define "body"}}
+<main>
+  <h1>DevOps Control Center</h1>
+  <p class="muted">Phase 1 skeleton is online.</p>
+  <dl>
+    <dt>Database</dt>
+    <dd class="ok">{{.DBStatus}}</dd>
+    <dt>Listening on</dt>
+    <dd>{{.Addr}}</dd>
+  </dl>
+</main>
+{{end}}

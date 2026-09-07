@@ -1,0 +1,5 @@
+# Registered projects. Parsed by internal/config in a later phase.
+# Each project describes what to deploy and where (server name ref),
+# the deploy strategy (dockerfile: <path> or iis), and optional hooks.
+# Empty until deployment support lands.
+projects: []

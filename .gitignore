@@ -1,0 +1,8 @@
+# Local config (may contain secrets) and runtime data
+/config.yaml
+/data/
+
+# Build artifacts
+/control-center.exe
+/control-center
+*.test

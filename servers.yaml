@@ -1,0 +1,5 @@
+# Deployment targets. Parsed by internal/config in a later phase.
+# Credentials are never stored in plaintext here or in the DB; this file
+# only carries the host/type and an encrypted-ref to a credential store.
+# Empty until deployment support lands.
+servers: []
