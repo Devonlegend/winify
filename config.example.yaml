@@ -34,9 +34,21 @@ proxy:
   server_name: "srv0"
 
 deploy:
-  # Parent directory on the target for cloned repos.
+  # Parent directory on Docker/Linux targets for cloned repos.
   work_dir: "/opt/control-center"
+  # Parent directory on Windows/IIS targets (separate path syntax).
+  iis_work_dir: 'C:\control-center'
+  # Where timestamped pre-deploy IIS backups are stored for rollback.
+  iis_backup_dir: 'C:\control-center\backups'
   # Empty disables SSH host-key verification (insecure; set a known_hosts file).
   known_hosts_file: ""
   health_timeout_seconds: 60
   health_interval_seconds: 3
+
+monitoring:
+  # Poll each registered server over its existing SSH/WinRM connection.
+  enabled: true
+  interval_seconds: 30
+  timeout_seconds: 15
+  retention_hours: 24
+  history_points: 200

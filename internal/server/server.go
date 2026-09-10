@@ -116,6 +116,8 @@ func (s *Server) Handler() http.Handler {
 
 		r.Get("/api/projects/{projectID}/deployments", s.handleAPIDeployments)
 		r.Get("/api/deployments/{id}", s.handleAPIDeployment)
+		r.Get("/api/metrics", s.handleAPIMetrics)
+		r.Get("/api/servers/{id}/metrics", s.handleAPIServerMetrics)
 	})
 
 	return r

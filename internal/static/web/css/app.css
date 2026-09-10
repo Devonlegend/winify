@@ -304,3 +304,154 @@ button.secondary {
 button.secondary:hover {
   background: #334155;
 }
+
+/* Target-type badge */
+.badge {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  vertical-align: middle;
+}
+
+.badge-docker {
+  background: #0c2a43;
+  color: #7dd3fc;
+}
+
+.badge-iis {
+  background: #2a1a3d;
+  color: #c4b5fd;
+}
+
+/* Monitoring */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 1.25rem;
+  margin-top: 2rem;
+}
+
+.metric-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  padding: 1.25rem;
+}
+
+.metric-card[data-state="down"] {
+  border-color: #7f1d1d;
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.card-head h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.card-host {
+  font-size: 0.8rem;
+  margin: 0.35rem 0 0;
+  word-break: break-all;
+}
+
+.card-error {
+  margin: 0.75rem 0 0;
+}
+
+.pill {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: #1e293b;
+  color: #94a3b8;
+}
+
+.pill-ok { background: #052e1b; color: #34d399; }
+.pill-down { background: #450a0a; color: #f87171; }
+.pill-stale { background: #3a2e05; color: #fbbf24; }
+
+.gauges {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.gauge-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: #94a3b8;
+  margin-bottom: 0.3rem;
+}
+
+.gauge-val {
+  color: #e2e8f0;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar {
+  height: 8px;
+  background: #1e293b;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  width: 0;
+  background: #38bdf8;
+  transition: width 0.4s ease;
+}
+
+.bar-fill[data-level="warn"] { background: #fbbf24; }
+.bar-fill[data-level="crit"] { background: #f87171; }
+
+.meta {
+  display: flex;
+  gap: 1.25rem;
+  margin: 1rem 0 0;
+}
+
+.meta dt {
+  font-size: 0.65rem;
+}
+
+.meta dd {
+  font-size: 0.9rem;
+  margin: 0.1rem 0 0;
+}
+
+.services {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+
+.svc {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #cbd5e1;
+}
+
+.svc-ok { background: #052e1b; color: #34d399; }
+.svc-bad { background: #450a0a; color: #f87171; }
+
+.chart-wrap {
+  margin-top: 1rem;
+  height: 150px;
+}

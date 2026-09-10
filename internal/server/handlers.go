@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -107,6 +108,7 @@ type sectionData struct {
 // plus whether a rollback target exists.
 type projectDeploys struct {
 	Project     config.Project
+	TargetType  string
 	Deployments []models.Deployment
 	CanRollback bool
 }
@@ -117,22 +119,33 @@ type deploymentPageData struct {
 }
 
 func (s *Server) handleDeployment(w http.ResponseWriter, r *http.Request) {
-	projects, err := s.store.ListProjects(r.Context())
+	ctx := r.Context()
+	projects, err := s.store.ListProjects(ctx)
 	if err != nil {
 		log.Printf("deployment: list projects: %v", err)
 		http.Error(w, "failed to load projects", http.StatusInternalServerError)
 		return
 	}
+	servers, err := s.store.ListServers(ctx)
+	if err != nil {
+		log.Printf("deployment: list servers: %v", err)
+		http.Error(w, "failed to load servers", http.StatusInternalServerError)
+		return
+	}
+	serverType := make(map[string]string, len(servers))
+	for _, srv := range servers {
+		serverType[srv.ID] = srv.Type
+	}
 
 	rows := make([]projectDeploys, 0, len(projects))
 	for _, p := range projects {
-		deploys, err := s.store.ListDeployments(r.Context(), p.ID, 20)
+		deploys, err := s.store.ListDeployments(ctx, p.ID, 20)
 		if err != nil {
 			log.Printf("deployment: list %s: %v", p.ID, err)
 			http.Error(w, "failed to load deployments", http.StatusInternalServerError)
 			return
 		}
-		successes, err := s.store.SuccessfulDeployments(r.Context(), p.ID, 2)
+		successes, err := s.store.SuccessfulDeployments(ctx, p.ID, 2)
 		if err != nil {
 			log.Printf("deployment: successes %s: %v", p.ID, err)
 			http.Error(w, "failed to load deployments", http.StatusInternalServerError)
@@ -140,6 +153,7 @@ func (s *Server) handleDeployment(w http.ResponseWriter, r *http.Request) {
 		}
 		rows = append(rows, projectDeploys{
 			Project:     p,
+			TargetType:  serverType[p.ServerID],
 			Deployments: deploys,
 			CanRollback: len(successes) >= 2,
 		})
@@ -216,10 +230,93 @@ func (s *Server) handleAPIDeployment(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, d)
 }
 
+// serverMetricCard is one server's card on the Monitoring tab.
+type serverMetricCard struct {
+	Server  config.Server
+	Latest  models.Metric
+	HasData bool
+	Down    bool
+	Stale   bool
+}
+
+type monitoringPageData struct {
+	pageData
+	Cards           []serverMetricCard
+	IntervalSeconds int
+}
+
 func (s *Server) handleMonitoring(w http.ResponseWriter, r *http.Request) {
-	data := sectionData{pageData: s.page(r)}
+	ctx := r.Context()
+	servers, err := s.store.ListServers(ctx)
+	if err != nil {
+		log.Printf("monitoring: list servers: %v", err)
+		http.Error(w, "failed to load servers", http.StatusInternalServerError)
+		return
+	}
+	latest, err := s.store.LatestMetrics(ctx)
+	if err != nil {
+		log.Printf("monitoring: latest metrics: %v", err)
+		http.Error(w, "failed to load metrics", http.StatusInternalServerError)
+		return
+	}
+	byServer := make(map[string]models.Metric, len(latest))
+	for _, m := range latest {
+		byServer[m.ServerID] = m
+	}
+
+	interval := s.cfg.Monitoring.IntervalSeconds
+	if interval <= 0 {
+		interval = 30
+	}
+	cards := make([]serverMetricCard, 0, len(servers))
+	for _, srv := range servers {
+		card := serverMetricCard{Server: srv}
+		if m, ok := byServer[srv.ID]; ok {
+			card.Latest = m
+			card.HasData = true
+			card.Down = !m.Reachable
+			// Two missed intervals means the poller is no longer updating us.
+			card.Stale = time.Since(m.Timestamp) > time.Duration(2*interval)*time.Second
+		}
+		cards = append(cards, card)
+	}
+
+	data := monitoringPageData{pageData: s.page(r), Cards: cards, IntervalSeconds: interval}
 	data.Active = "monitoring"
 	s.render(w, http.StatusOK, "monitoring", data)
+}
+
+// handleAPIMetrics returns the latest sample per server, for the auto-refresh.
+func (s *Server) handleAPIMetrics(w http.ResponseWriter, r *http.Request) {
+	latest, err := s.store.LatestMetrics(r.Context())
+	if err != nil {
+		log.Printf("api metrics: %v", err)
+		http.Error(w, "error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, latest)
+}
+
+// handleAPIServerMetrics returns a server's sample history, oldest first, for
+// the Chart.js time series.
+func (s *Server) handleAPIServerMetrics(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	limit := s.cfg.Monitoring.HistoryPoints
+	if limit <= 0 {
+		limit = 200
+	}
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 1000 {
+			limit = n
+		}
+	}
+	history, err := s.store.MetricHistory(r.Context(), id, limit)
+	if err != nil {
+		log.Printf("api server metrics: %v", err)
+		http.Error(w, "error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, history)
 }
 
 func (s *Server) handleAssistant(w http.ResponseWriter, r *http.Request) {

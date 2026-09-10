@@ -109,22 +109,31 @@ func (s *Store) DeleteExpiredSessions(ctx context.Context, now time.Time) error 
 	return nil
 }
 
+// serverColumns is the shared SELECT list for servers.
+const serverColumns = `id, name, type, host, winrm_endpoint, winrm_user, winrm_transport, winrm_insecure,
+	credential_ref, ssh_host, ssh_port, ssh_user, ssh_key_ref`
+
 // UpsertServer syncs one entry from servers.yaml into the database.
 func (s *Store) UpsertServer(ctx context.Context, srv config.Server) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO servers (id, name, type, winrm_endpoint, credential_ref, ssh_host, ssh_port, ssh_user, ssh_key_ref)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO servers (`+serverColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			type = excluded.type,
+			host = excluded.host,
 			winrm_endpoint = excluded.winrm_endpoint,
+			winrm_user = excluded.winrm_user,
+			winrm_transport = excluded.winrm_transport,
+			winrm_insecure = excluded.winrm_insecure,
 			credential_ref = excluded.credential_ref,
 			ssh_host = excluded.ssh_host,
 			ssh_port = excluded.ssh_port,
 			ssh_user = excluded.ssh_user,
 			ssh_key_ref = excluded.ssh_key_ref,
 			updated_at = CURRENT_TIMESTAMP`,
-		srv.ID, srv.Name, srv.Type, srv.WinRMEndpoint, srv.CredentialRef,
+		srv.ID, srv.Name, srv.Type, srv.Host, srv.WinRMEndpoint, srv.WinRMUser,
+		srv.WinRMTransport, boolToInt(srv.WinRMInsecure), srv.CredentialRef,
 		srv.SSHHost, srv.SSHPort, srv.SSHUser, srv.SSHKeyRef)
 	if err != nil {
 		return fmt.Errorf("upsert server %q: %w", srv.ID, err)
@@ -134,9 +143,7 @@ func (s *Store) UpsertServer(ctx context.Context, srv config.Server) error {
 
 // ListServers returns all configured targets.
 func (s *Store) ListServers(ctx context.Context) ([]config.Server, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, type, winrm_endpoint, credential_ref, ssh_host, ssh_port, ssh_user, ssh_key_ref
-		FROM servers ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+serverColumns+` FROM servers ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list servers: %w", err)
 	}
@@ -144,10 +151,9 @@ func (s *Store) ListServers(ctx context.Context) ([]config.Server, error) {
 
 	var out []config.Server
 	for rows.Next() {
-		var srv config.Server
-		if err := rows.Scan(&srv.ID, &srv.Name, &srv.Type, &srv.WinRMEndpoint,
-			&srv.CredentialRef, &srv.SSHHost, &srv.SSHPort, &srv.SSHUser, &srv.SSHKeyRef); err != nil {
-			return nil, fmt.Errorf("scan server: %w", err)
+		srv, err := scanServer(rows.Scan)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, srv)
 	}
@@ -156,19 +162,36 @@ func (s *Store) ListServers(ctx context.Context) ([]config.Server, error) {
 
 // GetServer loads one target by id.
 func (s *Store) GetServer(ctx context.Context, id string) (config.Server, error) {
-	var srv config.Server
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, type, winrm_endpoint, credential_ref, ssh_host, ssh_port, ssh_user, ssh_key_ref
-		FROM servers WHERE id = ?`, id,
-	).Scan(&srv.ID, &srv.Name, &srv.Type, &srv.WinRMEndpoint, &srv.CredentialRef,
-		&srv.SSHHost, &srv.SSHPort, &srv.SSHUser, &srv.SSHKeyRef)
+	row := s.db.QueryRowContext(ctx, `SELECT `+serverColumns+` FROM servers WHERE id = ?`, id)
+	srv, err := scanServer(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return config.Server{}, ErrNotFound
 	}
 	if err != nil {
-		return config.Server{}, fmt.Errorf("get server %q: %w", id, err)
+		return config.Server{}, err
 	}
 	return srv, nil
+}
+
+func scanServer(scan func(dest ...any) error) (config.Server, error) {
+	var (
+		srv      config.Server
+		insecure int
+	)
+	if err := scan(&srv.ID, &srv.Name, &srv.Type, &srv.Host, &srv.WinRMEndpoint,
+		&srv.WinRMUser, &srv.WinRMTransport, &insecure, &srv.CredentialRef,
+		&srv.SSHHost, &srv.SSHPort, &srv.SSHUser, &srv.SSHKeyRef); err != nil {
+		return config.Server{}, fmt.Errorf("scan server: %w", err)
+	}
+	srv.WinRMInsecure = insecure != 0
+	return srv, nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // UpsertProject syncs one entry from projects.yaml into the database.
@@ -178,9 +201,8 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 		return fmt.Errorf("marshal project env: %w", err)
 	}
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO projects (id, name, server_id, strategy, repo_url, dockerfile_path, iis_site,
-			branch, domain, port, health_path, webhook_secret_ref, env_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO projects (`+projectColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			server_id = excluded.server_id,
@@ -188,6 +210,11 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 			repo_url = excluded.repo_url,
 			dockerfile_path = excluded.dockerfile_path,
 			iis_site = excluded.iis_site,
+			iis_physical_path = excluded.iis_physical_path,
+			iis_app_pool = excluded.iis_app_pool,
+			iis_service = excluded.iis_service,
+			iis_build_command = excluded.iis_build_command,
+			iis_source_subdir = excluded.iis_source_subdir,
 			branch = excluded.branch,
 			domain = excluded.domain,
 			port = excluded.port,
@@ -196,6 +223,7 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 			env_json = excluded.env_json,
 			updated_at = CURRENT_TIMESTAMP`,
 		p.ID, p.Name, p.ServerID, p.Strategy, p.RepoURL, p.DockerfilePath, p.IISSite,
+		p.IISPhysicalPath, p.IISAppPool, p.IISService, p.IISBuildCommand, p.IISSourceSubdir,
 		p.Branch, p.Domain, p.Port, p.HealthPath, p.WebhookSecretRef, string(envJSON))
 	if err != nil {
 		return fmt.Errorf("upsert project %q: %w", p.ID, err)
@@ -203,12 +231,14 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 	return nil
 }
 
+// projectColumns is the shared SELECT list for projects.
+const projectColumns = `id, name, server_id, strategy, repo_url, dockerfile_path, iis_site,
+	iis_physical_path, iis_app_pool, iis_service, iis_build_command, iis_source_subdir,
+	branch, domain, port, health_path, webhook_secret_ref, env_json`
+
 // ListProjects returns all configured projects.
 func (s *Store) ListProjects(ctx context.Context) ([]config.Project, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, server_id, strategy, repo_url, dockerfile_path, iis_site,
-			branch, domain, port, health_path, webhook_secret_ref, env_json
-		FROM projects ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+projectColumns+` FROM projects ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
@@ -227,10 +257,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]config.Project, error) {
 
 // GetProject loads one project by id.
 func (s *Store) GetProject(ctx context.Context, id string) (config.Project, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, server_id, strategy, repo_url, dockerfile_path, iis_site,
-			branch, domain, port, health_path, webhook_secret_ref, env_json
-		FROM projects WHERE id = ?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT `+projectColumns+` FROM projects WHERE id = ?`, id)
 	p, err := scanProject(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return config.Project{}, ErrNotFound
@@ -249,7 +276,8 @@ func scanProject(scan func(dest ...any) error) (config.Project, error) {
 		envJSON string
 	)
 	if err := scan(&p.ID, &p.Name, &p.ServerID, &p.Strategy, &p.RepoURL, &p.DockerfilePath,
-		&p.IISSite, &p.Branch, &p.Domain, &p.Port, &p.HealthPath, &p.WebhookSecretRef,
+		&p.IISSite, &p.IISPhysicalPath, &p.IISAppPool, &p.IISService, &p.IISBuildCommand,
+		&p.IISSourceSubdir, &p.Branch, &p.Domain, &p.Port, &p.HealthPath, &p.WebhookSecretRef,
 		&envJSON); err != nil {
 		return config.Project{}, err
 	}
@@ -319,9 +347,12 @@ const (
 )
 
 // Deployment is one recorded deploy attempt, including its accumulated log.
+// ImageTag is a generic artifact reference: a Docker image tag for "docker"
+// targets, or the pre-deploy backup directory for "iis" targets.
 type Deployment struct {
 	ID         int64     `json:"id"`
 	ProjectID  string    `json:"project_id"`
+	TargetType string    `json:"target_type"` // docker | iis
 	CommitSHA  string    `json:"commit_sha"`
 	Ref        string    `json:"ref"`
 	ImageTag   string    `json:"image_tag"`
@@ -333,13 +364,16 @@ type Deployment struct {
 	FinishedAt time.Time `json:"finished_at,omitempty"` // zero while still running
 }
 
+// deploymentColumns is the shared SELECT list for deployments.
+const deploymentColumns = `id, project_id, target_type, commit_sha, ref, image_tag, status, trigger, log, error, started_at, finished_at`
+
 // CreateDeployment records a new attempt and returns its id. The log starts
 // empty and grows via AppendDeploymentLog.
 func (s *Store) CreateDeployment(ctx context.Context, d Deployment) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO deployments (project_id, commit_sha, ref, image_tag, status, trigger, started_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		d.ProjectID, d.CommitSHA, d.Ref, d.ImageTag, d.Status, d.Trigger, d.StartedAt.Unix())
+		INSERT INTO deployments (project_id, target_type, commit_sha, ref, image_tag, status, trigger, started_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.ProjectID, d.TargetType, d.CommitSHA, d.Ref, d.ImageTag, d.Status, d.Trigger, d.StartedAt.Unix())
 	if err != nil {
 		return 0, fmt.Errorf("create deployment: %w", err)
 	}
@@ -350,11 +384,12 @@ func (s *Store) CreateDeployment(ctx context.Context, d Deployment) (int64, erro
 	return id, nil
 }
 
-// SetDeploymentStatus updates status (and image tag) of an in-progress deploy.
-func (s *Store) SetDeploymentStatus(ctx context.Context, id int64, status, imageTag string) error {
+// SetDeploymentStatus updates status and the artifact reference of an
+// in-progress deploy.
+func (s *Store) SetDeploymentStatus(ctx context.Context, id int64, status, artifact string) error {
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE deployments SET status = ?, image_tag = ? WHERE id = ?`,
-		status, imageTag, id); err != nil {
+		status, artifact, id); err != nil {
 		return fmt.Errorf("set deployment status: %w", err)
 	}
 	return nil
@@ -382,9 +417,7 @@ func (s *Store) FinishDeployment(ctx context.Context, id int64, status, errMsg s
 
 // GetDeployment loads one attempt by id.
 func (s *Store) GetDeployment(ctx context.Context, id int64) (Deployment, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, project_id, commit_sha, ref, image_tag, status, trigger, log, error, started_at, finished_at
-		FROM deployments WHERE id = ?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT `+deploymentColumns+` FROM deployments WHERE id = ?`, id)
 	d, err := scanDeployment(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
@@ -397,9 +430,9 @@ func (s *Store) GetDeployment(ctx context.Context, id int64) (Deployment, error)
 
 // ListDeployments returns the most recent attempts for a project, newest first.
 func (s *Store) ListDeployments(ctx context.Context, projectID string, limit int) ([]Deployment, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_id, commit_sha, ref, image_tag, status, trigger, log, error, started_at, finished_at
-		FROM deployments WHERE project_id = ? ORDER BY id DESC LIMIT ?`, projectID, limit)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+deploymentColumns+` FROM deployments WHERE project_id = ? ORDER BY id DESC LIMIT ?`,
+		projectID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list deployments: %w", err)
 	}
@@ -417,11 +450,10 @@ func (s *Store) ListDeployments(ctx context.Context, projectID string, limit int
 }
 
 // SuccessfulDeployments returns successful attempts for a project, newest
-// first. Used to find the previous image tag for a rollback.
+// first. Used to find the previous image tag for a Docker rollback.
 func (s *Store) SuccessfulDeployments(ctx context.Context, projectID string, limit int) ([]Deployment, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_id, commit_sha, ref, image_tag, status, trigger, log, error, started_at, finished_at
-		FROM deployments WHERE project_id = ? AND status = ? ORDER BY id DESC LIMIT ?`,
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+deploymentColumns+` FROM deployments WHERE project_id = ? AND status = ? ORDER BY id DESC LIMIT ?`,
 		projectID, DeploySuccess, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list successful deployments: %w", err)
@@ -445,8 +477,8 @@ func scanDeployment(scan func(dest ...any) error) (Deployment, error) {
 		started  int64
 		finished int64
 	)
-	if err := scan(&d.ID, &d.ProjectID, &d.CommitSHA, &d.Ref, &d.ImageTag, &d.Status,
-		&d.Trigger, &d.Log, &d.Error, &started, &finished); err != nil {
+	if err := scan(&d.ID, &d.ProjectID, &d.TargetType, &d.CommitSHA, &d.Ref, &d.ImageTag,
+		&d.Status, &d.Trigger, &d.Log, &d.Error, &started, &finished); err != nil {
 		return Deployment{}, err
 	}
 	d.StartedAt = time.Unix(started, 0)
@@ -454,4 +486,119 @@ func scanDeployment(scan func(dest ...any) error) (Deployment, error) {
 		d.FinishedAt = time.Unix(finished, 0)
 	}
 	return d, nil
+}
+
+// ServiceStatus is one monitored service's state, e.g. {"docker","active"}.
+type ServiceStatus struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+}
+
+// Metric is one point-in-time sample from a server. Reachable is false when the
+// SSH/WinRM connection (or the remote command) failed; Error then explains why.
+// Percent fields are derived from the byte counts for convenience.
+type Metric struct {
+	ID            int64           `json:"-"`
+	ServerID      string          `json:"server_id"`
+	Timestamp     time.Time       `json:"ts"`
+	Reachable     bool            `json:"reachable"`
+	Error         string          `json:"error,omitempty"`
+	CPUPercent    float64         `json:"cpu_percent"`
+	MemTotal      uint64          `json:"mem_total"`
+	MemUsed       uint64          `json:"mem_used"`
+	MemPercent    float64         `json:"mem_percent"`
+	DiskTotal     uint64          `json:"disk_total"`
+	DiskUsed      uint64          `json:"disk_used"`
+	DiskPercent   float64         `json:"disk_percent"`
+	UptimeSeconds int64           `json:"uptime_seconds"`
+	Load1         float64         `json:"load1"`
+	Services      []ServiceStatus `json:"services"`
+}
+
+const metricColumns = `id, server_id, ts, reachable, error, cpu_percent, mem_total, mem_used, disk_total, disk_used, uptime_seconds, load1, services_json`
+
+// InsertMetric records one sample (successful or failed).
+func (s *Store) InsertMetric(ctx context.Context, m Metric) error {
+	servicesJSON, err := json.Marshal(m.Services)
+	if err != nil {
+		return fmt.Errorf("marshal metric services: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO metrics (server_id, ts, reachable, error, cpu_percent, mem_total, mem_used,
+			disk_total, disk_used, uptime_seconds, load1, services_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ServerID, m.Timestamp.Unix(), boolToInt(m.Reachable), m.Error, m.CPUPercent,
+		m.MemTotal, m.MemUsed, m.DiskTotal, m.DiskUsed, m.UptimeSeconds, m.Load1, string(servicesJSON))
+	if err != nil {
+		return fmt.Errorf("insert metric %q: %w", m.ServerID, err)
+	}
+	return nil
+}
+
+// LatestMetrics returns the most recent sample for every server that has one.
+func (s *Store) LatestMetrics(ctx context.Context) ([]Metric, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+metricColumns+` FROM metrics
+		WHERE id IN (SELECT MAX(id) FROM metrics GROUP BY server_id)
+		ORDER BY server_id`)
+	if err != nil {
+		return nil, fmt.Errorf("latest metrics: %w", err)
+	}
+	defer rows.Close()
+	return scanMetrics(rows)
+}
+
+// MetricHistory returns up to limit samples for one server, oldest first, so
+// charts can plot them directly.
+func (s *Store) MetricHistory(ctx context.Context, serverID string, limit int) ([]Metric, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+metricColumns+` FROM (
+			SELECT `+metricColumns+` FROM metrics WHERE server_id = ? ORDER BY id DESC LIMIT ?
+		) ORDER BY id ASC`, serverID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("metric history %q: %w", serverID, err)
+	}
+	defer rows.Close()
+	return scanMetrics(rows)
+}
+
+// PruneMetrics deletes samples older than before.
+func (s *Store) PruneMetrics(ctx context.Context, before time.Time) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM metrics WHERE ts < ?`, before.Unix()); err != nil {
+		return fmt.Errorf("prune metrics: %w", err)
+	}
+	return nil
+}
+
+func scanMetrics(rows *sql.Rows) ([]Metric, error) {
+	var out []Metric
+	for rows.Next() {
+		var (
+			m            Metric
+			ts           int64
+			reachable    int
+			servicesJSON string
+		)
+		if err := rows.Scan(&m.ID, &m.ServerID, &ts, &reachable, &m.Error, &m.CPUPercent,
+			&m.MemTotal, &m.MemUsed, &m.DiskTotal, &m.DiskUsed, &m.UptimeSeconds, &m.Load1,
+			&servicesJSON); err != nil {
+			return nil, fmt.Errorf("scan metric: %w", err)
+		}
+		m.Timestamp = time.Unix(ts, 0)
+		m.Reachable = reachable != 0
+		m.MemPercent = percent(m.MemUsed, m.MemTotal)
+		m.DiskPercent = percent(m.DiskUsed, m.DiskTotal)
+		if servicesJSON != "" {
+			if err := json.Unmarshal([]byte(servicesJSON), &m.Services); err != nil {
+				return nil, fmt.Errorf("decode metric services: %w", err)
+			}
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+func percent(used, total uint64) float64 {
+	if total == 0 {
+		return 0
+	}
+	return float64(used) / float64(total) * 100
 }

@@ -14,6 +14,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Target types. A project's server type selects the deploy pipeline.
+const (
+	ServerTypeDocker = "docker"
+	ServerTypeIIS    = "iis"
+)
+
 // Config is the top-level application configuration.
 type Config struct {
 	Server      ServerConfig      `yaml:"server"`
@@ -23,6 +29,7 @@ type Config struct {
 	Files       FilesConfig       `yaml:"files"`
 	Proxy       ProxyConfig       `yaml:"proxy"`
 	Deploy      DeployConfig      `yaml:"deploy"`
+	Monitoring  MonitoringConfig  `yaml:"monitoring"`
 }
 
 // ServerConfig controls the HTTP listener.
@@ -75,10 +82,31 @@ type ProxyConfig struct {
 	ServerName string `yaml:"server_name"`
 }
 
+// MonitoringConfig controls the metrics poller.
+type MonitoringConfig struct {
+	// Enabled turns the background metrics scheduler on or off.
+	Enabled bool `yaml:"enabled"`
+	// IntervalSeconds is how often each server is polled.
+	IntervalSeconds int `yaml:"interval_seconds"`
+	// TimeoutSeconds bounds a single server's collection.
+	TimeoutSeconds int `yaml:"timeout_seconds"`
+	// RetentionHours is how long samples are kept before pruning.
+	RetentionHours int `yaml:"retention_hours"`
+	// HistoryPoints caps the points returned for charts.
+	HistoryPoints int `yaml:"history_points"`
+}
+
 // DeployConfig controls how commands run on target servers.
 type DeployConfig struct {
-	// WorkDir is the parent directory on the target for cloned repos.
+	// WorkDir is the parent directory on Docker/Linux targets for cloned repos.
 	WorkDir string `yaml:"work_dir"`
+	// IISWorkDir is the parent directory on Windows targets for cloned repos.
+	// Separate from WorkDir because the two target types use different path
+	// syntaxes (POSIX vs Windows).
+	IISWorkDir string `yaml:"iis_work_dir"`
+	// IISBackupDir is where timestamped pre-deploy copies of the live IIS
+	// directory are stored for rollback.
+	IISBackupDir string `yaml:"iis_backup_dir"`
 	// KnownHostsFile enables SSH host-key verification. Empty disables it
 	// (insecure; only acceptable for throwaway environments).
 	KnownHostsFile string `yaml:"known_hosts_file"`
@@ -107,8 +135,17 @@ func Default() Config {
 		},
 		Deploy: DeployConfig{
 			WorkDir:               "/opt/control-center",
+			IISWorkDir:            `C:\control-center`,
+			IISBackupDir:          `C:\control-center\backups`,
 			HealthTimeoutSeconds:  60,
 			HealthIntervalSeconds: 3,
+		},
+		Monitoring: MonitoringConfig{
+			Enabled:         true,
+			IntervalSeconds: 30,
+			TimeoutSeconds:  15,
+			RetentionHours:  24,
+			HistoryPoints:   200,
 		},
 	}
 }
@@ -180,8 +217,42 @@ func (cfg *Config) applyEnv() error {
 	if v := os.Getenv("CC_DEPLOY_WORKDIR"); v != "" {
 		cfg.Deploy.WorkDir = v
 	}
+	if v := os.Getenv("CC_DEPLOY_IIS_WORKDIR"); v != "" {
+		cfg.Deploy.IISWorkDir = v
+	}
+	if v := os.Getenv("CC_DEPLOY_IIS_BACKUP_DIR"); v != "" {
+		cfg.Deploy.IISBackupDir = v
+	}
 	if v := os.Getenv("CC_DEPLOY_KNOWN_HOSTS"); v != "" {
 		cfg.Deploy.KnownHostsFile = v
+	}
+	if v := os.Getenv("CC_MONITOR_ENABLED"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("CC_MONITOR_ENABLED: %w", err)
+		}
+		cfg.Monitoring.Enabled = b
+	}
+	if v := os.Getenv("CC_MONITOR_INTERVAL"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("CC_MONITOR_INTERVAL: %w", err)
+		}
+		cfg.Monitoring.IntervalSeconds = n
+	}
+	if v := os.Getenv("CC_MONITOR_TIMEOUT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("CC_MONITOR_TIMEOUT: %w", err)
+		}
+		cfg.Monitoring.TimeoutSeconds = n
+	}
+	if v := os.Getenv("CC_MONITOR_RETENTION_HOURS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("CC_MONITOR_RETENTION_HOURS: %w", err)
+		}
+		cfg.Monitoring.RetentionHours = n
 	}
 	return nil
 }

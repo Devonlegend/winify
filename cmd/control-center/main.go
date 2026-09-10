@@ -30,6 +30,7 @@ import (
 	"github.com/Devonlegend/winify/internal/config"
 	"github.com/Devonlegend/winify/internal/deployment"
 	"github.com/Devonlegend/winify/internal/models"
+	"github.com/Devonlegend/winify/internal/monitoring"
 	"github.com/Devonlegend/winify/internal/proxy"
 	"github.com/Devonlegend/winify/internal/server"
 )
@@ -89,10 +90,20 @@ func runServe(args []string) {
 	if cfg.Deploy.KnownHostsFile == "" {
 		log.Printf("WARNING: deploy.known_hosts_file is empty; SSH host keys will NOT be verified")
 	}
-	newRunner := func(ctx context.Context, srv config.Server, sshKeyPEM string) (deployment.Runner, error) {
-		return deployment.DialSSH(ctx, srv.SSHHost, srv.SSHPort, srv.SSHUser, sshKeyPEM, cfg.Deploy.KnownHostsFile)
+	sshDial := func(ctx context.Context, srv config.Server, key string) (deployment.Runner, error) {
+		return deployment.DialSSH(ctx, srv.SSHHost, srv.SSHPort, srv.SSHUser, key, cfg.Deploy.KnownHostsFile)
 	}
-	deployer := deployment.NewDeployer(cfg, store, credStore, registrar, newRunner)
+	targetFactory := deployment.NewTargetFactory(cfg, sshDial)
+	deployer := deployment.NewDeployer(cfg, store, credStore, registrar, targetFactory)
+
+	// Metrics reuse the same SSH/WinRM connection code as deploys (no agent).
+	collector := monitoring.NewCollector(monitoring.NewRunnerFactory(cfg, credStore))
+	scheduler := monitoring.NewScheduler(cfg, store, collector)
+	if cfg.Monitoring.Enabled {
+		scheduler.Start()
+		defer scheduler.Stop()
+		log.Printf("monitoring: polling every %s", scheduler.Interval())
+	}
 
 	authSvc := auth.NewService(store, cfg.Auth.CookieSecure, time.Duration(cfg.Auth.SessionTTLHours)*time.Hour)
 	srv, err := server.New(server.Deps{

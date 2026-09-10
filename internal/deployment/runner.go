@@ -1,17 +1,19 @@
-// Package deployment owns everything that touches target servers: SSH command
-// execution, the Docker deploy pipeline, webhook signature verification and
-// rollback.
+// Package deployment owns everything that touches target servers: command
+// execution (SSH for Docker/Linux, WinRM for Windows/IIS), the deploy
+// pipelines, webhook signature verification and rollback.
 //
-// SECURITY: a Runner executes arbitrary shell commands as the configured SSH
-// user on a target host. Credentials for targets are resolved from the Phase 1
-// encrypted store and are never logged. Only the control-center admin can
-// cause a deploy; webhook-triggered deploys are gated by per-project HMAC.
+// SECURITY: a Runner executes commands in a target's native shell (sh over
+// SSH, PowerShell over WinRM) as the configured user. That account can stop
+// services, modify IIS and run containers. Credentials are resolved from the
+// Phase 1 encrypted store and are never logged. Only the control-center admin
+// can cause a deploy; webhook-triggered deploys are gated by per-project HMAC.
 package deployment
 
 import "context"
 
-// Runner executes a shell command on a target server and returns its combined
-// stdout/stderr. Implementations are not required to be concurrent-safe.
+// Runner executes a command in a target's native shell and returns combined
+// stdout/stderr. SSH runs sh commands; WinRM runs PowerShell scripts.
+// Implementations are not required to be concurrent-safe.
 type Runner interface {
 	Run(ctx context.Context, command string) (string, error)
 	Close() error

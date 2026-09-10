@@ -1,8 +1,52 @@
 {{define "title"}}Monitoring &middot; Control Center{{end}}
 {{define "body"}}
-<main>
+<main data-refresh-seconds="{{.IntervalSeconds}}">
   <h1>Monitoring</h1>
-  <p class="muted">CPU, memory and service health pulled over existing connections.</p>
-  <div class="placeholder">No metrics yet.</div>
+  <p class="muted">Live metrics pulled over the existing SSH/WinRM connections.</p>
+
+  {{if not .Cards}}
+    <div class="placeholder">No servers configured.</div>
+  {{end}}
+
+  <div class="cards">
+  {{range .Cards}}
+    <section class="card metric-card" data-server-id="{{.Server.ID}}" data-state="{{if not .HasData}}waiting{{else if .Down}}down{{else if .Stale}}stale{{else}}ok{{end}}">
+      <header class="card-head">
+        <h2>{{.Server.Name}} <span class="badge badge-{{.Server.Type}}">{{.Server.Type}}</span></h2>
+        <span class="pill pill-{{if not .HasData}}waiting{{else if .Down}}down{{else if .Stale}}stale{{else}}ok{{end}}" data-role="status">{{if not .HasData}}waiting{{else if .Down}}down{{else if .Stale}}stale{{else}}ok{{end}}</span>
+      </header>
+      <p class="muted card-host">{{if .Server.Host}}{{.Server.Host}}{{else if .Server.SSHHost}}{{.Server.SSHHost}}{{else}}{{.Server.WinRMEndpoint}}{{end}}</p>
+
+      <p class="error card-error" data-role="error" {{if not .Down}}hidden{{end}}>{{.Latest.Error}}</p>
+
+      <div class="gauges">
+        <div class="gauge">
+          <div class="gauge-head"><span>CPU</span><span class="gauge-val" data-role="cpu">--</span></div>
+          <div class="bar"><div class="bar-fill" data-role="cpu-bar" data-level="ok" style="width:0%"></div></div>
+        </div>
+        <div class="gauge">
+          <div class="gauge-head"><span>Memory</span><span class="gauge-val" data-role="mem">--</span></div>
+          <div class="bar"><div class="bar-fill" data-role="mem-bar" data-level="ok" style="width:0%"></div></div>
+        </div>
+        <div class="gauge">
+          <div class="gauge-head"><span>Disk</span><span class="gauge-val" data-role="disk">--</span></div>
+          <div class="bar"><div class="bar-fill" data-role="disk-bar" data-level="ok" style="width:0%"></div></div>
+        </div>
+      </div>
+
+      <dl class="meta">
+        <div><dt>Uptime</dt><dd data-role="uptime">--</dd></div>
+        <div><dt>Load 1m</dt><dd data-role="load">--</dd></div>
+        <div><dt>Updated</dt><dd data-role="updated">--</dd></div>
+      </dl>
+
+      <div class="services" data-role="services"></div>
+
+      <div class="chart-wrap"><canvas data-role="chart"></canvas></div>
+    </section>
+  {{end}}
+  </div>
 </main>
+<script src="/assets/js/chart.umd.min.js"></script>
+<script src="/assets/js/monitoring.js"></script>
 {{end}}

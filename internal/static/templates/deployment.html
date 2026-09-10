@@ -12,7 +12,7 @@
   <section class="project">
     <header class="project-head">
       <div>
-        <h2>{{.Project.Name}}</h2>
+        <h2>{{.Project.Name}} <span class="badge badge-{{.TargetType}}">{{.TargetType}}</span></h2>
         <p class="muted">
           {{.Project.ID}}
           {{if .Project.RepoURL}}&middot; {{.Project.RepoURL}}{{end}}
@@ -32,14 +32,15 @@
     <table class="deploys">
       <thead>
         <tr>
-          <th>#</th><th>Commit</th><th>Status</th><th>Trigger</th>
-          <th>Image</th><th>Started</th><th>Finished</th>
+          <th>#</th><th>Type</th><th>Commit</th><th>Status</th><th>Trigger</th>
+          <th>Artifact</th><th>Started</th><th>Finished</th>
         </tr>
       </thead>
       <tbody>
         {{range .Deployments}}
         <tr>
           <td>{{.ID}}</td>
+          <td>{{if .TargetType}}<span class="badge badge-{{.TargetType}}">{{.TargetType}}</span>{{end}}</td>
           <td class="mono">{{.CommitSHA}}</td>
           <td><span class="status status-{{.Status}}">{{.Status}}</span></td>
           <td>{{.Trigger}}</td>
@@ -48,7 +49,7 @@
           <td class="mono">{{if .FinishedAt.IsZero}}&mdash;{{else}}{{.FinishedAt.Format "2006-01-02 15:04:05"}}{{end}}</td>
         </tr>
         <tr class="logrow">
-          <td colspan="7">
+          <td colspan="8">
             {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
             <details><summary>Log</summary><pre class="log">{{.Log}}</pre></details>
           </td>
