@@ -21,6 +21,8 @@ type Config struct {
 	Auth        AuthConfig        `yaml:"auth"`
 	Credentials CredentialsConfig `yaml:"credentials"`
 	Files       FilesConfig       `yaml:"files"`
+	Proxy       ProxyConfig       `yaml:"proxy"`
+	Deploy      DeployConfig      `yaml:"deploy"`
 }
 
 // ServerConfig controls the HTTP listener.
@@ -61,6 +63,31 @@ type FilesConfig struct {
 	Projects string `yaml:"projects"`
 }
 
+// ProxyConfig configures registration with the reverse proxy (Caddy) that
+// fronts every deployment with automatic HTTPS.
+type ProxyConfig struct {
+	// Enabled turns on proxy registration. When false, deploys run but no
+	// public URL is registered (useful for local development without Caddy).
+	Enabled bool `yaml:"enabled"`
+	// AdminURL is the Caddy admin API endpoint.
+	AdminURL string `yaml:"admin_url"`
+	// ServerName is the Caddy HTTP server object routes are added to.
+	ServerName string `yaml:"server_name"`
+}
+
+// DeployConfig controls how commands run on target servers.
+type DeployConfig struct {
+	// WorkDir is the parent directory on the target for cloned repos.
+	WorkDir string `yaml:"work_dir"`
+	// KnownHostsFile enables SSH host-key verification. Empty disables it
+	// (insecure; only acceptable for throwaway environments).
+	KnownHostsFile string `yaml:"known_hosts_file"`
+	// HealthTimeoutSeconds bounds how long the post-deploy health check waits.
+	HealthTimeoutSeconds int `yaml:"health_timeout_seconds"`
+	// HealthIntervalSeconds is the delay between health-check attempts.
+	HealthIntervalSeconds int `yaml:"health_interval_seconds"`
+}
+
 // Default returns the built-in configuration used when a field is not set
 // in YAML and not overridden by the environment.
 func Default() Config {
@@ -73,6 +100,16 @@ func Default() Config {
 			SessionTTLHours: 12,
 		},
 		Files: FilesConfig{Servers: "servers.yaml", Projects: "projects.yaml"},
+		Proxy: ProxyConfig{
+			Enabled:    false,
+			AdminURL:   "http://127.0.0.1:2019",
+			ServerName: "srv0",
+		},
+		Deploy: DeployConfig{
+			WorkDir:               "/opt/control-center",
+			HealthTimeoutSeconds:  60,
+			HealthIntervalSeconds: 3,
+		},
 	}
 }
 
@@ -129,6 +166,22 @@ func (cfg *Config) applyEnv() error {
 			return fmt.Errorf("CC_COOKIE_SECURE: %w", err)
 		}
 		cfg.Auth.CookieSecure = b
+	}
+	if v := os.Getenv("CC_PROXY_ENABLED"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("CC_PROXY_ENABLED: %w", err)
+		}
+		cfg.Proxy.Enabled = b
+	}
+	if v := os.Getenv("CC_PROXY_ADMIN_URL"); v != "" {
+		cfg.Proxy.AdminURL = v
+	}
+	if v := os.Getenv("CC_DEPLOY_WORKDIR"); v != "" {
+		cfg.Deploy.WorkDir = v
+	}
+	if v := os.Getenv("CC_DEPLOY_KNOWN_HOSTS"); v != "" {
+		cfg.Deploy.KnownHostsFile = v
 	}
 	return nil
 }

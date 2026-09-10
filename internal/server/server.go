@@ -1,9 +1,12 @@
 // Package server wires the HTTP listener: chi routing, middleware, template
-// rendering and the handlers that serve the dashboard, login flow and health
-// endpoints. Dashboard and API routes are wrapped by auth.RequireAuth.
+// rendering and the handlers that serve the dashboard, login flow, deploy
+// history, webhook receiver and health endpoints. Dashboard and API routes are
+// wrapped by auth.RequireAuth; webhook routes are public but HMAC-verified.
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -16,6 +19,7 @@ import (
 
 	"github.com/Devonlegend/winify/internal/auth"
 	"github.com/Devonlegend/winify/internal/config"
+	"github.com/Devonlegend/winify/internal/deployment"
 	"github.com/Devonlegend/winify/internal/models"
 	"github.com/Devonlegend/winify/internal/static"
 )
@@ -23,14 +27,31 @@ import (
 // pageTemplates are the page files parsed alongside layout.html.
 var pageTemplates = []string{"login", "dashboard", "deployment", "monitoring", "assistant"}
 
-// Server holds the dependencies shared by every handler: configuration, the
-// data store, the auth service and one parsed template set per page.
+// Deployer is the subset of *deployment.Deployer the HTTP layer uses, so tests
+// can substitute a fake.
+type Deployer interface {
+	Trigger(ctx context.Context, project config.Project, srv config.Server, trigger, commit, ref string) (int64, error)
+	Rollback(ctx context.Context, project config.Project, srv config.Server) (int64, error)
+}
+
+// Deps are the server's dependencies.
+type Deps struct {
+	Cfg      config.Config
+	Store    *models.Store
+	Auth     *auth.Service
+	Secrets  deployment.SecretResolver
+	Deployer Deployer
+}
+
+// Server holds the dependencies shared by every handler.
 type Server struct {
-	cfg    config.Config
-	store  *models.Store
-	auth   *auth.Service
-	pages  map[string]*template.Template
-	assets fs.FS
+	cfg      config.Config
+	store    *models.Store
+	auth     *auth.Service
+	secrets  deployment.SecretResolver
+	deployer Deployer
+	pages    map[string]*template.Template
+	assets   fs.FS
 }
 
 // New parses the templates and prepares the asset FS. Each page is parsed as
@@ -38,7 +59,7 @@ type Server struct {
 // "body" block names; parsing them together would let later files overwrite
 // earlier ones. An error here means the embedded templates are malformed, so
 // the process should fail fast at boot.
-func New(cfg config.Config, store *models.Store, authSvc *auth.Service) (*Server, error) {
+func New(deps Deps) (*Server, error) {
 	pages := make(map[string]*template.Template, len(pageTemplates))
 	for _, name := range pageTemplates {
 		t, err := template.ParseFS(static.Templates, "templates/layout.html", "templates/"+name+".html")
@@ -53,11 +74,19 @@ func New(cfg config.Config, store *models.Store, authSvc *auth.Service) (*Server
 		return nil, err
 	}
 
-	return &Server{cfg: cfg, store: store, auth: authSvc, pages: pages, assets: sub}, nil
+	return &Server{
+		cfg:      deps.Cfg,
+		store:    deps.Store,
+		auth:     deps.Auth,
+		secrets:  deps.Secrets,
+		deployer: deps.Deployer,
+		pages:    pages,
+		assets:   sub,
+	}, nil
 }
 
-// Handler builds the router. Public routes are health, login and static assets;
-// everything else sits behind auth.RequireAuth.
+// Handler builds the router. Public routes are health, login, static assets and
+// the HMAC-verified webhooks; everything else sits behind auth.RequireAuth.
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
@@ -68,6 +97,10 @@ func (s *Server) Handler() http.Handler {
 	r.Post("/login", s.handleLogin)
 	r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.FS(s.assets))))
 
+	// Webhooks are authenticated by their per-project signature, not a session.
+	r.Post("/webhooks/github/{projectID}", s.handleGitHubWebhook)
+	r.Post("/webhooks/gitlab/{projectID}", s.handleGitLabWebhook)
+
 	r.Group(func(r chi.Router) {
 		r.Use(s.auth.RequireAuth)
 
@@ -76,9 +109,13 @@ func (s *Server) Handler() http.Handler {
 		})
 		r.Get("/dashboard", s.handleDashboard)
 		r.Get("/deployment", s.handleDeployment)
+		r.Post("/deployment/rollback/{projectID}", s.handleRollback)
 		r.Get("/monitoring", s.handleMonitoring)
 		r.Get("/assistant", s.handleAssistant)
 		r.Post("/logout", s.handleLogout)
+
+		r.Get("/api/projects/{projectID}/deployments", s.handleAPIDeployments)
+		r.Get("/api/deployments/{id}", s.handleAPIDeployment)
 	})
 
 	return r
@@ -96,6 +133,15 @@ func (s *Server) render(w http.ResponseWriter, status int, page string, data any
 	if err := t.ExecuteTemplate(w, "layout", data); err != nil {
 		// Headers are already sent; the best we can do is log the failure.
 		log.Printf("render %s: %v", page, err)
+	}
+}
+
+// writeJSON encodes v as a JSON response.
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("write json: %v", err)
 	}
 }
 

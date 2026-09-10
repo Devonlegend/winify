@@ -28,7 +28,9 @@ import (
 
 	"github.com/Devonlegend/winify/internal/auth"
 	"github.com/Devonlegend/winify/internal/config"
+	"github.com/Devonlegend/winify/internal/deployment"
 	"github.com/Devonlegend/winify/internal/models"
+	"github.com/Devonlegend/winify/internal/proxy"
 	"github.com/Devonlegend/winify/internal/server"
 )
 
@@ -71,8 +73,35 @@ func runServe(args []string) {
 	seedAdmin(ctx, store, cfg)
 	syncInventory(ctx, store, cfg)
 
+	key, err := auth.LoadMasterKey(cfg.Credentials.MasterKey, masterKeyPath(cfg))
+	if err != nil {
+		log.Fatalf("master key: %v", err)
+	}
+	credStore, err := auth.NewCredentialStore(store, key)
+	if err != nil {
+		log.Fatalf("credential store: %v", err)
+	}
+
+	var registrar proxy.Registrar = proxy.Noop{}
+	if cfg.Proxy.Enabled {
+		registrar = proxy.NewCaddy(cfg.Proxy.AdminURL, cfg.Proxy.ServerName)
+	}
+	if cfg.Deploy.KnownHostsFile == "" {
+		log.Printf("WARNING: deploy.known_hosts_file is empty; SSH host keys will NOT be verified")
+	}
+	newRunner := func(ctx context.Context, srv config.Server, sshKeyPEM string) (deployment.Runner, error) {
+		return deployment.DialSSH(ctx, srv.SSHHost, srv.SSHPort, srv.SSHUser, sshKeyPEM, cfg.Deploy.KnownHostsFile)
+	}
+	deployer := deployment.NewDeployer(cfg, store, credStore, registrar, newRunner)
+
 	authSvc := auth.NewService(store, cfg.Auth.CookieSecure, time.Duration(cfg.Auth.SessionTTLHours)*time.Hour)
-	srv, err := server.New(cfg, store, authSvc)
+	srv, err := server.New(server.Deps{
+		Cfg:      cfg,
+		Store:    store,
+		Auth:     authSvc,
+		Secrets:  credStore,
+		Deployer: deployer,
+	})
 	if err != nil {
 		log.Fatalf("server: %v", err)
 	}

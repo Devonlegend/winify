@@ -1,5 +1,7 @@
-# Projects are deployable units bound to a server. A missing file or an empty
-# list is fine; the shell simply shows zero projects.
+# Projects are deployable units bound to a server. Push to `branch` triggers a
+# build+deploy; `webhook_secret_ref` names the encrypted secret used to verify
+# the webhook signature. `domain` is registered with the reverse proxy on a
+# successful deploy.
 projects:
   - id: proj-001
     name: "Storefront API"
@@ -7,6 +9,13 @@ projects:
     strategy: dockerfile
     repo_url: "https://github.com/acme/storefront"
     dockerfile_path: "deploy/Dockerfile"
+    branch: "main"
+    domain: "storefront.example.com"
+    port: 8080
+    health_path: "/healthz"
+    webhook_secret_ref: "vault:proj-001-webhook"
+    env:
+      ASPNETCORE_ENVIRONMENT: "Production"
   - id: proj-002
     name: "Legacy Portal"
     server_id: server-001

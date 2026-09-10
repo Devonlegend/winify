@@ -19,19 +19,28 @@ type Server struct {
 	WinRMEndpoint string `yaml:"winrm_endpoint"`
 	CredentialRef string `yaml:"credential_ref"`
 	SSHHost       string `yaml:"ssh_host"`
+	SSHPort       int    `yaml:"ssh_port"`
 	SSHUser       string `yaml:"ssh_user"`
 	SSHKeyRef     string `yaml:"ssh_key_ref"`
 }
 
-// Project is a deployable unit bound to one server.
+// Project is a deployable unit bound to one server. WebhookSecretRef points at
+// an encrypted credential used to verify inbound webhook signatures; the
+// secret itself never appears here.
 type Project struct {
-	ID             string `yaml:"id"`
-	Name           string `yaml:"name"`
-	ServerID       string `yaml:"server_id"`
-	Strategy       string `yaml:"strategy"` // "dockerfile" or "iis"
-	RepoURL        string `yaml:"repo_url"`
-	DockerfilePath string `yaml:"dockerfile_path"`
-	IISSite        string `yaml:"iis_site"`
+	ID               string            `yaml:"id"`
+	Name             string            `yaml:"name"`
+	ServerID         string            `yaml:"server_id"`
+	Strategy         string            `yaml:"strategy"` // "dockerfile" or "iis"
+	RepoURL          string            `yaml:"repo_url"`
+	DockerfilePath   string            `yaml:"dockerfile_path"`
+	IISSite          string            `yaml:"iis_site"`
+	Branch           string            `yaml:"branch"`
+	Domain           string            `yaml:"domain"`
+	Port             int               `yaml:"port"`
+	HealthPath       string            `yaml:"health_path"`
+	WebhookSecretRef string            `yaml:"webhook_secret_ref"`
+	Env              map[string]string `yaml:"env"`
 }
 
 type serversFile struct {

@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -111,19 +112,20 @@ func (s *Store) DeleteExpiredSessions(ctx context.Context, now time.Time) error 
 // UpsertServer syncs one entry from servers.yaml into the database.
 func (s *Store) UpsertServer(ctx context.Context, srv config.Server) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO servers (id, name, type, winrm_endpoint, credential_ref, ssh_host, ssh_user, ssh_key_ref)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO servers (id, name, type, winrm_endpoint, credential_ref, ssh_host, ssh_port, ssh_user, ssh_key_ref)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			type = excluded.type,
 			winrm_endpoint = excluded.winrm_endpoint,
 			credential_ref = excluded.credential_ref,
 			ssh_host = excluded.ssh_host,
+			ssh_port = excluded.ssh_port,
 			ssh_user = excluded.ssh_user,
 			ssh_key_ref = excluded.ssh_key_ref,
 			updated_at = CURRENT_TIMESTAMP`,
 		srv.ID, srv.Name, srv.Type, srv.WinRMEndpoint, srv.CredentialRef,
-		srv.SSHHost, srv.SSHUser, srv.SSHKeyRef)
+		srv.SSHHost, srv.SSHPort, srv.SSHUser, srv.SSHKeyRef)
 	if err != nil {
 		return fmt.Errorf("upsert server %q: %w", srv.ID, err)
 	}
@@ -133,7 +135,7 @@ func (s *Store) UpsertServer(ctx context.Context, srv config.Server) error {
 // ListServers returns all configured targets.
 func (s *Store) ListServers(ctx context.Context) ([]config.Server, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, type, winrm_endpoint, credential_ref, ssh_host, ssh_user, ssh_key_ref
+		SELECT id, name, type, winrm_endpoint, credential_ref, ssh_host, ssh_port, ssh_user, ssh_key_ref
 		FROM servers ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list servers: %w", err)
@@ -144,7 +146,7 @@ func (s *Store) ListServers(ctx context.Context) ([]config.Server, error) {
 	for rows.Next() {
 		var srv config.Server
 		if err := rows.Scan(&srv.ID, &srv.Name, &srv.Type, &srv.WinRMEndpoint,
-			&srv.CredentialRef, &srv.SSHHost, &srv.SSHUser, &srv.SSHKeyRef); err != nil {
+			&srv.CredentialRef, &srv.SSHHost, &srv.SSHPort, &srv.SSHUser, &srv.SSHKeyRef); err != nil {
 			return nil, fmt.Errorf("scan server: %w", err)
 		}
 		out = append(out, srv)
@@ -152,11 +154,33 @@ func (s *Store) ListServers(ctx context.Context) ([]config.Server, error) {
 	return out, rows.Err()
 }
 
+// GetServer loads one target by id.
+func (s *Store) GetServer(ctx context.Context, id string) (config.Server, error) {
+	var srv config.Server
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, name, type, winrm_endpoint, credential_ref, ssh_host, ssh_port, ssh_user, ssh_key_ref
+		FROM servers WHERE id = ?`, id,
+	).Scan(&srv.ID, &srv.Name, &srv.Type, &srv.WinRMEndpoint, &srv.CredentialRef,
+		&srv.SSHHost, &srv.SSHPort, &srv.SSHUser, &srv.SSHKeyRef)
+	if errors.Is(err, sql.ErrNoRows) {
+		return config.Server{}, ErrNotFound
+	}
+	if err != nil {
+		return config.Server{}, fmt.Errorf("get server %q: %w", id, err)
+	}
+	return srv, nil
+}
+
 // UpsertProject syncs one entry from projects.yaml into the database.
 func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO projects (id, name, server_id, strategy, repo_url, dockerfile_path, iis_site)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+	envJSON, err := json.Marshal(p.Env)
+	if err != nil {
+		return fmt.Errorf("marshal project env: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO projects (id, name, server_id, strategy, repo_url, dockerfile_path, iis_site,
+			branch, domain, port, health_path, webhook_secret_ref, env_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			server_id = excluded.server_id,
@@ -164,8 +188,15 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 			repo_url = excluded.repo_url,
 			dockerfile_path = excluded.dockerfile_path,
 			iis_site = excluded.iis_site,
+			branch = excluded.branch,
+			domain = excluded.domain,
+			port = excluded.port,
+			health_path = excluded.health_path,
+			webhook_secret_ref = excluded.webhook_secret_ref,
+			env_json = excluded.env_json,
 			updated_at = CURRENT_TIMESTAMP`,
-		p.ID, p.Name, p.ServerID, p.Strategy, p.RepoURL, p.DockerfilePath, p.IISSite)
+		p.ID, p.Name, p.ServerID, p.Strategy, p.RepoURL, p.DockerfilePath, p.IISSite,
+		p.Branch, p.Domain, p.Port, p.HealthPath, p.WebhookSecretRef, string(envJSON))
 	if err != nil {
 		return fmt.Errorf("upsert project %q: %w", p.ID, err)
 	}
@@ -175,7 +206,8 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 // ListProjects returns all configured projects.
 func (s *Store) ListProjects(ctx context.Context) ([]config.Project, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, server_id, strategy, repo_url, dockerfile_path, iis_site
+		SELECT id, name, server_id, strategy, repo_url, dockerfile_path, iis_site,
+			branch, domain, port, health_path, webhook_secret_ref, env_json
 		FROM projects ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
@@ -184,14 +216,49 @@ func (s *Store) ListProjects(ctx context.Context) ([]config.Project, error) {
 
 	var out []config.Project
 	for rows.Next() {
-		var p config.Project
-		if err := rows.Scan(&p.ID, &p.Name, &p.ServerID, &p.Strategy, &p.RepoURL,
-			&p.DockerfilePath, &p.IISSite); err != nil {
-			return nil, fmt.Errorf("scan project: %w", err)
+		p, err := scanProject(rows.Scan)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// GetProject loads one project by id.
+func (s *Store) GetProject(ctx context.Context, id string) (config.Project, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, name, server_id, strategy, repo_url, dockerfile_path, iis_site,
+			branch, domain, port, health_path, webhook_secret_ref, env_json
+		FROM projects WHERE id = ?`, id)
+	p, err := scanProject(row.Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return config.Project{}, ErrNotFound
+	}
+	if err != nil {
+		return config.Project{}, err
+	}
+	return p, nil
+}
+
+// scanProject reads the common project column list. It takes a Scan func so it
+// works for both *sql.Row and *sql.Rows.
+func scanProject(scan func(dest ...any) error) (config.Project, error) {
+	var (
+		p       config.Project
+		envJSON string
+	)
+	if err := scan(&p.ID, &p.Name, &p.ServerID, &p.Strategy, &p.RepoURL, &p.DockerfilePath,
+		&p.IISSite, &p.Branch, &p.Domain, &p.Port, &p.HealthPath, &p.WebhookSecretRef,
+		&envJSON); err != nil {
+		return config.Project{}, err
+	}
+	if envJSON != "" {
+		if err := json.Unmarshal([]byte(envJSON), &p.Env); err != nil {
+			return config.Project{}, fmt.Errorf("decode project %q env: %w", p.ID, err)
+		}
+	}
+	return p, nil
 }
 
 // PutCredential stores an encrypted secret (nonce + ciphertext). The plaintext
@@ -241,4 +308,150 @@ func (s *Store) CredentialNames(ctx context.Context) ([]string, error) {
 		names = append(names, n)
 	}
 	return names, rows.Err()
+}
+
+// Deployment statuses.
+const (
+	DeployQueued  = "queued"
+	DeployRunning = "running"
+	DeploySuccess = "success"
+	DeployFailed  = "failed"
+)
+
+// Deployment is one recorded deploy attempt, including its accumulated log.
+type Deployment struct {
+	ID         int64     `json:"id"`
+	ProjectID  string    `json:"project_id"`
+	CommitSHA  string    `json:"commit_sha"`
+	Ref        string    `json:"ref"`
+	ImageTag   string    `json:"image_tag"`
+	Status     string    `json:"status"`
+	Trigger    string    `json:"trigger"` // webhook | rollback | manual
+	Log        string    `json:"log,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	StartedAt  time.Time `json:"started_at"`
+	FinishedAt time.Time `json:"finished_at,omitempty"` // zero while still running
+}
+
+// CreateDeployment records a new attempt and returns its id. The log starts
+// empty and grows via AppendDeploymentLog.
+func (s *Store) CreateDeployment(ctx context.Context, d Deployment) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO deployments (project_id, commit_sha, ref, image_tag, status, trigger, started_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		d.ProjectID, d.CommitSHA, d.Ref, d.ImageTag, d.Status, d.Trigger, d.StartedAt.Unix())
+	if err != nil {
+		return 0, fmt.Errorf("create deployment: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("deployment id: %w", err)
+	}
+	return id, nil
+}
+
+// SetDeploymentStatus updates status (and image tag) of an in-progress deploy.
+func (s *Store) SetDeploymentStatus(ctx context.Context, id int64, status, imageTag string) error {
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE deployments SET status = ?, image_tag = ? WHERE id = ?`,
+		status, imageTag, id); err != nil {
+		return fmt.Errorf("set deployment status: %w", err)
+	}
+	return nil
+}
+
+// AppendDeploymentLog appends a chunk to the deployment log. SQLite string
+// concatenation keeps each write small instead of rewriting the whole log.
+func (s *Store) AppendDeploymentLog(ctx context.Context, id int64, chunk string) error {
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE deployments SET log = log || ? WHERE id = ?`, chunk, id); err != nil {
+		return fmt.Errorf("append deployment log: %w", err)
+	}
+	return nil
+}
+
+// FinishDeployment marks the attempt terminal and stamps the finish time.
+func (s *Store) FinishDeployment(ctx context.Context, id int64, status, errMsg string, finished time.Time) error {
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE deployments SET status = ?, error = ?, finished_at = ? WHERE id = ?`,
+		status, errMsg, finished.Unix(), id); err != nil {
+		return fmt.Errorf("finish deployment: %w", err)
+	}
+	return nil
+}
+
+// GetDeployment loads one attempt by id.
+func (s *Store) GetDeployment(ctx context.Context, id int64) (Deployment, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, project_id, commit_sha, ref, image_tag, status, trigger, log, error, started_at, finished_at
+		FROM deployments WHERE id = ?`, id)
+	d, err := scanDeployment(row.Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Deployment{}, ErrNotFound
+	}
+	if err != nil {
+		return Deployment{}, err
+	}
+	return d, nil
+}
+
+// ListDeployments returns the most recent attempts for a project, newest first.
+func (s *Store) ListDeployments(ctx context.Context, projectID string, limit int) ([]Deployment, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, project_id, commit_sha, ref, image_tag, status, trigger, log, error, started_at, finished_at
+		FROM deployments WHERE project_id = ? ORDER BY id DESC LIMIT ?`, projectID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list deployments: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Deployment
+	for rows.Next() {
+		d, err := scanDeployment(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// SuccessfulDeployments returns successful attempts for a project, newest
+// first. Used to find the previous image tag for a rollback.
+func (s *Store) SuccessfulDeployments(ctx context.Context, projectID string, limit int) ([]Deployment, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, project_id, commit_sha, ref, image_tag, status, trigger, log, error, started_at, finished_at
+		FROM deployments WHERE project_id = ? AND status = ? ORDER BY id DESC LIMIT ?`,
+		projectID, DeploySuccess, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list successful deployments: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Deployment
+	for rows.Next() {
+		d, err := scanDeployment(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+func scanDeployment(scan func(dest ...any) error) (Deployment, error) {
+	var (
+		d        Deployment
+		started  int64
+		finished int64
+	)
+	if err := scan(&d.ID, &d.ProjectID, &d.CommitSHA, &d.Ref, &d.ImageTag, &d.Status,
+		&d.Trigger, &d.Log, &d.Error, &started, &finished); err != nil {
+		return Deployment{}, err
+	}
+	d.StartedAt = time.Unix(started, 0)
+	if finished > 0 {
+		d.FinishedAt = time.Unix(finished, 0)
+	}
+	return d, nil
 }

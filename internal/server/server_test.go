@@ -17,7 +17,48 @@ import (
 
 const testPassword = "correct horse"
 
+// stubSecrets resolves any name to a fixed value; used where a test does not
+// care about the secret contents.
+type stubSecrets struct{ value string }
+
+func (s stubSecrets) Get(context.Context, string) (string, error) { return s.value, nil }
+
+// fakeDeployer records Trigger/Rollback calls and returns a fixed id.
+type fakeDeployer struct {
+	triggered int
+	rolled    int
+	err       error
+}
+
+func (f *fakeDeployer) Trigger(context.Context, config.Project, config.Server, string, string, string) (int64, error) {
+	f.triggered++
+	if f.err != nil {
+		return 0, f.err
+	}
+	return 42, nil
+}
+
+func (f *fakeDeployer) Rollback(context.Context, config.Project, config.Server) (int64, error) {
+	f.rolled++
+	if f.err != nil {
+		return 0, f.err
+	}
+	return 43, nil
+}
+
 func newTestServer(t *testing.T) *Server {
+	t.Helper()
+	srv, _, _ := newTestServerFull(t)
+	return srv
+}
+
+func newTestServerWithStore(t *testing.T) (*Server, *models.Store) {
+	t.Helper()
+	srv, store, _ := newTestServerFull(t)
+	return srv, store
+}
+
+func newTestServerFull(t *testing.T) (*Server, *models.Store, *fakeDeployer) {
 	t.Helper()
 	db, err := models.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -37,11 +78,18 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatalf("UpsertUser: %v", err)
 	}
 
-	srv, err := New(config.Default(), store, auth.NewService(store, false, time.Hour))
+	deployer := &fakeDeployer{}
+	srv, err := New(Deps{
+		Cfg:      config.Default(),
+		Store:    store,
+		Auth:     auth.NewService(store, false, time.Hour),
+		Secrets:  stubSecrets{value: "test-secret"},
+		Deployer: deployer,
+	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return srv
+	return srv, store, deployer
 }
 
 func doRequest(t *testing.T, s *Server, method, path string) *httptest.ResponseRecorder {

@@ -2,7 +2,64 @@
 {{define "body"}}
 <main>
   <h1>Deployment</h1>
-  <p class="muted">Deploy pipelines, targets and release history land here.</p>
-  <div class="placeholder">No deployments yet.</div>
+  <p class="muted">Every deploy attempt, newest first.</p>
+
+  {{if not .Projects}}
+    <div class="placeholder">No projects configured.</div>
+  {{end}}
+
+  {{range .Projects}}
+  <section class="project">
+    <header class="project-head">
+      <div>
+        <h2>{{.Project.Name}}</h2>
+        <p class="muted">
+          {{.Project.ID}}
+          {{if .Project.RepoURL}}&middot; {{.Project.RepoURL}}{{end}}
+          {{if .Project.Branch}}&middot; {{.Project.Branch}}{{end}}
+          {{if .Project.Domain}}&middot; https://{{.Project.Domain}}{{end}}
+        </p>
+      </div>
+      {{if .CanRollback}}
+      <form method="post" action="/deployment/rollback/{{.Project.ID}}"
+            onsubmit="return confirm('Roll back {{.Project.Name}} to the previous successful image?');">
+        <button type="submit" class="secondary">Roll back</button>
+      </form>
+      {{end}}
+    </header>
+
+    {{if .Deployments}}
+    <table class="deploys">
+      <thead>
+        <tr>
+          <th>#</th><th>Commit</th><th>Status</th><th>Trigger</th>
+          <th>Image</th><th>Started</th><th>Finished</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Deployments}}
+        <tr>
+          <td>{{.ID}}</td>
+          <td class="mono">{{.CommitSHA}}</td>
+          <td><span class="status status-{{.Status}}">{{.Status}}</span></td>
+          <td>{{.Trigger}}</td>
+          <td class="mono">{{.ImageTag}}</td>
+          <td class="mono">{{.StartedAt.Format "2006-01-02 15:04:05"}}</td>
+          <td class="mono">{{if .FinishedAt.IsZero}}&mdash;{{else}}{{.FinishedAt.Format "2006-01-02 15:04:05"}}{{end}}</td>
+        </tr>
+        <tr class="logrow">
+          <td colspan="7">
+            {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+            <details><summary>Log</summary><pre class="log">{{.Log}}</pre></details>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+      <div class="placeholder">No deployments yet. Push to the configured branch to trigger one.</div>
+    {{end}}
+  </section>
+  {{end}}
 </main>
 {{end}}

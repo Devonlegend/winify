@@ -25,3 +25,18 @@ credentials:
 files:
   servers: "servers.yaml"
   projects: "projects.yaml"
+
+proxy:
+  # Register successful deploys with Caddy for automatic HTTPS.
+  # Requires a running Caddy with its admin API reachable.
+  enabled: false
+  admin_url: "http://127.0.0.1:2019"
+  server_name: "srv0"
+
+deploy:
+  # Parent directory on the target for cloned repos.
+  work_dir: "/opt/control-center"
+  # Empty disables SSH host-key verification (insecure; set a known_hosts file).
+  known_hosts_file: ""
+  health_timeout_seconds: 60
+  health_interval_seconds: 3

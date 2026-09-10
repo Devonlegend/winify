@@ -1,5 +1,5 @@
-# Deployment targets. Each entry references credentials by name; the secret
-# value lives encrypted in SQLite (see: control-center cred add <name>).
+# Deployment targets. Credentials are referenced by name; secret values live
+# encrypted in SQLite (add with: control-center cred add <name>).
 servers:
   - id: server-001
     name: "Production IIS Server"
@@ -10,5 +10,6 @@ servers:
     name: "Docker Host"
     type: docker
     ssh_host: "10.0.0.9"
+    ssh_port: 22
     ssh_user: "deploy"
     ssh_key_ref: "vault:server-002-ssh"
