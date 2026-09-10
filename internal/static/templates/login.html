@@ -1,0 +1,19 @@
+{{define "title"}}Sign in &middot; Control Center{{end}}
+{{define "body"}}
+<main class="login">
+  <h1>DevOps Control Center</h1>
+  <p class="muted">Sign in to continue.</p>
+  {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+  <form method="post" action="/login" class="login-form">
+    <label>
+      <span>Username</span>
+      <input type="text" name="username" autocomplete="username" autofocus required>
+    </label>
+    <label>
+      <span>Password</span>
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Sign in</button>
+  </form>
+</main>
+{{end}}

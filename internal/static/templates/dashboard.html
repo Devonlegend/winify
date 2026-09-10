@@ -1,13 +1,21 @@
 {{define "title"}}Dashboard &middot; Control Center{{end}}
 {{define "body"}}
 <main>
-  <h1>DevOps Control Center</h1>
-  <p class="muted">Phase 1 skeleton is online.</p>
-  <dl>
-    <dt>Database</dt>
-    <dd class="ok">{{.DBStatus}}</dd>
-    <dt>Listening on</dt>
-    <dd>{{.Addr}}</dd>
+  <h1>Dashboard</h1>
+  <p class="muted">Phase 1 shell is online.</p>
+  <dl class="stats">
+    <div>
+      <dt>Database</dt>
+      <dd class="ok">{{.DBStatus}}</dd>
+    </div>
+    <div>
+      <dt>Servers</dt>
+      <dd>{{.ServerCount}}</dd>
+    </div>
+    <div>
+      <dt>Projects</dt>
+      <dd>{{.ProjectCount}}</dd>
+    </div>
   </dl>
 </main>
 {{end}}

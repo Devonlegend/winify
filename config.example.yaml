@@ -1,5 +1,5 @@
 # Copy to config.yaml and adjust. Every field here is optional:
-# if the file is absent, the built-in defaults below are used.
+# if the file is absent, the built-in defaults are used.
 server:
   # host:port to listen on. ":8080" binds every interface.
   addr: ":8080"
@@ -7,3 +7,21 @@ server:
 database:
   # SQLite database file, created on first run if missing.
   path: "data/control-center.db"
+
+auth:
+  admin_user: "admin"
+  # bcrypt hash. Generate with: control-center hash-password
+  # Prefer CC_ADMIN_PASSWORD in the environment over putting a hash in a file.
+  admin_password_hash: ""
+  # Keep true in production. Browsers still accept Secure cookies on localhost.
+  cookie_secure: true
+  session_ttl_hours: 12
+
+credentials:
+  # base64-encoded 32-byte AES key. Prefer CC_MASTER_KEY.
+  # Empty => a key is generated into data/master.key on first use.
+  master_key: ""
+
+files:
+  servers: "servers.yaml"
+  projects: "projects.yaml"

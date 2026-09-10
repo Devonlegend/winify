@@ -1,5 +1,14 @@
-# Registered projects. Parsed by internal/config in a later phase.
-# Each project describes what to deploy and where (server name ref),
-# the deploy strategy (dockerfile: <path> or iis), and optional hooks.
-# Empty until deployment support lands.
-projects: []
+# Projects are deployable units bound to a server. A missing file or an empty
+# list is fine; the shell simply shows zero projects.
+projects:
+  - id: proj-001
+    name: "Storefront API"
+    server_id: server-002
+    strategy: dockerfile
+    repo_url: "https://github.com/acme/storefront"
+    dockerfile_path: "deploy/Dockerfile"
+  - id: proj-002
+    name: "Legacy Portal"
+    server_id: server-001
+    strategy: iis
+    iis_site: "Default Web Site/portal"

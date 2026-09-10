@@ -7,6 +7,22 @@
   <link rel="stylesheet" href="/assets/css/app.css">
 </head>
 <body>
+  {{if .User}}
+  <header class="topbar">
+    <span class="brand">DevOps Control Center</span>
+    <nav class="tabs">
+      <a href="/deployment" class="{{if eq .Active "deployment"}}active{{end}}">Deployment</a>
+      <a href="/monitoring" class="{{if eq .Active "monitoring"}}active{{end}}">Monitoring</a>
+      <a href="/assistant" class="{{if eq .Active "assistant"}}active{{end}}">Assistant</a>
+    </nav>
+    <div class="account">
+      <span class="user">{{.User}}</span>
+      <form method="post" action="/logout">
+        <button type="submit" class="link">Log out</button>
+      </form>
+    </div>
+  </header>
+  {{end}}
   {{template "body" .}}
 </body>
 </html>{{end}}

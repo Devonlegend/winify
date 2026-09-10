@@ -1,48 +1,78 @@
-// Command control-center runs the DevOps Control Center server.
+// Command control-center runs the DevOps Control Center server, and provides
+// small admin subcommands for hashing the admin password and managing
+// encrypted credentials.
+//
+// Usage:
+//
+//	control-center [serve] [-config config.yaml]
+//	control-center hash-password
+//	control-center cred add <name>
+//	control-center cred list
+//	control-center cred get <name>
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/Devonlegend/winify/internal/auth"
 	"github.com/Devonlegend/winify/internal/config"
 	"github.com/Devonlegend/winify/internal/models"
 	"github.com/Devonlegend/winify/internal/server"
 )
 
 func main() {
-	configPath := flag.String("config", "config.yaml", "path to YAML config; missing file means built-in defaults")
-	flag.Parse()
-
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		log.Fatalf("config: %v", err)
-	}
-
-	if dir := filepath.Dir(cfg.Database.Path); dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			log.Fatalf("create data dir %s: %v", dir, err)
+	args := os.Args[1:]
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		switch args[0] {
+		case "serve":
+			runServe(args[1:])
+			return
+		case "hash-password":
+			runHashPassword(args[1:])
+			return
+		case "cred":
+			runCred(args[1:])
+			return
+		default:
+			log.Fatalf("unknown command %q (want: serve, hash-password, cred)", args[0])
 		}
 	}
+	runServe(args)
+}
 
-	db, err := models.Open(cfg.Database.Path)
-	if err != nil {
-		log.Fatalf("database: %v", err)
+// ---- serve ----
+
+func runServe(args []string) {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	configPath := fs.String("config", defaultConfigPath(), "path to YAML config; missing file means built-in defaults")
+	fs.Parse(args)
+
+	cfg := mustConfig(*configPath)
+	store, cleanup := mustStore(cfg)
+	defer cleanup()
+
+	ctx := context.Background()
+	if err := store.DeleteExpiredSessions(ctx, time.Now()); err != nil {
+		log.Printf("prune sessions: %v", err)
 	}
-	defer db.Close()
 
-	if err := models.Migrate(db); err != nil {
-		log.Fatalf("migrate: %v", err)
-	}
+	seedAdmin(ctx, store, cfg)
+	syncInventory(ctx, store, cfg)
 
-	srv, err := server.New(cfg, db)
+	authSvc := auth.NewService(store, cfg.Auth.CookieSecure, time.Duration(cfg.Auth.SessionTTLHours)*time.Hour)
+	srv, err := server.New(cfg, store, authSvc)
 	if err != nil {
 		log.Fatalf("server: %v", err)
 	}
@@ -55,7 +85,7 @@ func main() {
 
 	// ctx is cancelled on Ctrl-C / SIGINT. signal.NotifyContext is the modern
 	// way to turn a signal into a context instead of a global handler.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
 	go func() {
@@ -65,7 +95,7 @@ func main() {
 		}
 	}()
 
-	<-ctx.Done()
+	<-signalCtx.Done()
 	log.Println("shutting down")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -73,4 +103,198 @@ func main() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+}
+
+// seedAdmin ensures the configured admin account exists. The password comes
+// from CC_ADMIN_PASSWORD (hashed here) or a pre-hashed auth.admin_password_hash.
+// Neither value is ever logged.
+func seedAdmin(ctx context.Context, store *models.Store, cfg config.Config) {
+	hash := cfg.Auth.AdminPasswordHash
+	if plaintext := os.Getenv("CC_ADMIN_PASSWORD"); plaintext != "" {
+		h, err := auth.HashPassword(plaintext)
+		if err != nil {
+			log.Fatalf("hash admin password: %v", err)
+		}
+		hash = h
+	}
+	if hash == "" {
+		log.Fatal("no admin password configured: set CC_ADMIN_PASSWORD, or set auth.admin_password_hash " +
+			"(generate one with: control-center hash-password)")
+	}
+	if err := store.UpsertUser(ctx, cfg.Auth.AdminUser, hash); err != nil {
+		log.Fatalf("seed admin user: %v", err)
+	}
+}
+
+// syncInventory mirrors servers.yaml / projects.yaml into the database. Missing
+// files are treated as empty inventories.
+func syncInventory(ctx context.Context, store *models.Store, cfg config.Config) {
+	servers, err := config.LoadServers(cfg.Files.Servers)
+	if err != nil {
+		log.Fatalf("servers config: %v", err)
+	}
+	for _, s := range servers {
+		if err := store.UpsertServer(ctx, s); err != nil {
+			log.Fatalf("sync server: %v", err)
+		}
+	}
+
+	projects, err := config.LoadProjects(cfg.Files.Projects)
+	if err != nil {
+		log.Fatalf("projects config: %v", err)
+	}
+	for _, p := range projects {
+		if err := store.UpsertProject(ctx, p); err != nil {
+			log.Fatalf("sync project: %v", err)
+		}
+	}
+
+	log.Printf("inventory synced: %d servers, %d projects", len(servers), len(projects))
+}
+
+// ---- hash-password ----
+
+func runHashPassword(args []string) {
+	fs := flag.NewFlagSet("hash-password", flag.ExitOnError)
+	fs.Parse(args)
+
+	password, err := readSecret("New admin password (input is echoed): ")
+	if err != nil {
+		log.Fatalf("read password: %v", err)
+	}
+	if password == "" {
+		log.Fatal("empty password")
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		log.Fatalf("hash: %v", err)
+	}
+	// stdout carries only the bcrypt hash, which is safe to paste into config.
+	fmt.Println(hash)
+}
+
+// ---- cred ----
+
+func runCred(args []string) {
+	fs := flag.NewFlagSet("cred", flag.ExitOnError)
+	configPath := fs.String("config", defaultConfigPath(), "path to YAML config")
+	fs.Parse(args)
+	rest := fs.Args()
+
+	if len(rest) == 0 {
+		log.Fatal("usage: control-center cred <add|list|get> [name]")
+	}
+	action := rest[0]
+
+	cfg := mustConfig(*configPath)
+	store, cleanup := mustStore(cfg)
+	defer cleanup()
+
+	key, err := auth.LoadMasterKey(cfg.Credentials.MasterKey, masterKeyPath(cfg))
+	if err != nil {
+		log.Fatalf("master key: %v", err)
+	}
+	credStore, err := auth.NewCredentialStore(store, key)
+	if err != nil {
+		log.Fatalf("credential store: %v", err)
+	}
+	ctx := context.Background()
+
+	switch action {
+	case "add":
+		if len(rest) < 2 {
+			log.Fatal("usage: control-center cred add <name>")
+		}
+		name := rest[1]
+		secret, err := readSecret("Secret value (input is echoed): ")
+		if err != nil {
+			log.Fatalf("read secret: %v", err)
+		}
+		if secret == "" {
+			log.Fatal("empty secret, nothing stored")
+		}
+		if err := credStore.Put(ctx, name, secret); err != nil {
+			log.Fatalf("store credential: %v", err)
+		}
+		// Log the name only. The secret is never printed.
+		log.Printf("stored credential %q (encrypted at rest)", name)
+
+	case "list":
+		names, err := store.CredentialNames(ctx)
+		if err != nil {
+			log.Fatalf("list credentials: %v", err)
+		}
+		for _, n := range names {
+			fmt.Println(n)
+		}
+
+	case "get":
+		if len(rest) < 2 {
+			log.Fatal("usage: control-center cred get <name>")
+		}
+		name := rest[1]
+		secret, err := credStore.Get(ctx, name)
+		if errors.Is(err, models.ErrNotFound) {
+			log.Fatalf("credential %q not found", name)
+		}
+		if err != nil {
+			log.Fatalf("read credential: %v", err)
+		}
+		// Deliberate: the operator asked for the plaintext. It goes to stdout,
+		// never to the log, so it cannot end up in a log aggregation pipeline.
+		fmt.Println(secret)
+
+	default:
+		log.Fatalf("unknown cred action %q (want: add, list, get)", action)
+	}
+}
+
+// ---- shared helpers ----
+
+func defaultConfigPath() string {
+	if v := os.Getenv("CC_CONFIG"); v != "" {
+		return v
+	}
+	return "config.yaml"
+}
+
+func mustConfig(path string) config.Config {
+	cfg, err := config.Load(path)
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	return cfg
+}
+
+func mustStore(cfg config.Config) (*models.Store, func()) {
+	if dir := filepath.Dir(cfg.Database.Path); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			log.Fatalf("create data dir %s: %v", dir, err)
+		}
+	}
+	db, err := models.Open(cfg.Database.Path)
+	if err != nil {
+		log.Fatalf("database: %v", err)
+	}
+	if err := models.Migrate(db); err != nil {
+		db.Close()
+		log.Fatalf("migrate: %v", err)
+	}
+	return models.NewStore(db), func() { db.Close() }
+}
+
+// masterKeyPath keeps the generated key beside the database in the data dir.
+func masterKeyPath(cfg config.Config) string {
+	return filepath.Join(filepath.Dir(cfg.Database.Path), "master.key")
+}
+
+// readSecret reads one line from stdin. It does not disable terminal echo, so
+// prompts say so explicitly.
+func readSecret(prompt string) (string, error) {
+	fmt.Fprint(os.Stderr, prompt)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
 }

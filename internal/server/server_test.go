@@ -1,15 +1,21 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Devonlegend/winify/internal/auth"
 	"github.com/Devonlegend/winify/internal/config"
 	"github.com/Devonlegend/winify/internal/models"
 )
+
+const testPassword = "correct horse"
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
@@ -21,7 +27,17 @@ func newTestServer(t *testing.T) *Server {
 	if err := models.Migrate(db); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	srv, err := New(config.Default(), db)
+	store := models.NewStore(db)
+
+	hash, err := auth.HashPassword(testPassword)
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	if err := store.UpsertUser(context.Background(), "admin", hash); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+
+	srv, err := New(config.Default(), store, auth.NewService(store, false, time.Hour))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -30,25 +46,37 @@ func newTestServer(t *testing.T) *Server {
 
 func doRequest(t *testing.T, s *Server, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(method, path, nil)
 	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, req)
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(method, path, nil))
 	return rec
 }
 
-func TestDashboardRenders(t *testing.T) {
-	s := newTestServer(t)
-	rec := doRequest(t, s, http.MethodGet, "/")
+// login performs a form login and returns the session cookie.
+func login(t *testing.T, s *Server) *http.Cookie {
+	t.Helper()
+	form := url.Values{"username": {"admin"}, "password": {testPassword}}
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("login status = %d, want 303 (body: %s)", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "DevOps Control Center") {
-		t.Fatalf("body missing title: %q", rec.Body.String())
+	cookies := rec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("login did not set a session cookie")
 	}
-	if !strings.Contains(rec.Body.String(), ">ok<") {
-		t.Fatalf("body missing db status: %q", rec.Body.String())
-	}
+	return cookies[0]
+}
+
+func getWithCookie(t *testing.T, s *Server, path string, cookie *http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	return rec
 }
 
 func TestHealthzOK(t *testing.T) {
@@ -63,6 +91,80 @@ func TestHealthzOK(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"status":"ok"`) {
 		t.Fatalf("body = %q, want ok status", rec.Body.String())
+	}
+}
+
+func TestProtectedRoutesRedirectWhenAnonymous(t *testing.T) {
+	s := newTestServer(t)
+	for _, path := range []string{"/", "/dashboard", "/deployment", "/monitoring", "/assistant"} {
+		rec := doRequest(t, s, http.MethodGet, path)
+		if rec.Code != http.StatusSeeOther {
+			t.Errorf("GET %s status = %d, want 303", path, rec.Code)
+		}
+		if loc := rec.Header().Get("Location"); loc != "/login" {
+			t.Errorf("GET %s Location = %q, want /login", path, loc)
+		}
+	}
+}
+
+func TestLoginRejectsBadCredentials(t *testing.T) {
+	s := newTestServer(t)
+	form := url.Values{"username": {"admin"}, "password": {"nope"}}
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Invalid username or password") {
+		t.Fatalf("body = %q, want invalid-credentials message", rec.Body.String())
+	}
+}
+
+func TestDashboardShellWithTabs(t *testing.T) {
+	s := newTestServer(t)
+	cookie := login(t, s)
+	rec := getWithCookie(t, s, "/dashboard", cookie)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"Deployment", "Monitoring", "Assistant", "Log out"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dashboard body missing %q", want)
+		}
+	}
+}
+
+func TestSectionRoutesRender(t *testing.T) {
+	s := newTestServer(t)
+	cookie := login(t, s)
+	for _, path := range []string{"/deployment", "/monitoring", "/assistant"} {
+		rec := getWithCookie(t, s, path, cookie)
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s status = %d, want 200", path, rec.Code)
+		}
+	}
+}
+
+func TestLogoutRevokesSession(t *testing.T) {
+	s := newTestServer(t)
+	cookie := login(t, s)
+
+	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("logout status = %d, want 303", rec.Code)
+	}
+
+	after := getWithCookie(t, s, "/dashboard", cookie)
+	if after.Code != http.StatusSeeOther {
+		t.Fatalf("dashboard after logout = %d, want 303", after.Code)
 	}
 }
 
