@@ -471,6 +471,26 @@ func (s *Store) SuccessfulDeployments(ctx context.Context, projectID string, lim
 	return out, rows.Err()
 }
 
+// RecentDeployments returns the newest attempts across all projects.
+func (s *Store) RecentDeployments(ctx context.Context, limit int) ([]Deployment, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+deploymentColumns+` FROM deployments ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("recent deployments: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Deployment
+	for rows.Next() {
+		d, err := scanDeployment(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 func scanDeployment(scan func(dest ...any) error) (Deployment, error) {
 	var (
 		d        Deployment

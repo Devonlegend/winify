@@ -1,11 +1,13 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -98,10 +100,6 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		data.ProjectCount = len(projects)
 	}
 	s.render(w, http.StatusOK, "dashboard", data)
-}
-
-type sectionData struct {
-	pageData
 }
 
 // projectDeploys is one project row on the Deployment tab: its recent attempts
@@ -320,9 +318,56 @@ func (s *Server) handleAPIServerMetrics(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleAssistant(w http.ResponseWriter, r *http.Request) {
-	data := sectionData{pageData: s.page(r)}
+	data := assistantPageData{
+		pageData: s.page(r),
+		Enabled:  s.assistant != nil,
+		Model:    s.cfg.Assistant.Model,
+	}
 	data.Active = "assistant"
 	s.render(w, http.StatusOK, "assistant", data)
+}
+
+type assistantPageData struct {
+	pageData
+	Enabled bool
+	Model   string
+}
+
+// handleAssistantAsk answers a question from the curated docs and/or live
+// deploy/monitoring data. The answer cites which sources it used.
+func (s *Server) handleAssistantAsk(w http.ResponseWriter, r *http.Request) {
+	if s.assistant == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "assistant is disabled"})
+		return
+	}
+
+	var req struct {
+		Question string `json:"question"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	question := strings.TrimSpace(req.Question)
+	if question == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "question is required"})
+		return
+	}
+
+	timeout := time.Duration(s.cfg.Assistant.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+
+	answer, err := s.assistant.Ask(ctx, question)
+	if err != nil {
+		log.Printf("assistant: ask: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "assistant failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, answer)
 }
 
 // ---- Health ----

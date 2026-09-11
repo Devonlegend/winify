@@ -30,6 +30,7 @@ type Config struct {
 	Proxy       ProxyConfig       `yaml:"proxy"`
 	Deploy      DeployConfig      `yaml:"deploy"`
 	Monitoring  MonitoringConfig  `yaml:"monitoring"`
+	Assistant   AssistantConfig   `yaml:"assistant"`
 }
 
 // ServerConfig controls the HTTP listener.
@@ -96,6 +97,25 @@ type MonitoringConfig struct {
 	HistoryPoints int `yaml:"history_points"`
 }
 
+// AssistantConfig configures the local RAG assistant (ChromaDB + Ollama).
+type AssistantConfig struct {
+	// Enabled turns the /assistant/ask endpoint and ingestion on.
+	Enabled bool `yaml:"enabled"`
+	// ChromaURL is the ChromaDB server. Empty or unreachable falls back to an
+	// in-process store.
+	ChromaURL string `yaml:"chroma_url"`
+	// Collection is the ChromaDB collection holding the curated docs.
+	Collection string `yaml:"collection"`
+	// OllamaURL is the Ollama server.
+	OllamaURL string `yaml:"ollama_url"`
+	// Model is the local generation model.
+	Model string `yaml:"model"`
+	// TimeoutSeconds bounds a single answer (retrieval + generation).
+	TimeoutSeconds int `yaml:"timeout_seconds"`
+	// TopK is how many doc chunks to retrieve per question.
+	TopK int `yaml:"top_k"`
+}
+
 // DeployConfig controls how commands run on target servers.
 type DeployConfig struct {
 	// WorkDir is the parent directory on Docker/Linux targets for cloned repos.
@@ -146,6 +166,15 @@ func Default() Config {
 			TimeoutSeconds:  15,
 			RetentionHours:  24,
 			HistoryPoints:   200,
+		},
+		Assistant: AssistantConfig{
+			Enabled:        true,
+			ChromaURL:      "http://127.0.0.1:8000",
+			Collection:     "control-center-docs",
+			OllamaURL:      "http://127.0.0.1:11434",
+			Model:          "gemma3:1b",
+			TimeoutSeconds: 60,
+			TopK:           3,
 		},
 	}
 }
@@ -253,6 +282,39 @@ func (cfg *Config) applyEnv() error {
 			return fmt.Errorf("CC_MONITOR_RETENTION_HOURS: %w", err)
 		}
 		cfg.Monitoring.RetentionHours = n
+	}
+	if v := os.Getenv("CC_ASSISTANT_ENABLED"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("CC_ASSISTANT_ENABLED: %w", err)
+		}
+		cfg.Assistant.Enabled = b
+	}
+	if v := os.Getenv("CC_CHROMA_URL"); v != "" {
+		cfg.Assistant.ChromaURL = v
+	}
+	if v := os.Getenv("CC_ASSISTANT_COLLECTION"); v != "" {
+		cfg.Assistant.Collection = v
+	}
+	if v := os.Getenv("CC_OLLAMA_URL"); v != "" {
+		cfg.Assistant.OllamaURL = v
+	}
+	if v := os.Getenv("CC_ASSISTANT_MODEL"); v != "" {
+		cfg.Assistant.Model = v
+	}
+	if v := os.Getenv("CC_ASSISTANT_TIMEOUT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("CC_ASSISTANT_TIMEOUT: %w", err)
+		}
+		cfg.Assistant.TimeoutSeconds = n
+	}
+	if v := os.Getenv("CC_ASSISTANT_TOP_K"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("CC_ASSISTANT_TOP_K: %w", err)
+		}
+		cfg.Assistant.TopK = n
 	}
 	return nil
 }

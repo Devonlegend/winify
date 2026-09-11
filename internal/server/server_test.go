@@ -80,11 +80,12 @@ func newTestServerFull(t *testing.T) (*Server, *models.Store, *fakeDeployer) {
 
 	deployer := &fakeDeployer{}
 	srv, err := New(Deps{
-		Cfg:      config.Default(),
-		Store:    store,
-		Auth:     auth.NewService(store, false, time.Hour),
-		Secrets:  stubSecrets{value: "test-secret"},
-		Deployer: deployer,
+		Cfg:       config.Default(),
+		Store:     store,
+		Auth:      auth.NewService(store, false, time.Hour),
+		Secrets:   stubSecrets{value: "test-secret"},
+		Deployer:  deployer,
+		Assistant: &fakeAssistant{},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

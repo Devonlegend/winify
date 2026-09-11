@@ -52,3 +52,14 @@ monitoring:
   timeout_seconds: 15
   retention_hours: 24
   history_points: 200
+
+assistant:
+  # Local RAG assistant. ChromaDB stores the curated docs; Ollama generates.
+  # If ChromaDB is unreachable an in-process store is used automatically.
+  enabled: true
+  chroma_url: "http://127.0.0.1:8000"
+  collection: "control-center-docs"
+  ollama_url: "http://127.0.0.1:11434"
+  model: "gemma3:1b"   # or "qwen3:1.7b"
+  timeout_seconds: 60
+  top_k: 3

@@ -1,8 +1,22 @@
 {{define "title"}}Assistant &middot; Control Center{{end}}
 {{define "body"}}
-<main>
+<main class="assistant">
   <h1>Assistant</h1>
-  <p class="muted">Local RAG assistant (ChromaDB + Ollama) will live here.</p>
-  <div class="placeholder">Assistant offline.</div>
+  <p class="muted">Local RAG over the platform guides plus live deploy and monitoring data. Model: <span class="mono">{{.Model}}</span>.</p>
+
+  {{if not .Enabled}}
+    <div class="placeholder">Assistant is disabled. Enable the <code>assistant</code> section in config to use it.</div>
+  {{else}}
+  <div class="chat" id="chat" data-endpoint="/assistant/ask">
+    <div class="msg msg-bot">
+      <div class="bubble">Ask about using the platform (for example, "how do I roll back a deployment?") or about a project or server ("did the last deploy to proj-001 succeed?").</div>
+    </div>
+  </div>
+  <form class="chat-form" id="chat-form">
+    <input id="chat-input" type="text" placeholder="Ask a question&hellip;" autocomplete="off" required>
+    <button type="submit" id="chat-send">Send</button>
+  </form>
+  {{end}}
 </main>
+<script src="/assets/js/assistant.js"></script>
 {{end}}

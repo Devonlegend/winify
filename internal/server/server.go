@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Devonlegend/winify/internal/assistant"
 	"github.com/Devonlegend/winify/internal/auth"
 	"github.com/Devonlegend/winify/internal/config"
 	"github.com/Devonlegend/winify/internal/deployment"
@@ -34,24 +35,31 @@ type Deployer interface {
 	Rollback(ctx context.Context, project config.Project, srv config.Server) (int64, error)
 }
 
+// Assistant is the subset of *assistant.Service the HTTP layer uses.
+type Assistant interface {
+	Ask(ctx context.Context, question string) (assistant.Answer, error)
+}
+
 // Deps are the server's dependencies.
 type Deps struct {
-	Cfg      config.Config
-	Store    *models.Store
-	Auth     *auth.Service
-	Secrets  deployment.SecretResolver
-	Deployer Deployer
+	Cfg       config.Config
+	Store     *models.Store
+	Auth      *auth.Service
+	Secrets   deployment.SecretResolver
+	Deployer  Deployer
+	Assistant Assistant
 }
 
 // Server holds the dependencies shared by every handler.
 type Server struct {
-	cfg      config.Config
-	store    *models.Store
-	auth     *auth.Service
-	secrets  deployment.SecretResolver
-	deployer Deployer
-	pages    map[string]*template.Template
-	assets   fs.FS
+	cfg       config.Config
+	store     *models.Store
+	auth      *auth.Service
+	secrets   deployment.SecretResolver
+	deployer  Deployer
+	assistant Assistant
+	pages     map[string]*template.Template
+	assets    fs.FS
 }
 
 // New parses the templates and prepares the asset FS. Each page is parsed as
@@ -75,13 +83,14 @@ func New(deps Deps) (*Server, error) {
 	}
 
 	return &Server{
-		cfg:      deps.Cfg,
-		store:    deps.Store,
-		auth:     deps.Auth,
-		secrets:  deps.Secrets,
-		deployer: deps.Deployer,
-		pages:    pages,
-		assets:   sub,
+		cfg:       deps.Cfg,
+		store:     deps.Store,
+		auth:      deps.Auth,
+		secrets:   deps.Secrets,
+		deployer:  deps.Deployer,
+		assistant: deps.Assistant,
+		pages:     pages,
+		assets:    sub,
 	}, nil
 }
 
@@ -112,6 +121,7 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/deployment/rollback/{projectID}", s.handleRollback)
 		r.Get("/monitoring", s.handleMonitoring)
 		r.Get("/assistant", s.handleAssistant)
+		r.Post("/assistant/ask", s.handleAssistantAsk)
 		r.Post("/logout", s.handleLogout)
 
 		r.Get("/api/projects/{projectID}/deployments", s.handleAPIDeployments)
