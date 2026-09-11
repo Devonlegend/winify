@@ -7,3 +7,8 @@
 /control-center
 *.test
 CLAUDE.md
+
+# Local test harness runtime state (keys, database, binary)
+/dev/data/
+/dev/keys/
+/dev/control-center.exe

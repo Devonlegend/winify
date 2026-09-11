@@ -11,6 +11,7 @@ package monitoring
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -27,8 +28,9 @@ type RunnerFactory func(ctx context.Context, srv config.Server) (deployment.Runn
 // NewRunnerFactory resolves the server's encrypted credential and dials the
 // same connection the deploy pipeline uses. This is deliberately the ONLY
 // connection logic monitoring owns — it delegates to deployment.DialSSH and
-// deployment.DialWinRM rather than re-implementing SSH/WinRM.
-func NewRunnerFactory(cfg config.Config, secrets deployment.SecretResolver) RunnerFactory {
+// deployment.DialWinRM rather than re-implementing SSH/WinRM. The audit
+// recorder wraps the connection so monitoring commands are logged too.
+func NewRunnerFactory(cfg config.Config, secrets deployment.SecretResolver, audit deployment.AuditRecorder) RunnerFactory {
 	return func(ctx context.Context, srv config.Server) (deployment.Runner, error) {
 		switch srv.Type {
 		case config.ServerTypeIIS:
@@ -36,13 +38,21 @@ func NewRunnerFactory(cfg config.Config, secrets deployment.SecretResolver) Runn
 			if err != nil {
 				return nil, fmt.Errorf("resolve winrm credential: %w", err)
 			}
-			return deployment.DialWinRM(srv, password)
+			runner, err := deployment.DialWinRM(srv, password)
+			if err != nil {
+				return nil, err
+			}
+			return deployment.WithAuditRecorder(runner, audit), nil
 		default:
 			key, err := deployment.ResolveRef(ctx, secrets, srv.SSHKeyRef)
 			if err != nil {
 				return nil, fmt.Errorf("resolve ssh key: %w", err)
 			}
-			return deployment.DialSSH(ctx, srv.SSHHost, srv.SSHPort, srv.SSHUser, key, cfg.Deploy.KnownHostsFile)
+			runner, err := deployment.DialSSH(ctx, srv.SSHHost, srv.SSHPort, srv.SSHUser, key, cfg.Deploy.KnownHostsFile)
+			if err != nil {
+				return nil, err
+			}
+			return deployment.WithAuditRecorder(runner, audit), nil
 		}
 	}
 }
@@ -78,6 +88,7 @@ func (c *Collector) Collect(ctx context.Context, srv config.Server) models.Metri
 	}
 	if err := parseMetrics(out, &m); err != nil {
 		m.Error = "parse metrics: " + err.Error()
+		log.Printf("monitor: %s parse failed: %v", srv.ID, err)
 		return m
 	}
 	m.Reachable = true

@@ -45,7 +45,7 @@ func (t *iisTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) 
 	logf("iis pipeline: repo=%s source=%s physical=%s pool=%s", repoDir, source, p.IISPhysicalPath, p.IISAppPool)
 
 	// 1. Fetch the requested revision.
-	if _, err := execCmd(ctx, t.runner, syncRepoScript(repoDir, p.RepoURL, job.commit), "git clone/fetch + checkout "+shortSHA(job.commit), logf); err != nil {
+	if _, err := execCmd(ctx, t.runner, syncRepoScript(repoDir, p.RepoURL, deployRevision(p, job.commit)), "git clone/fetch + checkout "+shortSHA(deployRevision(p, job.commit)), logf); err != nil {
 		return "", fmt.Errorf("clone/checkout: %w", err)
 	}
 

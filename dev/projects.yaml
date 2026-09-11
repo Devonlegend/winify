@@ -1,0 +1,13 @@
+# Local demo project created by dev/setup.ps1.
+projects:
+  - id: proj-docker
+    name: "Demo Docker App"
+    server_id: server-docker
+    strategy: dockerfile
+    repo_url: "/srv/sample-app"
+    dockerfile_path: "Dockerfile"
+    branch: "main"
+    domain: ""
+    port: 18080
+    health_path: "/healthz"
+    webhook_secret_ref: "vault:demo-webhook"

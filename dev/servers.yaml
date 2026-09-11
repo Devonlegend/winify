@@ -1,0 +1,12 @@
+# Local Docker target created by dev/setup.ps1.
+servers:
+  - id: server-docker
+    name: "Local Docker Target"
+    type: docker
+    host: "host.docker.internal"
+    ssh_host: "127.0.0.1"
+    ssh_port: 2222
+    ssh_user: "root"
+    ssh_key_ref: "vault:server-docker-ssh"
+    services: ["dockerd"]
+    disk_path: "/"

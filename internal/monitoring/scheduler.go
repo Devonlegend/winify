@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Devonlegend/winify/internal/config"
+	"github.com/Devonlegend/winify/internal/deployment"
 	"github.com/Devonlegend/winify/internal/models"
 )
 
@@ -107,6 +108,13 @@ func (s *Scheduler) PollAll(ctx context.Context) {
 func (s *Scheduler) pollOne(ctx context.Context, srv config.Server) {
 	pollCtx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
+
+	// Attribute every command this poll runs to the server in the audit log.
+	pollCtx = deployment.WithAudit(pollCtx, deployment.AuditMeta{
+		ServerID:   srv.ID,
+		ServerType: srv.Type,
+		Action:     "monitor",
+	})
 
 	// Some remote calls (notably the WinRM HTTP transport) do not honor context
 	// cancellation promptly. Run collection in a goroutine and enforce the

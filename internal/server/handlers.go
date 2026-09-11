@@ -317,6 +317,23 @@ func (s *Server) handleAPIServerMetrics(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, history)
 }
 
+// handleAPIAudit returns recent audited remote commands, newest first.
+func (s *Server) handleAPIAudit(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 1000 {
+			limit = n
+		}
+	}
+	commands, err := s.store.ListRemoteCommands(r.Context(), limit)
+	if err != nil {
+		log.Printf("api audit: %v", err)
+		http.Error(w, "error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, commands)
+}
+
 func (s *Server) handleAssistant(w http.ResponseWriter, r *http.Request) {
 	data := assistantPageData{
 		pageData: s.page(r),

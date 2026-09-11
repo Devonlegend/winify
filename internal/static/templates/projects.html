@@ -1,0 +1,83 @@
+{{define "title"}}Projects &middot; Control Center{{end}}
+{{define "body"}}
+<main>
+  <h1>Projects</h1>
+  <p class="muted">Deployable apps. A push to the branch triggers a deploy; you can also deploy now.</p>
+
+  {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+
+  {{if .Projects}}
+  <table class="deploys">
+    <thead><tr><th>ID</th><th>Name</th><th>Server</th><th>Repo</th><th>Domain</th><th></th></tr></thead>
+    <tbody>
+      {{range .Projects}}
+      <tr>
+        <td class="mono">{{.Project.ID}}</td>
+        <td>{{.Project.Name}} <span class="badge badge-{{.ServerType}}">{{.ServerType}}</span></td>
+        <td class="mono">{{.Project.ServerID}}</td>
+        <td class="mono">{{.Project.RepoURL}}</td>
+        <td class="mono">{{if .Project.Domain}}https://{{.Project.Domain}}{{end}}</td>
+        <td class="row-actions">
+          <form method="post" action="/projects/deploy/{{.Project.ID}}">
+            <button type="submit" class="link">Deploy</button>
+          </form>
+          <a href="/projects?edit={{.Project.ID}}">Edit</a>
+          <form method="post" action="/projects/delete" onsubmit="return confirm('Delete project {{.Project.ID}}?');">
+            <input type="hidden" name="id" value="{{.Project.ID}}">
+            <button type="submit" class="link danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+    <div class="placeholder">No projects yet. Add one below.</div>
+  {{end}}
+
+  <h2 class="form-title">{{if .Edit}}Edit project{{else}}Add project{{end}}</h2>
+  {{if not .Servers}}<p class="error">Add a server first.</p>{{end}}
+  <form method="post" action="/projects" class="admin-form">
+    <label>ID<input name="id" value="{{if .Edit}}{{.Edit.ID}}{{end}}" required {{if .Edit}}readonly{{end}}></label>
+    <label>Name<input name="name" value="{{if .Edit}}{{.Edit.Name}}{{end}}" required></label>
+    <label>Server
+      <select name="server_id" required>
+        <option value="">&mdash; select &mdash;</option>
+        {{range .Servers}}
+        <option value="{{.ID}}" {{if $.Edit}}{{if eq $.Edit.ServerID .ID}}selected{{end}}{{end}}>{{.ID}} ({{.Type}})</option>
+        {{end}}
+      </select>
+    </label>
+    <label>Repository URL<input name="repo_url" value="{{if .Edit}}{{.Edit.RepoURL}}{{end}}" placeholder="https://github.com/you/app" required></label>
+    <label>Branch<input name="branch" value="{{if .Edit}}{{.Edit.Branch}}{{end}}" placeholder="main"></label>
+    <label>Domain<input name="domain" value="{{if .Edit}}{{.Edit.Domain}}{{end}}" placeholder="app.example.com"></label>
+    <label>Port<input name="port" value="{{if .Edit}}{{.Edit.Port}}{{end}}" placeholder="8080" required></label>
+    <label>Health path<input name="health_path" value="{{if .Edit}}{{.Edit.HealthPath}}{{end}}" placeholder="/healthz"></label>
+    <label>Webhook secret ref<input name="webhook_secret_ref" value="{{if .Edit}}{{.Edit.WebhookSecretRef}}{{end}}" placeholder="vault:app-webhook"></label>
+
+    <fieldset>
+      <legend>Docker</legend>
+      <label>Dockerfile path<input name="dockerfile_path" value="{{if .Edit}}{{.Edit.DockerfilePath}}{{end}}" placeholder="Dockerfile"></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>IIS</legend>
+      <label>Physical path<input name="iis_physical_path" value="{{if .Edit}}{{.Edit.IISPhysicalPath}}{{end}}" placeholder="C:\inetpub\wwwroot\app"></label>
+      <label>App pool<input name="iis_app_pool" value="{{if .Edit}}{{.Edit.IISAppPool}}{{end}}"></label>
+      <label>Service (optional)<input name="iis_service" value="{{if .Edit}}{{.Edit.IISService}}{{end}}"></label>
+      <label>Build command (optional)<input name="iis_build_command" value="{{if .Edit}}{{.Edit.IISBuildCommand}}{{end}}" placeholder="dotnet publish -c Release -o publish"></label>
+      <label>Source subdir<input name="iis_source_subdir" value="{{if .Edit}}{{.Edit.IISSourceSubdir}}{{end}}" placeholder="publish"></label>
+    </fieldset>
+
+    <label>Environment (KEY=VALUE per line)
+      <textarea name="env" rows="4" placeholder="ASPNETCORE_ENVIRONMENT=Production">{{.EditEnv}}</textarea>
+    </label>
+
+    <div class="form-actions">
+      <button type="submit">Save project</button>
+      {{if .Edit}}<a class="link" href="/projects">Cancel</a>{{end}}
+    </div>
+  </form>
+</main>
+{{end}}

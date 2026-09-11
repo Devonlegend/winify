@@ -27,7 +27,7 @@ func (t *dockerTarget) Close() error { return t.runner.Close() }
 // Deploy clones the repo on the target, builds the image there, brings it up
 // with Compose and health-checks it. Returns the image tag.
 func (t *dockerTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) (string, error) {
-	tag := imageTag(job.project.ID, job.commit)
+	tag := imageTag(job.project.ID, deployRevision(job.project, job.commit))
 	workdir := path.Join(t.cfg.Deploy.WorkDir, job.project.ID)
 	logf("docker pipeline: build %s", tag)
 
@@ -68,12 +68,13 @@ func (t *dockerTarget) cloneAndBuild(ctx context.Context, job deployJob, workdir
 	if job.project.RepoURL == "" {
 		return fmt.Errorf("project %s has no repo_url", job.project.ID)
 	}
+	rev := deployRevision(job.project, job.commit)
 	clone := fmt.Sprintf(
 		"mkdir -p %s && if [ -d %s/.git ]; then cd %s && git fetch --all --prune && git checkout --force %s; "+
 			"else git clone %s %s && cd %s && git checkout --force %s; fi",
-		shellQuote(workdir), shellQuote(workdir), shellQuote(workdir), shellQuote(job.commit),
-		shellQuote(job.project.RepoURL), shellQuote(workdir), shellQuote(workdir), shellQuote(job.commit))
-	if out, err := execCmd(ctx, t.runner, clone, "git clone/fetch + checkout "+shortSHA(job.commit), logf); err != nil {
+		shellQuote(workdir), shellQuote(workdir), shellQuote(workdir), shellQuote(rev),
+		shellQuote(job.project.RepoURL), shellQuote(workdir), shellQuote(workdir), shellQuote(rev))
+	if out, err := execCmd(ctx, t.runner, clone, "git clone/fetch + checkout "+shortSHA(rev), logf); err != nil {
 		return fmt.Errorf("clone/checkout: %w\n%s", err, out)
 	}
 
@@ -96,7 +97,11 @@ func (t *dockerTarget) composeUp(ctx context.Context, job deployJob, workdir, ta
 	content := composeFile(job.project, tag)
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
 	write := fmt.Sprintf("echo %s | base64 -d > %s", encoded, shellQuote(path.Join(workdir, "docker-compose.yml")))
-	if out, err := execCmd(ctx, t.runner, write, "write docker-compose.yml", logf); err != nil {
+	// The generated file embeds project env values, so mark only this command
+	// sensitive: the audit log records a label, never the payload. Use a child
+	// context so the redaction does not leak to the commands that follow.
+	writeCtx := withAuditRedaction(ctx, "write docker-compose.yml (contents redacted)")
+	if out, err := execCmd(writeCtx, t.runner, write, "write docker-compose.yml", logf); err != nil {
 		return fmt.Errorf("write compose file: %w\n%s", err, out)
 	}
 
@@ -147,6 +152,6 @@ func composeFile(project config.Project, imageTag string) string {
 	return b.String()
 }
 
-func imageTag(projectID, commit string) string {
-	return fmt.Sprintf("cc/%s:%s", sanitize(projectID), shortSHA(commit))
+func imageTag(projectID, revision string) string {
+	return fmt.Sprintf("cc/%s:%s", sanitize(projectID), sanitize(shortSHA(revision)))
 }

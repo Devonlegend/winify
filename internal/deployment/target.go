@@ -37,8 +37,9 @@ type SSHDialer func(ctx context.Context, srv config.Server, privateKeyPEM string
 
 // NewTargetFactory returns the production factory that selects the pipeline by
 // the target server's Type. This is the single branch point between Docker and
-// IIS; everything downstream of a Target is target-specific by design.
-func NewTargetFactory(cfg config.Config, sshDial SSHDialer) TargetFactory {
+// IIS; everything downstream of a Target is target-specific by design. The
+// audit recorder wraps the connection so every remote command is logged.
+func NewTargetFactory(cfg config.Config, sshDial SSHDialer, audit AuditRecorder) TargetFactory {
 	return func(ctx context.Context, job deployJob, secrets SecretResolver) (Target, error) {
 		switch job.server.Type {
 		case config.ServerTypeIIS:
@@ -50,7 +51,7 @@ func NewTargetFactory(cfg config.Config, sshDial SSHDialer) TargetFactory {
 			if err != nil {
 				return nil, fmt.Errorf("connect to %s: %w", job.server.WinRMEndpoint, err)
 			}
-			return NewIISTarget(cfg, runner), nil
+			return NewIISTarget(cfg, WithAuditRecorder(runner, audit)), nil
 		default:
 			key, err := ResolveRef(ctx, secrets, job.server.SSHKeyRef)
 			if err != nil {
@@ -60,7 +61,7 @@ func NewTargetFactory(cfg config.Config, sshDial SSHDialer) TargetFactory {
 			if err != nil {
 				return nil, fmt.Errorf("connect to %s: %w", job.server.SSHHost, err)
 			}
-			return NewDockerTarget(cfg, runner), nil
+			return NewDockerTarget(cfg, WithAuditRecorder(runner, audit)), nil
 		}
 	}
 }
@@ -140,6 +141,18 @@ func shortSHA(sha string) string {
 		return sha[:7]
 	}
 	return sha
+}
+
+// deployRevision is the git revision to check out and tag: the pushed commit
+// when there is one, otherwise the configured branch (manual deploys).
+func deployRevision(project config.Project, commit string) string {
+	if commit != "" {
+		return commit
+	}
+	if project.Branch != "" {
+		return project.Branch
+	}
+	return "main"
 }
 
 // sanitize makes a string safe for a Docker image path component.

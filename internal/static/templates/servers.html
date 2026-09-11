@@ -1,0 +1,78 @@
+{{define "title"}}Servers &middot; Control Center{{end}}
+{{define "body"}}
+<main>
+  <h1>Servers</h1>
+  <p class="muted">Deployment targets. Credentials are referenced by name and stored encrypted.</p>
+
+  {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+
+  {{if .Servers}}
+  <table class="deploys">
+    <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Endpoint</th><th></th></tr></thead>
+    <tbody>
+      {{range .Servers}}
+      <tr>
+        <td class="mono">{{.ID}}</td>
+        <td>{{.Name}}</td>
+        <td><span class="badge badge-{{.Type}}">{{.Type}}</span></td>
+        <td class="mono">{{if .SSHHost}}{{.SSHHost}}{{else}}{{.WinRMEndpoint}}{{end}}</td>
+        <td class="row-actions">
+          <a href="/servers?edit={{.ID}}">Edit</a>
+          <form method="post" action="/servers/delete" onsubmit="return confirm('Delete server {{.ID}}?');">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button type="submit" class="link danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+    <div class="placeholder">No servers yet. Add one below.</div>
+  {{end}}
+
+  <h2 class="form-title">{{if .Edit}}Edit server{{else}}Add server{{end}}</h2>
+  <form method="post" action="/servers" class="admin-form">
+    <label>ID<input name="id" value="{{if .Edit}}{{.Edit.ID}}{{end}}" required {{if .Edit}}readonly{{end}}></label>
+    <label>Name<input name="name" value="{{if .Edit}}{{.Edit.Name}}{{end}}" required></label>
+    <label>Type
+      <select name="type" required>
+        <option value="docker" {{if .Edit}}{{if eq .Edit.Type "docker"}}selected{{end}}{{end}}>docker</option>
+        <option value="iis" {{if .Edit}}{{if eq .Edit.Type "iis"}}selected{{end}}{{end}}>iis</option>
+      </select>
+    </label>
+    <label>Host (proxy upstream, optional)<input name="host" value="{{if .Edit}}{{.Edit.Host}}{{end}}"></label>
+
+    <fieldset>
+      <legend>Docker / SSH</legend>
+      <label>SSH host<input name="ssh_host" value="{{if .Edit}}{{.Edit.SSHHost}}{{end}}"></label>
+      <label>SSH port<input name="ssh_port" value="{{if .Edit}}{{.Edit.SSHPort}}{{end}}" placeholder="22"></label>
+      <label>SSH user<input name="ssh_user" value="{{if .Edit}}{{.Edit.SSHUser}}{{end}}"></label>
+      <label>SSH key ref<input name="ssh_key_ref" value="{{if .Edit}}{{.Edit.SSHKeyRef}}{{end}}" placeholder="vault:server-002-ssh"></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Windows / WinRM</legend>
+      <label>WinRM endpoint<input name="winrm_endpoint" value="{{if .Edit}}{{.Edit.WinRMEndpoint}}{{end}}" placeholder="https://host:5986/wsman"></label>
+      <label>WinRM user<input name="winrm_user" value="{{if .Edit}}{{.Edit.WinRMUser}}{{end}}"></label>
+      <label>WinRM transport
+        <select name="winrm_transport">
+          <option value="ntlm" {{if .Edit}}{{if eq .Edit.WinRMTransport "ntlm"}}selected{{end}}{{end}}>ntlm</option>
+          <option value="basic" {{if .Edit}}{{if eq .Edit.WinRMTransport "basic"}}selected{{end}}{{end}}>basic</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" name="winrm_insecure" {{if .Edit}}{{if .Edit.WinRMInsecure}}checked{{end}}{{end}}> Skip TLS verification</label>
+      <label>WinRM credential ref<input name="credential_ref" value="{{if .Edit}}{{.Edit.CredentialRef}}{{end}}" placeholder="vault:server-001-winrm"></label>
+    </fieldset>
+
+    <label>Services (comma-separated)<input name="services" value="{{if .Edit}}{{range $i, $s := .Edit.Services}}{{if $i}}, {{end}}{{$s}}{{end}}{{end}}" placeholder="docker, nginx"></label>
+    <label>Disk path<input name="disk_path" value="{{if .Edit}}{{.Edit.DiskPath}}{{end}}" placeholder="/ or C:"></label>
+
+    <div class="form-actions">
+      <button type="submit">Save server</button>
+      {{if .Edit}}<a class="link" href="/servers">Cancel</a>{{end}}
+    </div>
+  </form>
+</main>
+{{end}}

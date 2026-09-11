@@ -24,12 +24,17 @@ type Deployer struct {
 	secrets   SecretResolver
 	proxy     proxy.Registrar
 	newTarget TargetFactory
+	timeout   time.Duration
 	inFlight  sync.Map // projectID -> struct{}
 }
 
 // NewDeployer wires the pipeline dependencies.
 func NewDeployer(cfg config.Config, store *models.Store, secrets SecretResolver, reg proxy.Registrar, newTarget TargetFactory) *Deployer {
-	return &Deployer{cfg: cfg, store: store, secrets: secrets, proxy: reg, newTarget: newTarget}
+	timeout := time.Duration(cfg.Deploy.TimeoutMinutes) * time.Minute
+	if timeout <= 0 {
+		timeout = 30 * time.Minute
+	}
+	return &Deployer{cfg: cfg, store: store, secrets: secrets, proxy: reg, newTarget: newTarget, timeout: timeout}
 }
 
 // deployJob is one unit of work handed to a Target.
@@ -65,7 +70,9 @@ func (d *Deployer) Trigger(ctx context.Context, project config.Project, srv conf
 	}
 	go func() {
 		defer d.inFlight.Delete(project.ID)
-		d.run(context.Background(), deployJob{
+		runCtx, cancel := context.WithTimeout(context.Background(), d.timeout)
+		defer cancel()
+		d.run(runCtx, deployJob{
 			id: id, project: project, server: srv, trigger: trigger, commit: commit, ref: ref,
 		})
 	}()
@@ -102,7 +109,9 @@ func (d *Deployer) Rollback(ctx context.Context, project config.Project, srv con
 	}
 	go func() {
 		defer d.inFlight.Delete(project.ID)
-		d.run(context.Background(), deployJob{
+		runCtx, cancel := context.WithTimeout(context.Background(), d.timeout)
+		defer cancel()
+		d.run(runCtx, deployJob{
 			id: id, project: project, server: srv, trigger: "rollback", artifact: artifact, rollback: true,
 		})
 	}()
@@ -122,22 +131,25 @@ func (d *Deployer) previousSuccessful(ctx context.Context, projectID string) (mo
 }
 
 // run executes the pipeline for one job and records status + logs throughout.
+// Remote commands use ctx (which may carry a deadline); history writes use a
+// cancellation-proof context so a timed-out deploy is still finalized.
 func (d *Deployer) run(ctx context.Context, job deployJob) {
+	dbCtx := context.WithoutCancel(ctx)
 	logf := func(format string, args ...any) {
 		line := fmt.Sprintf(format, args...)
-		if err := d.store.AppendDeploymentLog(ctx, job.id, line+"\n"); err != nil {
+		if err := d.store.AppendDeploymentLog(dbCtx, job.id, line+"\n"); err != nil {
 			log.Printf("deploy %d: append log: %v", job.id, err)
 		}
 	}
 	fail := func(err error) {
 		logf("ERROR: %v", err)
-		if ferr := d.store.FinishDeployment(ctx, job.id, models.DeployFailed, err.Error(), time.Now()); ferr != nil {
+		if ferr := d.store.FinishDeployment(dbCtx, job.id, models.DeployFailed, err.Error(), time.Now()); ferr != nil {
 			log.Printf("deploy %d: finish: %v", job.id, ferr)
 		}
 		log.Printf("deploy %d (%s) failed: %v", job.id, job.project.ID, err)
 	}
 
-	if err := d.store.SetDeploymentStatus(ctx, job.id, models.DeployRunning, job.artifact); err != nil {
+	if err := d.store.SetDeploymentStatus(dbCtx, job.id, models.DeployRunning, job.artifact); err != nil {
 		log.Printf("deploy %d: set running: %v", job.id, err)
 		return
 	}
@@ -147,6 +159,15 @@ func (d *Deployer) run(ctx context.Context, job deployJob) {
 	}
 	logf("%s %d started: project=%s target=%s trigger=%s commit=%s",
 		verb, job.id, job.project.ID, job.server.Type, job.trigger, shortSHA(job.commit))
+
+	// Tag every remote command run by this job so the audit log can attribute
+	// it to a server, action and deployment.
+	ctx = WithAudit(ctx, AuditMeta{
+		ServerID:     job.server.ID,
+		ServerType:   job.server.Type,
+		Action:       verb,
+		DeploymentID: job.id,
+	})
 
 	target, err := d.newTarget(ctx, job, d.secrets)
 	if err != nil {
@@ -167,7 +188,7 @@ func (d *Deployer) run(ctx context.Context, job deployJob) {
 	}
 	if artifact != "" {
 		job.artifact = artifact
-		if err := d.store.SetDeploymentStatus(ctx, job.id, models.DeployRunning, artifact); err != nil {
+		if err := d.store.SetDeploymentStatus(dbCtx, job.id, models.DeployRunning, artifact); err != nil {
 			log.Printf("deploy %d: set artifact: %v", job.id, err)
 		}
 	}
@@ -178,7 +199,7 @@ func (d *Deployer) run(ctx context.Context, job deployJob) {
 	}
 
 	logf("%s %d succeeded: artifact=%s", verb, job.id, job.artifact)
-	if err := d.store.FinishDeployment(ctx, job.id, models.DeploySuccess, "", time.Now()); err != nil {
+	if err := d.store.FinishDeployment(dbCtx, job.id, models.DeploySuccess, "", time.Now()); err != nil {
 		log.Printf("deploy %d: finish: %v", job.id, err)
 	}
 	log.Printf("%s %d (%s) succeeded", verb, job.id, job.project.ID)

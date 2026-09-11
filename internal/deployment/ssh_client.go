@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -63,6 +64,26 @@ func DialSSH(ctx context.Context, host string, port int, user, privateKeyPEM, kn
 	return &SSHRunner{client: ssh.NewClient(clientConn, chans, reqs)}, nil
 }
 
+// syncBuffer is a mutex-protected buffer. x/crypto/ssh copies stdout and stderr
+// concurrently, so a plain bytes.Buffer shared by both would be a data race and
+// can silently drop output.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
 // Run executes command through the target's login shell and returns combined
 // output. It honors ctx cancellation by closing the session.
 func (r *SSHRunner) Run(ctx context.Context, command string) (string, error) {
@@ -72,7 +93,7 @@ func (r *SSHRunner) Run(ctx context.Context, command string) (string, error) {
 	}
 	defer session.Close()
 
-	var buf bytes.Buffer
+	var buf syncBuffer
 	session.Stdout = &buf
 	session.Stderr = &buf
 

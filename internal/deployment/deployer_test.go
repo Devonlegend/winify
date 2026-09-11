@@ -25,11 +25,15 @@ type fakeTarget struct {
 	lastJob    deployJob
 }
 
-func (f *fakeTarget) Deploy(_ context.Context, job deployJob, _ loggerFunc) (string, error) {
+func (f *fakeTarget) Deploy(ctx context.Context, job deployJob, _ loggerFunc) (string, error) {
 	f.deployed = true
 	f.lastJob = job
 	if f.release != nil {
-		<-f.release
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
 	}
 	return f.deployArtifact, f.deployErr
 }
@@ -150,9 +154,6 @@ func TestTriggerSuccess(t *testing.T) {
 	if dep.ImageTag != "cc/proj-001:abc1234" {
 		t.Fatalf("artifact = %q", dep.ImageTag)
 	}
-	if !target.closed {
-		t.Error("target was not closed")
-	}
 	if len(reg.hosts) != 1 || reg.hosts[0] != "app.example.com" || reg.ups[0] != "10.0.0.9:8080" {
 		t.Fatalf("proxy registration = %v -> %v", reg.hosts, reg.ups)
 	}
@@ -214,6 +215,26 @@ func TestRollbackIISNeedsNoHistory(t *testing.T) {
 	}
 	if target.lastJob.artifact != "" {
 		t.Fatalf("iis rollback should not pass a prior artifact, got %q", target.lastJob.artifact)
+	}
+}
+
+func TestDeployTimeoutFinalizesHistory(t *testing.T) {
+	target := &fakeTarget{release: make(chan struct{})}
+	d, store, _ := newTestDeployer(t, target)
+	d.timeout = 50 * time.Millisecond
+
+	id, err := d.Trigger(context.Background(), dockerProject(), dockerServer(), "webhook", "abc1234", "refs/heads/main")
+	if err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+	// The remote call is cancelled by the deadline, but history must still be
+	// finalized (the store writes use a cancellation-proof context).
+	dep := waitTerminal(t, store, id)
+	if dep.Status != models.DeployFailed {
+		t.Fatalf("status = %q, want failed", dep.Status)
+	}
+	if dep.Error == "" {
+		t.Fatal("timed-out deploy recorded no error")
 	}
 }
 

@@ -70,10 +70,14 @@
     input.disabled = true;
     send.disabled = true;
 
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, 90000);
+
     fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: question })
+      body: JSON.stringify({ question: question }),
+      signal: controller.signal
     })
       .then(function (response) {
         return response.json()
@@ -89,11 +93,14 @@
         bot.className = 'bubble';
         renderAnswer(bot, result.data);
       })
-      .catch(function () {
+      .catch(function (err) {
         bot.className = 'bubble bubble-error';
-        bot.textContent = 'Could not reach the assistant.';
+        bot.textContent = (err && err.name === 'AbortError')
+          ? 'The assistant took too long to respond.'
+          : 'Could not reach the assistant.';
       })
       .then(function () {
+        clearTimeout(timer);
         input.disabled = false;
         send.disabled = false;
         input.focus();

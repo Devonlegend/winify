@@ -20,6 +20,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -73,7 +74,7 @@ func runServe(args []string) {
 	}
 
 	seedAdmin(ctx, store, cfg)
-	syncInventory(ctx, store, cfg)
+	seedInventory(ctx, store, cfg)
 
 	key, err := auth.LoadMasterKey(cfg.Credentials.MasterKey, masterKeyPath(cfg))
 	if err != nil {
@@ -94,11 +95,39 @@ func runServe(args []string) {
 	sshDial := func(ctx context.Context, srv config.Server, key string) (deployment.Runner, error) {
 		return deployment.DialSSH(ctx, srv.SSHHost, srv.SSHPort, srv.SSHUser, key, cfg.Deploy.KnownHostsFile)
 	}
-	targetFactory := deployment.NewTargetFactory(cfg, sshDial)
+
+	// Audit every remote command (deploy, rollback, monitor): target, action,
+	// timestamp and deployment. Commands never contain credentials; sensitive
+	// payloads are redacted by the caller before they reach here.
+	auditRecorder := func(ctx context.Context, meta deployment.AuditMeta, command string, runErr error) {
+		rc := models.RemoteCommand{
+			ServerID:     meta.ServerID,
+			ServerType:   meta.ServerType,
+			Action:       meta.Action,
+			DeploymentID: meta.DeploymentID,
+			Command:      command,
+			ExecutedAt:   time.Now(),
+		}
+		if runErr != nil {
+			rc.Error = runErr.Error()
+		}
+		shown := command
+		if len(shown) > 200 {
+			shown = shown[:200] + "..."
+		}
+		log.Printf("audit: server=%s type=%s action=%s deploy=%d command=%q error=%v",
+			meta.ServerID, meta.ServerType, meta.Action, meta.DeploymentID, shown, runErr)
+		// Persist even if the command's context was cancelled.
+		if err := store.InsertRemoteCommand(context.WithoutCancel(ctx), rc); err != nil {
+			log.Printf("audit: persist: %v", err)
+		}
+	}
+
+	targetFactory := deployment.NewTargetFactory(cfg, sshDial, auditRecorder)
 	deployer := deployment.NewDeployer(cfg, store, credStore, registrar, targetFactory)
 
 	// Metrics reuse the same SSH/WinRM connection code as deploys (no agent).
-	collector := monitoring.NewCollector(monitoring.NewRunnerFactory(cfg, credStore))
+	collector := monitoring.NewCollector(monitoring.NewRunnerFactory(cfg, credStore, auditRecorder))
 	scheduler := monitoring.NewScheduler(cfg, store, collector)
 	if cfg.Monitoring.Enabled {
 		scheduler.Start()
@@ -115,12 +144,13 @@ func runServe(args []string) {
 	}
 
 	srv, err := server.New(server.Deps{
-		Cfg:       cfg,
-		Store:     store,
-		Auth:      authSvc,
-		Secrets:   credStore,
-		Deployer:  deployer,
-		Assistant: assistantSvc,
+		Cfg:             cfg,
+		Store:           store,
+		Auth:            authSvc,
+		Secrets:         credStore,
+		Deployer:        deployer,
+		Assistant:       assistantSvc,
+		CredentialAdmin: credStore,
 	})
 	if err != nil {
 		log.Fatalf("server: %v", err)
@@ -175,30 +205,49 @@ func seedAdmin(ctx context.Context, store *models.Store, cfg config.Config) {
 	}
 }
 
-// syncInventory mirrors servers.yaml / projects.yaml into the database. Missing
-// files are treated as empty inventories.
-func syncInventory(ctx context.Context, store *models.Store, cfg config.Config) {
-	servers, err := config.LoadServers(cfg.Files.Servers)
-	if err != nil {
-		log.Fatalf("servers config: %v", err)
-	}
-	for _, s := range servers {
-		if err := store.UpsertServer(ctx, s); err != nil {
-			log.Fatalf("sync server: %v", err)
+// seedInventory imports servers.yaml / projects.yaml into an empty database.
+// After the first run the database is the source of truth and the dashboard
+// manages the inventory, so the files are not re-imported.
+func seedInventory(ctx context.Context, store *models.Store, cfg config.Config) {
+	if n, err := store.CountServers(ctx); err != nil {
+		log.Fatalf("count servers: %v", err)
+	} else if n == 0 {
+		servers, err := config.LoadServers(cfg.Files.Servers)
+		if err != nil {
+			log.Fatalf("servers config: %v", err)
 		}
+		for _, srv := range servers {
+			if err := store.UpsertServer(ctx, srv); err != nil {
+				log.Fatalf("seed server: %v", err)
+			}
+		}
+		log.Printf("seeded %d servers from %s", len(servers), cfg.Files.Servers)
+	} else {
+		log.Printf("servers table has %d rows; skipping YAML seed", n)
 	}
 
-	projects, err := config.LoadProjects(cfg.Files.Projects)
-	if err != nil {
-		log.Fatalf("projects config: %v", err)
-	}
-	for _, p := range projects {
-		if err := store.UpsertProject(ctx, p); err != nil {
-			log.Fatalf("sync project: %v", err)
+	if n, err := store.CountProjects(ctx); err != nil {
+		log.Fatalf("count projects: %v", err)
+	} else if n == 0 {
+		projects, err := config.LoadProjects(cfg.Files.Projects)
+		if err != nil {
+			log.Fatalf("projects config: %v", err)
 		}
+		for _, p := range projects {
+			if err := store.UpsertProject(ctx, p); err != nil {
+				log.Fatalf("seed project: %v", err)
+			}
+			// A repo URL with embedded credentials would end up in the clone
+			// command and therefore in deploy logs and the audit log. Warn
+			// without echoing the URL. Use target-side deploy keys instead.
+			if u, err := url.Parse(p.RepoURL); err == nil && u.User != nil {
+				log.Printf("WARNING: project %s repo_url embeds credentials; use target-side deploy keys instead", p.ID)
+			}
+		}
+		log.Printf("seeded %d projects from %s", len(projects), cfg.Files.Projects)
+	} else {
+		log.Printf("projects table has %d rows; skipping YAML seed", n)
 	}
-
-	log.Printf("inventory synced: %d servers, %d projects", len(servers), len(projects))
 }
 
 // buildAssistant loads the curated docs, picks a vector store (ChromaDB with an
@@ -373,9 +422,18 @@ func masterKeyPath(cfg config.Config) string {
 	return filepath.Join(filepath.Dir(cfg.Database.Path), "master.key")
 }
 
-// readSecret reads one line from stdin. It does not disable terminal echo, so
-// prompts say so explicitly.
+// readSecret reads a secret from stdin. When stdin is piped or redirected it
+// reads the whole stream, so multi-line secrets such as SSH private keys work
+// with `control-center cred add name < key`. Interactively it reads one line.
 func readSecret(prompt string) (string, error) {
+	if info, err := os.Stdin.Stat(); err == nil && info.Mode()&os.ModeCharDevice == 0 {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimRight(string(data), "\r\n"), nil
+	}
+
 	fmt.Fprint(os.Stderr, prompt)
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {

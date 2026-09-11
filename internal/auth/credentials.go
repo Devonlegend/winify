@@ -68,6 +68,13 @@ func (c *CredentialStore) Get(ctx context.Context, name string) (string, error) 
 	return string(plaintext), nil
 }
 
+// Delete removes a stored credential. Removing a credential that is still
+// referenced by a server or project will break that connection; callers should
+// warn the operator.
+func (c *CredentialStore) Delete(ctx context.Context, name string) error {
+	return c.store.DeleteCredential(ctx, name)
+}
+
 // LoadMasterKey resolves the AES master key. Precedence:
 //  1. explicit base64 key (CC_MASTER_KEY env or config)
 //  2. an existing key file at path

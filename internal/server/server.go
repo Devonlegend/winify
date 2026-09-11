@@ -26,7 +26,7 @@ import (
 )
 
 // pageTemplates are the page files parsed alongside layout.html.
-var pageTemplates = []string{"login", "dashboard", "deployment", "monitoring", "assistant"}
+var pageTemplates = []string{"login", "dashboard", "deployment", "monitoring", "assistant", "servers", "projects", "credentials"}
 
 // Deployer is the subset of *deployment.Deployer the HTTP layer uses, so tests
 // can substitute a fake.
@@ -40,26 +40,35 @@ type Assistant interface {
 	Ask(ctx context.Context, question string) (assistant.Answer, error)
 }
 
+// CredentialAdmin manages encrypted credentials from the dashboard. Values are
+// write-only: they are never read back into a response.
+type CredentialAdmin interface {
+	Put(ctx context.Context, name, secret string) error
+	Delete(ctx context.Context, name string) error
+}
+
 // Deps are the server's dependencies.
 type Deps struct {
-	Cfg       config.Config
-	Store     *models.Store
-	Auth      *auth.Service
-	Secrets   deployment.SecretResolver
-	Deployer  Deployer
-	Assistant Assistant
+	Cfg             config.Config
+	Store           *models.Store
+	Auth            *auth.Service
+	Secrets         deployment.SecretResolver
+	Deployer        Deployer
+	Assistant       Assistant
+	CredentialAdmin CredentialAdmin
 }
 
 // Server holds the dependencies shared by every handler.
 type Server struct {
-	cfg       config.Config
-	store     *models.Store
-	auth      *auth.Service
-	secrets   deployment.SecretResolver
-	deployer  Deployer
-	assistant Assistant
-	pages     map[string]*template.Template
-	assets    fs.FS
+	cfg         config.Config
+	store       *models.Store
+	auth        *auth.Service
+	secrets     deployment.SecretResolver
+	deployer    Deployer
+	assistant   Assistant
+	credentials CredentialAdmin
+	pages       map[string]*template.Template
+	assets      fs.FS
 }
 
 // New parses the templates and prepares the asset FS. Each page is parsed as
@@ -83,14 +92,15 @@ func New(deps Deps) (*Server, error) {
 	}
 
 	return &Server{
-		cfg:       deps.Cfg,
-		store:     deps.Store,
-		auth:      deps.Auth,
-		secrets:   deps.Secrets,
-		deployer:  deps.Deployer,
-		assistant: deps.Assistant,
-		pages:     pages,
-		assets:    sub,
+		cfg:         deps.Cfg,
+		store:       deps.Store,
+		auth:        deps.Auth,
+		secrets:     deps.Secrets,
+		deployer:    deps.Deployer,
+		assistant:   deps.Assistant,
+		credentials: deps.CredentialAdmin,
+		pages:       pages,
+		assets:      sub,
 	}, nil
 }
 
@@ -122,12 +132,25 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/monitoring", s.handleMonitoring)
 		r.Get("/assistant", s.handleAssistant)
 		r.Post("/assistant/ask", s.handleAssistantAsk)
+
+		r.Get("/servers", s.handleServersPage)
+		r.Post("/servers", s.handleServerSave)
+		r.Post("/servers/delete", s.handleServerDelete)
+		r.Get("/projects", s.handleProjectsPage)
+		r.Post("/projects", s.handleProjectSave)
+		r.Post("/projects/delete", s.handleProjectDelete)
+		r.Post("/projects/deploy/{projectID}", s.handleManualDeploy)
+		r.Get("/credentials", s.handleCredentialsPage)
+		r.Post("/credentials", s.handleCredentialSave)
+		r.Post("/credentials/delete", s.handleCredentialDelete)
+
 		r.Post("/logout", s.handleLogout)
 
 		r.Get("/api/projects/{projectID}/deployments", s.handleAPIDeployments)
 		r.Get("/api/deployments/{id}", s.handleAPIDeployment)
 		r.Get("/api/metrics", s.handleAPIMetrics)
 		r.Get("/api/servers/{id}/metrics", s.handleAPIServerMetrics)
+		r.Get("/api/audit", s.handleAPIAudit)
 	})
 
 	return r

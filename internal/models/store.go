@@ -622,3 +622,109 @@ func percent(used, total uint64) float64 {
 	}
 	return float64(used) / float64(total) * 100
 }
+
+// RemoteCommand is one audited remote command execution. Command never contains
+// a credential (authentication is out of band) and sensitive payloads such as a
+// generated compose file are recorded as a redacted label.
+type RemoteCommand struct {
+	ID           int64     `json:"id"`
+	ServerID     string    `json:"server_id"`
+	ServerType   string    `json:"server_type"`
+	Action       string    `json:"action"` // deploy | rollback | monitor
+	DeploymentID int64     `json:"deployment_id"`
+	Command      string    `json:"command"`
+	Error        string    `json:"error,omitempty"`
+	ExecutedAt   time.Time `json:"executed_at"`
+}
+
+const remoteCommandColumns = `id, server_id, server_type, action, deployment_id, command, error, executed_at`
+
+// InsertRemoteCommand appends one audit record.
+func (s *Store) InsertRemoteCommand(ctx context.Context, rc RemoteCommand) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO remote_commands (server_id, server_type, action, deployment_id, command, error, executed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		rc.ServerID, rc.ServerType, rc.Action, rc.DeploymentID, rc.Command, rc.Error, rc.ExecutedAt.Unix())
+	if err != nil {
+		return fmt.Errorf("insert remote command: %w", err)
+	}
+	return nil
+}
+
+// ListRemoteCommands returns the most recent audited commands, newest first.
+func (s *Store) ListRemoteCommands(ctx context.Context, limit int) ([]RemoteCommand, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+remoteCommandColumns+` FROM remote_commands ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list remote commands: %w", err)
+	}
+	defer rows.Close()
+
+	var out []RemoteCommand
+	for rows.Next() {
+		var (
+			rc       RemoteCommand
+			executed int64
+		)
+		if err := rows.Scan(&rc.ID, &rc.ServerID, &rc.ServerType, &rc.Action, &rc.DeploymentID,
+			&rc.Command, &rc.Error, &executed); err != nil {
+			return nil, fmt.Errorf("scan remote command: %w", err)
+		}
+		rc.ExecutedAt = time.Unix(executed, 0)
+		out = append(out, rc)
+	}
+	return out, rows.Err()
+}
+
+// CountServers returns how many servers exist (used to seed from YAML only on a
+// fresh install).
+func (s *Store) CountServers(ctx context.Context) (int, error) {
+	return s.count(ctx, `SELECT COUNT(*) FROM servers`)
+}
+
+// CountProjects returns how many projects exist.
+func (s *Store) CountProjects(ctx context.Context) (int, error) {
+	return s.count(ctx, `SELECT COUNT(*) FROM projects`)
+}
+
+// CountProjectsByServer counts projects bound to a server, so a server with
+// dependents is not deleted by accident.
+func (s *Store) CountProjectsByServer(ctx context.Context, serverID string) (int, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE server_id = ?`, serverID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count projects for %q: %w", serverID, err)
+	}
+	return n, nil
+}
+
+func (s *Store) count(ctx context.Context, query string) (int, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx, query).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count: %w", err)
+	}
+	return n, nil
+}
+
+// DeleteServer removes a target. Callers should check for dependent projects.
+func (s *Store) DeleteServer(ctx context.Context, id string) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM servers WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete server %q: %w", id, err)
+	}
+	return nil
+}
+
+// DeleteProject removes a project.
+func (s *Store) DeleteProject(ctx context.Context, id string) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete project %q: %w", id, err)
+	}
+	return nil
+}
+
+// DeleteCredential removes an encrypted credential by name.
+func (s *Store) DeleteCredential(ctx context.Context, name string) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM credentials WHERE name = ?`, name); err != nil {
+		return fmt.Errorf("delete credential %q: %w", name, err)
+	}
+	return nil
+}

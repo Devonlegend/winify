@@ -134,6 +134,9 @@ type DeployConfig struct {
 	HealthTimeoutSeconds int `yaml:"health_timeout_seconds"`
 	// HealthIntervalSeconds is the delay between health-check attempts.
 	HealthIntervalSeconds int `yaml:"health_interval_seconds"`
+	// TimeoutMinutes bounds a whole deploy/rollback so a hung remote command
+	// cannot leave a deployment stuck in "running" forever.
+	TimeoutMinutes int `yaml:"timeout_minutes"`
 }
 
 // Default returns the built-in configuration used when a field is not set
@@ -159,6 +162,7 @@ func Default() Config {
 			IISBackupDir:          `C:\control-center\backups`,
 			HealthTimeoutSeconds:  60,
 			HealthIntervalSeconds: 3,
+			TimeoutMinutes:        30,
 		},
 		Monitoring: MonitoringConfig{
 			Enabled:         true,
@@ -254,6 +258,13 @@ func (cfg *Config) applyEnv() error {
 	}
 	if v := os.Getenv("CC_DEPLOY_KNOWN_HOSTS"); v != "" {
 		cfg.Deploy.KnownHostsFile = v
+	}
+	if v := os.Getenv("CC_DEPLOY_TIMEOUT_MINUTES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("CC_DEPLOY_TIMEOUT_MINUTES: %w", err)
+		}
+		cfg.Deploy.TimeoutMinutes = n
 	}
 	if v := os.Getenv("CC_MONITOR_ENABLED"); v != "" {
 		b, err := strconv.ParseBool(v)

@@ -591,3 +591,132 @@ button.secondary:hover {
   opacity: 0.5;
   cursor: default;
 }
+
+/* Admin forms (servers / projects / credentials) */
+.notice {
+  background: #052e1b;
+  border: 1px solid #14532d;
+  color: #bbf7d0;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.9rem;
+}
+
+.form-title {
+  font-size: 1.1rem;
+  margin: 2.5rem 0 0.75rem;
+}
+
+.admin-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.9rem 1rem;
+  align-items: end;
+  margin-top: 0.5rem;
+}
+
+.admin-form label {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.admin-form input,
+.admin-form select,
+.admin-form textarea {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.admin-form input:focus,
+.admin-form select:focus,
+.admin-form textarea:focus {
+  outline: 2px solid #38bdf8;
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+.admin-form input[readonly] {
+  opacity: 0.6;
+}
+
+.admin-form fieldset {
+  grid-column: 1 / -1;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  padding: 0.75rem 1rem 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem 1rem;
+}
+
+.admin-form legend {
+  color: #64748b;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0 0.4rem;
+}
+
+.admin-form label.check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-form .form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.admin-form button[type="submit"] {
+  background: #38bdf8;
+  color: #082f49;
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 1.1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admin-form button[type="submit"]:hover {
+  background: #7dd3fc;
+}
+
+.admin-form label:has(textarea) {
+  grid-column: 1 / -1;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  white-space: nowrap;
+}
+
+.row-actions form {
+  display: inline;
+}
+
+.row-actions a {
+  color: #38bdf8;
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.row-actions a:hover {
+  text-decoration: underline;
+}
+
+.danger {
+  color: #f87171;
+}

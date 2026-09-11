@@ -44,6 +44,8 @@ deploy:
   known_hosts_file: ""
   health_timeout_seconds: 60
   health_interval_seconds: 3
+  # Bound a whole deploy so a hung remote command cannot leave it "running".
+  timeout_minutes: 30
 
 monitoring:
   # Poll each registered server over its existing SSH/WinRM connection.

@@ -10,10 +10,16 @@ import (
 // scriptFor returns the remote command that emits key=value metric lines in the
 // target's native shell. Both scripts print the same keys, so parsing is shared.
 func scriptFor(srv config.Server) string {
+	var script string
 	if srv.Type == config.ServerTypeIIS {
-		return windowsScript(srv)
+		script = windowsScript(srv)
+	} else {
+		script = linuxScript(srv)
 	}
-	return linuxScript(srv)
+	// A Windows checkout with core.autocrlf can turn LF into CRLF inside the
+	// multi-line raw string literals; strip CR so the remote shell never sees a
+	// stray \r (which would corrupt paths and awk programs).
+	return strings.ReplaceAll(script, "\r\n", "\n")
 }
 
 // linuxScript reads /proc and df — the same signals psutil exposes — using only

@@ -1,0 +1,52 @@
+# Self-contained config for local end-to-end testing with Docker.
+# Uses its own database under dev/data so it never touches your real data.
+server:
+  addr: ":8090"
+
+database:
+  path: "dev/data/control-center.db"
+
+auth:
+  admin_user: "admin"
+  # password: admin
+  admin_password_hash: "$2a$10$uEjFRv8IQV8MQAqLOIXPvejdRJ5Tr4NAQZgN.OZdoU2mOqigJIqFy"
+  cookie_secure: false
+  session_ttl_hours: 12
+
+credentials:
+  master_key: ""
+
+files:
+  servers: "dev/servers.yaml"
+  projects: "dev/projects.yaml"
+
+proxy:
+  # No public domain for the local demo; enable with real Caddy + DNS to test TLS.
+  enabled: false
+  admin_url: "http://127.0.0.1:2019"
+  server_name: "srv0"
+
+deploy:
+  work_dir: "/opt/control-center"
+  iis_work_dir: 'C:\control-center'
+  iis_backup_dir: 'C:\control-center\backups'
+  known_hosts_file: ""
+  health_timeout_seconds: 60
+  health_interval_seconds: 3
+  timeout_minutes: 15
+
+monitoring:
+  enabled: true
+  interval_seconds: 10
+  timeout_seconds: 8
+  retention_hours: 24
+  history_points: 200
+
+assistant:
+  enabled: true
+  chroma_url: "http://127.0.0.1:8000"
+  collection: "control-center-docs"
+  ollama_url: "http://127.0.0.1:11434"
+  model: "gemma3:1b"
+  timeout_seconds: 60
+  top_k: 3

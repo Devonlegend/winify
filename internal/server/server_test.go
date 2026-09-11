@@ -22,6 +22,8 @@ const testPassword = "correct horse"
 type stubSecrets struct{ value string }
 
 func (s stubSecrets) Get(context.Context, string) (string, error) { return s.value, nil }
+func (s stubSecrets) Put(context.Context, string, string) error   { return nil }
+func (s stubSecrets) Delete(context.Context, string) error        { return nil }
 
 // fakeDeployer records Trigger/Rollback calls and returns a fixed id.
 type fakeDeployer struct {
@@ -80,12 +82,13 @@ func newTestServerFull(t *testing.T) (*Server, *models.Store, *fakeDeployer) {
 
 	deployer := &fakeDeployer{}
 	srv, err := New(Deps{
-		Cfg:       config.Default(),
-		Store:     store,
-		Auth:      auth.NewService(store, false, time.Hour),
-		Secrets:   stubSecrets{value: "test-secret"},
-		Deployer:  deployer,
-		Assistant: &fakeAssistant{},
+		Cfg:             config.Default(),
+		Store:           store,
+		Auth:            auth.NewService(store, false, time.Hour),
+		Secrets:         stubSecrets{value: "test-secret"},
+		Deployer:        deployer,
+		Assistant:       &fakeAssistant{},
+		CredentialAdmin: stubSecrets{value: "test-secret"},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

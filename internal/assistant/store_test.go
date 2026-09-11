@@ -22,7 +22,7 @@ func TestLoadDocsCoversCuratedSources(t *testing.T) {
 		}
 		sources[d.Source] = true
 	}
-	for _, want := range []string{"user-guide.md", "iis-troubleshooting.md", "docker-troubleshooting.md", "faq.md"} {
+	for _, want := range []string{"setup-guide.md", "adding-project-server.md", "troubleshooting.md", "faq.md"} {
 		if !sources[want] {
 			t.Errorf("missing curated source %q", want)
 		}
