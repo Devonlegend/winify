@@ -274,7 +274,21 @@ type projectFormPageData struct {
 }
 
 func (s *Server) handleProjectNew(w http.ResponseWriter, r *http.Request) {
-	s.renderProjectForm(w, r, http.StatusOK, nil, r.URL.Query().Get("error"))
+	s.renderWizard(w, r, http.StatusOK, r.URL.Query().Get("error"))
+}
+
+// renderWizard renders the guided New Resource flow. Validation errors fall
+// back to the full form (renderProjectForm) so nothing stays hidden.
+func (s *Server) renderWizard(w http.ResponseWriter, r *http.Request, status int, errMsg string) {
+	servers, err := s.store.ListServers(r.Context())
+	if err != nil {
+		log.Printf("projects: servers: %v", err)
+		http.Error(w, "failed to load servers", http.StatusInternalServerError)
+		return
+	}
+	data := projectFormPageData{pageData: s.page(r), Servers: servers, Error: errMsg}
+	data.Active = "projects"
+	s.render(w, status, "project_wizard", data)
 }
 
 func (s *Server) renderProjectForm(w http.ResponseWriter, r *http.Request, status int, form *config.Project, errMsg string) {
@@ -426,6 +440,9 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.Strategy = srv.Type
+	if srv.Type == config.ServerTypeIIS {
+		p.Source = ""
+	}
 
 	if err := validateProject(p, srv); err != nil {
 		s.renderProjectForm(w, r, http.StatusBadRequest, &p, err.Error())

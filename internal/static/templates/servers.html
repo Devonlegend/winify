@@ -33,18 +33,18 @@
   {{end}}
 
   <h2 class="form-title">{{if .Edit}}Edit server{{else}}Add server{{end}}</h2>
-  <form method="post" action="/servers" class="admin-form">
+  <form method="post" action="/servers" class="admin-form" data-server-form>
     <label>ID<input name="id" value="{{if .Edit}}{{.Edit.ID}}{{end}}" required {{if .Edit}}readonly{{end}}></label>
     <label>Name<input name="name" value="{{if .Edit}}{{.Edit.Name}}{{end}}" required></label>
     <label>Type
-      <select name="type" required>
+      <select name="type" id="server-type" required>
         <option value="docker" {{if .Edit}}{{if eq .Edit.Type "docker"}}selected{{end}}{{end}}>docker</option>
         <option value="iis" {{if .Edit}}{{if eq .Edit.Type "iis"}}selected{{end}}{{end}}>iis</option>
       </select>
     </label>
     <label>Host (proxy upstream, optional)<input name="host" value="{{if .Edit}}{{.Edit.Host}}{{end}}"></label>
 
-    <fieldset>
+    <fieldset data-server-group="docker">
       <legend>Docker / SSH</legend>
       <label>SSH host<input name="ssh_host" value="{{if .Edit}}{{.Edit.SSHHost}}{{end}}"></label>
       <label>SSH port<input name="ssh_port" value="{{if .Edit}}{{.Edit.SSHPort}}{{end}}" placeholder="22"></label>
@@ -52,7 +52,7 @@
       <label>SSH key ref<input name="ssh_key_ref" value="{{if .Edit}}{{.Edit.SSHKeyRef}}{{end}}" placeholder="vault:server-002-ssh"></label>
     </fieldset>
 
-    <fieldset>
+    <fieldset data-server-group="iis">
       <legend>Windows / WinRM</legend>
       <label>WinRM endpoint<input name="winrm_endpoint" value="{{if .Edit}}{{.Edit.WinRMEndpoint}}{{end}}" placeholder="https://host:5986/wsman"></label>
       <label>WinRM user<input name="winrm_user" value="{{if .Edit}}{{.Edit.WinRMUser}}{{end}}"></label>

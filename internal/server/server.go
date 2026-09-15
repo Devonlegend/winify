@@ -26,7 +26,7 @@ import (
 )
 
 // pageTemplates are the page files parsed alongside layout.html and partials.html.
-var pageTemplates = []string{"login", "dashboard", "deployment", "monitoring", "assistant", "servers", "projects", "project_new", "resource", "credentials", "tokens"}
+var pageTemplates = []string{"login", "dashboard", "deployment", "monitoring", "assistant", "servers", "projects", "project_new", "project_wizard", "resource", "credentials", "tokens"}
 
 // Deployer is the subset of *deployment.Deployer the HTTP layer uses, so tests
 // can substitute a fake.

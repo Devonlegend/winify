@@ -1,0 +1,127 @@
+{{define "title"}}New resource &middot; Control Center{{end}}
+{{define "body"}}
+<main>
+  <div class="page-head">
+    <div>
+      <div class="crumbs"><a href="/projects">Projects</a> / New</div>
+      <h1>New resource</h1>
+      <p class="muted">A few guided steps. Advanced options stay out of the way until you need them.</p>
+    </div>
+  </div>
+
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+  {{if not .Servers}}<p class="error">Add a server first (Servers &rarr; Add server).</p>{{end}}
+
+  <form method="post" action="/projects" class="wizard" id="wizard">
+    <ol class="wizard-steps" id="wizard-steps">
+      <li data-step="1">Type</li>
+      <li data-step="2">Source</li>
+      <li data-step="3">Repository</li>
+      <li data-step="4">Target</li>
+      <li data-step="5">Basics</li>
+      <li data-step="6">Review</li>
+    </ol>
+
+    <section class="wizard-step" data-step="1">
+      <h2>What are you deploying?</h2>
+      <div class="choice-grid">
+        <label class="choice">
+          <input type="radio" name="wizard_family" value="docker" checked>
+          <span class="choice-title">Docker application</span>
+          <span class="choice-desc">Build from a Dockerfile, run the repo's Compose file, or run a prebuilt image.</span>
+        </label>
+        <label class="choice">
+          <input type="radio" name="wizard_family" value="iis">
+          <span class="choice-title">Windows IIS application</span>
+          <span class="choice-desc">Publish files to an IIS site over WinRM with backup and rollback.</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="wizard-step" data-step="2" data-family="docker">
+      <h2>Where does it come from?</h2>
+      <div class="choice-grid">
+        <label class="choice">
+          <input type="radio" name="source" value="dockerfile" checked>
+          <span class="choice-title">Git repository</span>
+          <span class="choice-desc">Build the image from the repo's Dockerfile.</span>
+        </label>
+        <label class="choice">
+          <input type="radio" name="source" value="compose">
+          <span class="choice-title">Docker Compose</span>
+          <span class="choice-desc">Run the repo's own docker-compose.yml.</span>
+        </label>
+        <label class="choice">
+          <input type="radio" name="source" value="image">
+          <span class="choice-title">Docker image</span>
+          <span class="choice-desc">Run a prebuilt image from a registry.</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="wizard-step" data-step="3" data-requires-repo="true">
+      <h2>Repository</h2>
+      <div class="admin-form">
+        <label>Repository URL<input name="repo_url" id="wz-repo" placeholder="https://github.com/you/app"></label>
+        <label>Branch<input name="branch" placeholder="main"></label>
+        <label>Webhook secret ref<input name="webhook_secret_ref" placeholder="vault:app-webhook"></label>
+      </div>
+    </section>
+
+    <section class="wizard-step" data-step="4">
+      <h2>Target server</h2>
+      <div class="admin-form">
+        <label>Server
+          <select name="server_id" id="wz-server" required>
+            {{range .Servers}}<option value="{{.ID}}" data-type="{{.Type}}">{{.ID}} ({{.Type}})</option>{{end}}
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="wizard-step" data-step="5">
+      <h2>Basics</h2>
+      <div class="admin-form">
+        <label>Name<input name="name" id="wz-name" required placeholder="Storefront API"></label>
+        <label>ID<input name="id" id="wz-id" required placeholder="storefront-api"></label>
+        <label>Domain<input name="domain" placeholder="app.example.com"></label>
+        <label>Port<input name="port" value="8080" required></label>
+        <label>Health path<input name="health_path" value="/healthz"></label>
+        <label>Project group<input name="project_group" value="Default"></label>
+        <label>Environment<input name="environment" value="production"></label>
+      </div>
+      <div class="admin-form" data-group="iis" hidden>
+        <label>IIS physical path<input name="iis_physical_path" placeholder="C:\inetpub\wwwroot\app"></label>
+        <label>App pool<input name="iis_app_pool"></label>
+        <label>Service (optional)<input name="iis_service"></label>
+        <label>Build command (optional)<input name="iis_build_command" placeholder="dotnet publish -c Release -o publish"></label>
+        <label>Source subdir<input name="iis_source_subdir" placeholder="publish"></label>
+      </div>
+    </section>
+
+    <section class="wizard-step" data-step="6">
+      <h2>Review &amp; deploy</h2>
+      <dl class="review" id="wz-review"></dl>
+      <details class="advanced">
+        <summary>Advanced options</summary>
+        <div class="admin-form">
+          <label data-src="dockerfile">Dockerfile path<input name="dockerfile_path" placeholder="Dockerfile"></label>
+          <label data-src="compose">Compose path<input name="compose_path" placeholder="docker-compose.yml"></label>
+          <label data-src="image">Image<input name="image" placeholder="nginx:1.27"></label>
+          <label data-src="docker">Container port<input name="container_port" placeholder="defaults to Port"></label>
+        </div>
+        <div class="admin-form">
+          <label>Environment (KEY=VALUE per line)<textarea name="env" rows="4" placeholder="ASPNETCORE_ENVIRONMENT=Production"></textarea></label>
+        </div>
+      </details>
+    </section>
+
+    <div class="wizard-actions">
+      <button type="button" class="btn" id="wz-back">Back</button>
+      <button type="button" class="btn-primary" id="wz-next">Next</button>
+      <button type="submit" class="btn-primary" id="wz-submit">Create &amp; deploy</button>
+    </div>
+  </form>
+</main>
+<script src="/assets/js/wizard.js"></script>
+{{end}}
