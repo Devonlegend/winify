@@ -1099,7 +1099,22 @@ details summary {
   font-weight: 600;
 }
 
+.resource-title {
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.resource-title:hover {
+  color: var(--accent-ink);
+}
+
 .card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   margin-top: 0.9rem;
 }
 
@@ -1264,6 +1279,50 @@ details summary {
   cursor: pointer;
 }
 
+/* Deploy drawer */
+.drawer {
+  position: fixed;
+  left: var(--sidebar-w);
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  max-height: 46vh;
+  background: var(--panel);
+  border-top: 1px solid var(--border-strong);
+  box-shadow: var(--shadow);
+}
+
+.drawer[hidden] {
+  display: none;
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.drawer-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.drawer-head #drawer-status {
+  margin-right: auto;
+}
+
+.drawer .log {
+  flex: 1;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  max-height: none;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .app {
@@ -1285,6 +1344,10 @@ details summary {
 
   .menu-toggle {
     display: inline-flex;
+  }
+
+  .drawer {
+    left: 0;
   }
 
   main {

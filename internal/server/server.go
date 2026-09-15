@@ -174,6 +174,8 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/projects/delete", s.handleProjectDelete)
 		r.Post("/projects/env", s.handleProjectEnvSave)
 		r.Post("/projects/deploy/{projectID}", s.handleManualDeploy)
+		r.Post("/deployments/start/{projectID}", s.handleDeployStart)
+		r.Get("/deployments/{id}/stream", s.handleDeploymentStream)
 		r.Get("/credentials", s.handleCredentialsPage)
 		r.Post("/credentials", s.handleCredentialSave)
 		r.Post("/credentials/delete", s.handleCredentialDelete)
@@ -228,6 +230,14 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// Flush forwards to the underlying writer so streaming (SSE) works through the
+// logging middleware.
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // requestLogger logs one line per request. It logs method, path, status and

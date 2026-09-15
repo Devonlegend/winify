@@ -31,16 +31,19 @@
       <div class="env-label">{{.Name}}</div>
       <div class="cards">
         {{range .Resources}}
-        <a class="card resource-card" href="/projects/{{.Project.ID}}">
+        <div class="card resource-card">
           <div class="card-head">
-            <h3>{{.Project.Name}}</h3>
+            <a class="resource-title" href="/projects/{{.Project.ID}}">{{.Project.Name}}</a>
             <span class="badge badge-{{.ServerType}}">{{.ServerType}}</span>
           </div>
           <p class="muted card-host">{{.Project.ID}}{{if .Project.Domain}} &middot; https://{{.Project.Domain}}{{end}}</p>
           <div class="card-foot">
             {{if .HasDeploy}}<span class="status status-{{.LastStatus}}">{{.LastStatus}}</span>{{else}}<span class="status">no deploys</span>{{end}}
+            <form method="post" action="/projects/deploy/{{.Project.ID}}" data-deploy="{{.Project.ID}}">
+              <button type="submit" class="btn btn-sm">Deploy</button>
+            </form>
           </div>
-        </a>
+        </div>
         {{end}}
       </div>
     </div>

@@ -8,7 +8,7 @@
       <p class="muted">{{.Project.RepoURL}}{{if .Project.Domain}} &middot; <a href="https://{{.Project.Domain}}" target="_blank" rel="noopener">https://{{.Project.Domain}}</a>{{end}}</p>
     </div>
     <div class="page-actions">
-      <form method="post" action="/projects/deploy/{{.Project.ID}}">
+      <form method="post" action="/projects/deploy/{{.Project.ID}}" data-deploy="{{.Project.ID}}">
         <button type="submit" class="btn-primary">Deploy</button>
       </form>
       {{if .CanRollback}}
