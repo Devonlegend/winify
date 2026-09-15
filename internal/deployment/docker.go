@@ -73,7 +73,7 @@ func (t *dockerTarget) deployDockerfile(ctx context.Context, job deployJob, logf
 	if err := t.composeUp(ctx, workdir, logf); err != nil {
 		return "", err
 	}
-	if err := t.healthCheck(ctx, job, logf); err != nil {
+	if err := t.healthCheck(ctx, job, workdir, "docker-compose.yml", logf); err != nil {
 		return "", err
 	}
 	return tag, nil
@@ -94,7 +94,7 @@ func (t *dockerTarget) deployImage(ctx context.Context, job deployJob, logf logg
 	if err := t.composeUp(ctx, workdir, logf); err != nil {
 		return "", err
 	}
-	if err := t.healthCheck(ctx, job, logf); err != nil {
+	if err := t.healthCheck(ctx, job, workdir, "docker-compose.yml", logf); err != nil {
 		return "", err
 	}
 	return image, nil
@@ -119,7 +119,7 @@ func (t *dockerTarget) deployCompose(ctx context.Context, job deployJob, logf lo
 	if err := t.composeUpRepo(ctx, workdir, composePath, logf); err != nil {
 		return "", err
 	}
-	if err := t.healthCheck(ctx, job, logf); err != nil {
+	if err := t.healthCheck(ctx, job, workdir, composePath, logf); err != nil {
 		return "", err
 	}
 	return rev, nil
@@ -140,7 +140,7 @@ func (t *dockerTarget) rollbackImage(ctx context.Context, job deployJob, logf lo
 	if err := t.composeUp(ctx, workdir, logf); err != nil {
 		return "", err
 	}
-	if err := t.healthCheck(ctx, job, logf); err != nil {
+	if err := t.healthCheck(ctx, job, workdir, "docker-compose.yml", logf); err != nil {
 		return "", err
 	}
 	return image, nil
@@ -168,7 +168,7 @@ func (t *dockerTarget) rollbackCompose(ctx context.Context, job deployJob, logf 
 	if err := t.composeUpRepo(ctx, workdir, composePath, logf); err != nil {
 		return "", err
 	}
-	if err := t.healthCheck(ctx, job, logf); err != nil {
+	if err := t.healthCheck(ctx, job, workdir, composePath, logf); err != nil {
 		return "", err
 	}
 	return rev, nil
@@ -264,8 +264,9 @@ func (t *dockerTarget) composeUpRepo(ctx context.Context, workdir, composePath s
 }
 
 // healthCheck polls the running container through the published port until it
-// answers or the timeout elapses.
-func (t *dockerTarget) healthCheck(ctx context.Context, job deployJob, logf loggerFunc) error {
+// answers or the timeout elapses. On failure it dumps container state and logs
+// so the cause (usually a container-port mismatch) is visible in the deploy log.
+func (t *dockerTarget) healthCheck(ctx context.Context, job deployJob, workdir, composePath string, logf loggerFunc) error {
 	if job.project.DisableHealthCheck {
 		logf("health check disabled; skipping")
 		return nil
@@ -277,12 +278,27 @@ func (t *dockerTarget) healthCheck(ctx context.Context, job deployJob, logf logg
 	interval, attempts := healthTiming(t.cfg)
 	url := healthURL(job.project)
 	cmd := fmt.Sprintf(
-		"for i in $(seq 1 %d); do if curl -fsS --max-time 3 %s >/dev/null 2>&1; then echo healthy; exit 0; fi; sleep %d; done; echo 'health check failed'; exit 1",
+		"last=''; for i in $(seq 1 %d); do out=$(curl -fsS --max-time 3 %s 2>&1) && { echo healthy; exit 0; }; last=\"$out\"; sleep %d; done; echo \"health check failed: $last\"; exit 1",
 		attempts, shellQuote(url), interval)
-	if out, err := execCmd(ctx, t.runner, cmd, "health check "+url, logf); err != nil {
-		return fmt.Errorf("health check failed: %w\n%s", err, out)
+	if _, err := execCmd(ctx, t.runner, cmd, "health check "+url, logf); err != nil {
+		t.diagnose(ctx, workdir, composePath, logf)
+		return fmt.Errorf("health check failed for %s: %w (is the app listening on port %d inside the container? set container_port to the app's port, or a PORT env var)",
+			url, err, job.project.Port)
 	}
 	return nil
+}
+
+// diagnose appends the container list and recent logs to the deploy log so a
+// failed health check explains itself.
+func (t *dockerTarget) diagnose(ctx context.Context, workdir, composePath string, logf loggerFunc) {
+	ps := fmt.Sprintf("cd %s && docker compose -f %s ps", shellQuote(workdir), shellQuote(composePath))
+	if _, err := execCmd(ctx, t.runner, ps, "compose ps (diagnostics)", logf); err != nil {
+		logf("diagnostics: %v", err)
+	}
+	logs := fmt.Sprintf("cd %s && docker compose -f %s logs --tail=30 --no-color 2>&1", shellQuote(workdir), shellQuote(composePath))
+	if _, err := execCmd(ctx, t.runner, logs, "compose logs (diagnostics)", logf); err != nil {
+		logf("diagnostics: %v", err)
+	}
 }
 
 // composeFile renders a minimal compose file for the app image.
