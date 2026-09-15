@@ -57,8 +57,18 @@
     <label>Webhook secret ref<input name="webhook_secret_ref" value="{{if .Edit}}{{.Edit.WebhookSecretRef}}{{end}}" placeholder="vault:app-webhook"></label>
 
     <fieldset>
-      <legend>Docker</legend>
+      <legend>Docker deploy source</legend>
+      <label>Source
+        <select name="source">
+          <option value="dockerfile" {{if .Edit}}{{if eq .Edit.Source "dockerfile"}}selected{{end}}{{end}}>dockerfile (build from repo)</option>
+          <option value="compose" {{if .Edit}}{{if eq .Edit.Source "compose"}}selected{{end}}{{end}}>compose (repo docker-compose.yml)</option>
+          <option value="image" {{if .Edit}}{{if eq .Edit.Source "image"}}selected{{end}}{{end}}>image (prebuilt registry image)</option>
+        </select>
+      </label>
       <label>Dockerfile path<input name="dockerfile_path" value="{{if .Edit}}{{.Edit.DockerfilePath}}{{end}}" placeholder="Dockerfile"></label>
+      <label>Compose path<input name="compose_path" value="{{if .Edit}}{{.Edit.ComposePath}}{{end}}" placeholder="docker-compose.yml"></label>
+      <label>Image<input name="image" value="{{if .Edit}}{{.Edit.Image}}{{end}}" placeholder="nginx:1.27"></label>
+      <label>Container port<input name="container_port" value="{{if .Edit}}{{.Edit.ContainerPort}}{{end}}" placeholder="defaults to Port"></label>
     </fieldset>
 
     <fieldset>

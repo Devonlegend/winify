@@ -83,13 +83,13 @@ func (d *Deployer) Trigger(ctx context.Context, project config.Project, srv conf
 // previous image tag from history; IIS rollback discovers the latest backup on
 // the target, so it does not require two prior successes.
 func (d *Deployer) Rollback(ctx context.Context, project config.Project, srv config.Server) (int64, error) {
-	var artifact string
+	var prev models.Deployment
 	if srv.Type != config.ServerTypeIIS {
-		prev, err := d.previousSuccessful(ctx, project.ID)
+		p, err := d.previousSuccessful(ctx, project.ID)
 		if err != nil {
 			return 0, err
 		}
-		artifact = prev.ImageTag
+		prev = p
 	}
 
 	if _, loaded := d.inFlight.LoadOrStore(project.ID, struct{}{}); loaded {
@@ -98,7 +98,8 @@ func (d *Deployer) Rollback(ctx context.Context, project config.Project, srv con
 	id, err := d.store.CreateDeployment(ctx, models.Deployment{
 		ProjectID:  project.ID,
 		TargetType: srv.Type,
-		ImageTag:   artifact,
+		CommitSHA:  prev.CommitSHA,
+		ImageTag:   prev.ImageTag,
 		Status:     models.DeployQueued,
 		Trigger:    "rollback",
 		StartedAt:  time.Now(),
@@ -112,7 +113,8 @@ func (d *Deployer) Rollback(ctx context.Context, project config.Project, srv con
 		runCtx, cancel := context.WithTimeout(context.Background(), d.timeout)
 		defer cancel()
 		d.run(runCtx, deployJob{
-			id: id, project: project, server: srv, trigger: "rollback", artifact: artifact, rollback: true,
+			id: id, project: project, server: srv, trigger: "rollback",
+			commit: prev.CommitSHA, ref: prev.Ref, artifact: prev.ImageTag, rollback: true,
 		})
 	}()
 	return id, nil

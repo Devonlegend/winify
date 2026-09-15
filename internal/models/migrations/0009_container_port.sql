@@ -1,0 +1,1 @@
+ALTER TABLE projects ADD COLUMN container_port INTEGER NOT NULL DEFAULT 0;

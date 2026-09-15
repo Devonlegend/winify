@@ -202,13 +202,17 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO projects (`+projectColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			server_id = excluded.server_id,
 			strategy = excluded.strategy,
+			source = excluded.source,
 			repo_url = excluded.repo_url,
 			dockerfile_path = excluded.dockerfile_path,
+			compose_path = excluded.compose_path,
+			image = excluded.image,
+			container_port = excluded.container_port,
 			iis_site = excluded.iis_site,
 			iis_physical_path = excluded.iis_physical_path,
 			iis_app_pool = excluded.iis_app_pool,
@@ -222,9 +226,10 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 			webhook_secret_ref = excluded.webhook_secret_ref,
 			env_json = excluded.env_json,
 			updated_at = CURRENT_TIMESTAMP`,
-		p.ID, p.Name, p.ServerID, p.Strategy, p.RepoURL, p.DockerfilePath, p.IISSite,
-		p.IISPhysicalPath, p.IISAppPool, p.IISService, p.IISBuildCommand, p.IISSourceSubdir,
-		p.Branch, p.Domain, p.Port, p.HealthPath, p.WebhookSecretRef, string(envJSON))
+		p.ID, p.Name, p.ServerID, p.Strategy, p.Source, p.RepoURL, p.DockerfilePath, p.ComposePath,
+		p.Image, p.ContainerPort, p.IISSite, p.IISPhysicalPath, p.IISAppPool, p.IISService,
+		p.IISBuildCommand, p.IISSourceSubdir, p.Branch, p.Domain, p.Port, p.HealthPath,
+		p.WebhookSecretRef, string(envJSON))
 	if err != nil {
 		return fmt.Errorf("upsert project %q: %w", p.ID, err)
 	}
@@ -232,7 +237,7 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 }
 
 // projectColumns is the shared SELECT list for projects.
-const projectColumns = `id, name, server_id, strategy, repo_url, dockerfile_path, iis_site,
+const projectColumns = `id, name, server_id, strategy, source, repo_url, dockerfile_path, compose_path, image, container_port, iis_site,
 	iis_physical_path, iis_app_pool, iis_service, iis_build_command, iis_source_subdir,
 	branch, domain, port, health_path, webhook_secret_ref, env_json`
 
@@ -275,10 +280,10 @@ func scanProject(scan func(dest ...any) error) (config.Project, error) {
 		p       config.Project
 		envJSON string
 	)
-	if err := scan(&p.ID, &p.Name, &p.ServerID, &p.Strategy, &p.RepoURL, &p.DockerfilePath,
-		&p.IISSite, &p.IISPhysicalPath, &p.IISAppPool, &p.IISService, &p.IISBuildCommand,
-		&p.IISSourceSubdir, &p.Branch, &p.Domain, &p.Port, &p.HealthPath, &p.WebhookSecretRef,
-		&envJSON); err != nil {
+	if err := scan(&p.ID, &p.Name, &p.ServerID, &p.Strategy, &p.Source, &p.RepoURL,
+		&p.DockerfilePath, &p.ComposePath, &p.Image, &p.ContainerPort, &p.IISSite, &p.IISPhysicalPath,
+		&p.IISAppPool, &p.IISService, &p.IISBuildCommand, &p.IISSourceSubdir, &p.Branch,
+		&p.Domain, &p.Port, &p.HealthPath, &p.WebhookSecretRef, &envJSON); err != nil {
 		return config.Project{}, err
 	}
 	if envJSON != "" {

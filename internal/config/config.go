@@ -20,6 +20,14 @@ const (
 	ServerTypeIIS    = "iis"
 )
 
+// Docker deploy sources. A Docker project builds a Dockerfile, deploys the
+// repository's own compose file, or runs a prebuilt registry image.
+const (
+	ProjectSourceDockerfile = "dockerfile"
+	ProjectSourceCompose    = "compose"
+	ProjectSourceImage      = "image"
+)
+
 // Config is the top-level application configuration.
 type Config struct {
 	Server      ServerConfig      `yaml:"server"`

@@ -71,6 +71,9 @@ Create or update a project:
 
 - A deploy returns `202 Accepted` with the new `deployment_id`; poll
   `GET /api/v1/deployments/{id}` for status and the log.
+- A project's `source` is `dockerfile`, `compose` or `image`. The `image`
+  source needs `image` (and optionally `container_port`); the others need
+  `repo_url`.
 - A second deploy for the same project while one is running returns `409`.
 - A read-only token used on a mutating endpoint returns `403`.
 - Missing or invalid tokens return `401`.

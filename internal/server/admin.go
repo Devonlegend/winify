@@ -237,12 +237,25 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 		s.renderProjects(w, r, http.StatusBadRequest, nil, "port must be a number.")
 		return
 	}
+	containerPort := 0
+	if v := strings.TrimSpace(r.FormValue("container_port")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			s.renderProjects(w, r, http.StatusBadRequest, nil, "container_port must be a number.")
+			return
+		}
+		containerPort = n
+	}
 	p := config.Project{
 		ID:               strings.TrimSpace(r.FormValue("id")),
 		Name:             strings.TrimSpace(r.FormValue("name")),
 		ServerID:         strings.TrimSpace(r.FormValue("server_id")),
+		Source:           strings.TrimSpace(r.FormValue("source")),
 		RepoURL:          strings.TrimSpace(r.FormValue("repo_url")),
 		DockerfilePath:   strings.TrimSpace(r.FormValue("dockerfile_path")),
+		ComposePath:      strings.TrimSpace(r.FormValue("compose_path")),
+		Image:            strings.TrimSpace(r.FormValue("image")),
+		ContainerPort:    containerPort,
 		IISSite:          strings.TrimSpace(r.FormValue("iis_site")),
 		IISPhysicalPath:  strings.TrimSpace(r.FormValue("iis_physical_path")),
 		IISAppPool:       strings.TrimSpace(r.FormValue("iis_app_pool")),
@@ -305,18 +318,37 @@ func validateProject(p config.Project, srv config.Server) error {
 		return errors.New("name is required")
 	case p.ServerID == "":
 		return errors.New("server is required")
-	case p.RepoURL == "":
-		return errors.New("repo_url is required")
 	case p.Port < 1 || p.Port > 65535:
 		return errors.New("port must be between 1 and 65535")
 	}
 	if srv.Type == config.ServerTypeIIS {
+		if p.RepoURL == "" {
+			return errors.New("repo_url is required")
+		}
 		if p.IISPhysicalPath == "" {
 			return errors.New("iis_physical_path is required for an IIS project")
 		}
 		if p.IISAppPool == "" {
 			return errors.New("iis_app_pool is required for an IIS project")
 		}
+		return nil
+	}
+	// Docker sources.
+	switch p.Source {
+	case config.ProjectSourceImage:
+		if strings.TrimSpace(p.Image) == "" {
+			return errors.New("image is required for the image deploy source")
+		}
+	case config.ProjectSourceCompose:
+		if p.RepoURL == "" {
+			return errors.New("repo_url is required for the compose deploy source")
+		}
+	case "", config.ProjectSourceDockerfile:
+		if p.RepoURL == "" {
+			return errors.New("repo_url is required for the dockerfile deploy source")
+		}
+	default:
+		return errors.New("source must be dockerfile, compose or image")
 	}
 	return nil
 }

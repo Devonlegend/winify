@@ -1,0 +1,9 @@
+services:
+  app:
+    build: .
+    container_name: cc-sample-compose
+    restart: unless-stopped
+    ports:
+      - "18083:18083"
+    environment:
+      PORT: "18083"

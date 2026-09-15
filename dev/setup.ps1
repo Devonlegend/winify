@@ -46,6 +46,7 @@ Write-Host "==> Creating the sample app repository on the target"
 docker exec $targetName sh -c "rm -rf /srv/sample-app && mkdir -p /srv/sample-app" 2>$null
 docker cp "$dev\sample-app\server.py" "${targetName}:/srv/sample-app/server.py" 2>$null
 docker cp "$dev\sample-app\Dockerfile" "${targetName}:/srv/sample-app/Dockerfile" 2>$null
+docker cp "$dev\sample-app\docker-compose.yml" "${targetName}:/srv/sample-app/docker-compose.yml" 2>$null
 docker exec $targetName sh -c "cd /srv/sample-app && git init -q -b main && git config user.email demo@example.com && git config user.name demo && git add -A && git commit -qm init" 2>$null
 if ($LASTEXITCODE -ne 0) { Fail "failed to create the sample repo" }
 $sha = (docker exec $targetName git -C /srv/sample-app rev-parse HEAD).Trim()

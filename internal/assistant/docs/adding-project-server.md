@@ -22,22 +22,35 @@ Monitoring) and `disk_path` (the volume to report).
 
 ## Adding a Docker project
 
-Open the **Projects** tab, fill in the form and pick the Docker server:
+Open the **Projects** tab, fill in the form and pick the Docker server. A Docker
+project has a **deploy source**:
+
+- **dockerfile** — build the image from the repo. Set `repo_url`, `branch` and
+  `dockerfile_path` (default `Dockerfile`).
+- **compose** — deploy the repository's own compose file. Set `repo_url`,
+  `branch` and `compose_path` (default `docker-compose.yml`). Project `env`
+  values are written to a `.env` file next to the compose file.
+- **image** — run a prebuilt registry image. Set `image` (for example
+  `nginx:1.27`) and `container_port` if the image listens on a different port
+  than `port`.
+
+All sources also use:
 
 - `id` and `name`
-- `repo_url` — the git repository
-- `branch` — the branch a push must target (default `main`)
 - `domain` — the public hostname Caddy will serve over HTTPS
-- `port` — the port the app listens on
+- `port` — the published host port (also used for the health check and proxy)
+- `container_port` — the port inside the container; defaults to `port`
 - `health_path` — a path that returns 2xx/3xx (for example `/healthz`)
-- `dockerfile_path` — where the Dockerfile lives in the repo
 - `webhook_secret_ref` — the name of an encrypted credential used to verify the
-  push webhook
-- `env` — optional `KEY=VALUE` lines injected into the container
+  push webhook (dockerfile and compose sources)
+- `env` — optional `KEY=VALUE` lines
 
-The pipeline clones the repo on the target, builds the image from
-`dockerfile_path`, runs it with Docker Compose on `port`, and health-checks
-`health_path` before treating the deploy as successful.
+For dockerfile and compose sources the pipeline clones the repo on the target.
+The dockerfile source builds the image, then runs it with Docker Compose on
+`port` and health-checks `health_path`. The compose source runs
+`docker compose up -d --build`. The image source pulls the image and runs it
+with a generated compose file. In all cases the deploy is only successful if
+the health check passes.
 
 ## Adding an IIS project
 

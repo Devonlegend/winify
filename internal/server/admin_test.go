@@ -117,6 +117,37 @@ func TestAdminServerDeleteBlockedByProjects(t *testing.T) {
 	}
 }
 
+func TestAdminProjectImageSourceValidation(t *testing.T) {
+	s, store := newTestServerWithStore(t)
+	cookie := login(t, s)
+	ctx := context.Background()
+	if err := store.UpsertServer(ctx, config.Server{ID: "s1", Type: "docker", SSHHost: "h", SSHUser: "u", SSHKeyRef: "vault:k"}); err != nil {
+		t.Fatalf("UpsertServer: %v", err)
+	}
+
+	// image source without an image is rejected.
+	rec := postForm(t, s, "/projects", url.Values{
+		"id": {"p1"}, "name": {"A"}, "server_id": {"s1"}, "repo_url": {"x"},
+		"port": {"8080"}, "source": {"image"},
+	}, cookie)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "image is required") {
+		t.Fatalf("expected image validation error, got status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// with an image it saves.
+	rec = postForm(t, s, "/projects", url.Values{
+		"id": {"p1"}, "name": {"A"}, "server_id": {"s1"}, "repo_url": {"x"},
+		"port": {"8080"}, "source": {"image"}, "image": {"nginx:1.27"},
+	}, cookie)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("save status = %d, want 303", rec.Code)
+	}
+	p, err := store.GetProject(ctx, "p1")
+	if err != nil || p.Source != "image" || p.Image != "nginx:1.27" {
+		t.Fatalf("project = %+v err=%v", p, err)
+	}
+}
+
 func TestAdminCredentialsPageAndSave(t *testing.T) {
 	s, store := newTestServerWithStore(t)
 	cookie := login(t, s)

@@ -45,12 +45,18 @@ type Server struct {
 //
 // The IIS* fields are only used when the bound server's type is "iis".
 type Project struct {
-	ID               string            `yaml:"id" json:"id"`
-	Name             string            `yaml:"name" json:"name"`
-	ServerID         string            `yaml:"server_id" json:"server_id"`
-	Strategy         string            `yaml:"strategy" json:"strategy,omitempty"` // "dockerfile" or "iis"
-	RepoURL          string            `yaml:"repo_url" json:"repo_url"`
-	DockerfilePath   string            `yaml:"dockerfile_path" json:"dockerfile_path,omitempty"`
+	ID             string `yaml:"id" json:"id"`
+	Name           string `yaml:"name" json:"name"`
+	ServerID       string `yaml:"server_id" json:"server_id"`
+	Strategy       string `yaml:"strategy" json:"strategy,omitempty"` // "dockerfile" or "iis"
+	Source         string `yaml:"source" json:"source,omitempty"`     // dockerfile | compose | image
+	RepoURL        string `yaml:"repo_url" json:"repo_url"`
+	DockerfilePath string `yaml:"dockerfile_path" json:"dockerfile_path,omitempty"`
+	ComposePath    string `yaml:"compose_path" json:"compose_path,omitempty"`
+	Image          string `yaml:"image" json:"image,omitempty"`
+	// ContainerPort is the port the workload listens on inside the container.
+	// Defaults to Port when unset; needed for prebuilt images (e.g. nginx:80).
+	ContainerPort    int               `yaml:"container_port" json:"container_port,omitempty"`
 	IISSite          string            `yaml:"iis_site" json:"iis_site,omitempty"`
 	IISPhysicalPath  string            `yaml:"iis_physical_path" json:"iis_physical_path,omitempty"`
 	IISAppPool       string            `yaml:"iis_app_pool" json:"iis_app_pool,omitempty"`
