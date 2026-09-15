@@ -11,6 +11,7 @@ dashboard that watches an external CI system.
 
 - **In-dashboard management** of servers, projects and encrypted credentials;
   deploy from the UI or on a signed push webhook.
+- **REST API with scoped tokens** (`/api/v1`) for automation and CI.
 - **Webhook-driven deploys** for Docker and IIS, with per-project HMAC
   verification and deploy history.
 - **Rollback** to the previous known-good version (Docker image tag or IIS

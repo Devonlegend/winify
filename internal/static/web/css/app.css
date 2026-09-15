@@ -28,9 +28,10 @@ h1 {
 .topbar {
   display: flex;
   align-items: center;
-  gap: 2rem;
-  padding: 0 1.5rem;
-  height: 56px;
+  gap: 1.5rem;
+  padding: 0.5rem 1.5rem;
+  min-height: 56px;
+  flex-wrap: wrap;
   background: #0f172a;
   border-bottom: 1px solid #1e293b;
 }
@@ -45,6 +46,7 @@ h1 {
   display: flex;
   gap: 0.25rem;
   flex: 1;
+  flex-wrap: wrap;
 }
 
 .tabs a {
@@ -719,4 +721,40 @@ button.secondary:hover {
 
 .danger {
   color: #f87171;
+}
+
+/* API tokens */
+.badge-write {
+  background: #0c2a43;
+  color: #7dd3fc;
+}
+
+.badge-read {
+  background: #1e293b;
+  color: #cbd5e1;
+}
+
+.token-reveal {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #052e1b;
+  border: 1px solid #14532d;
+  border-radius: 8px;
+  color: #bbf7d0;
+  font-size: 0.9rem;
+}
+
+.token-reveal p {
+  margin: 0;
+}
+
+.token-reveal code {
+  display: block;
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: #060b16;
+  border-radius: 6px;
+  color: #7dd3fc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
 }

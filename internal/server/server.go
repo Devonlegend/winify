@@ -26,7 +26,7 @@ import (
 )
 
 // pageTemplates are the page files parsed alongside layout.html.
-var pageTemplates = []string{"login", "dashboard", "deployment", "monitoring", "assistant", "servers", "projects", "credentials"}
+var pageTemplates = []string{"login", "dashboard", "deployment", "monitoring", "assistant", "servers", "projects", "credentials", "tokens"}
 
 // Deployer is the subset of *deployment.Deployer the HTTP layer uses, so tests
 // can substitute a fake.
@@ -120,6 +120,9 @@ func (s *Server) Handler() http.Handler {
 	r.Post("/webhooks/github/{projectID}", s.handleGitHubWebhook)
 	r.Post("/webhooks/gitlab/{projectID}", s.handleGitLabWebhook)
 
+	// The REST API is authenticated by bearer token, not a session.
+	r.Route("/api/v1", s.apiRoutes)
+
 	r.Group(func(r chi.Router) {
 		r.Use(s.auth.RequireAuth)
 
@@ -143,6 +146,9 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/credentials", s.handleCredentialsPage)
 		r.Post("/credentials", s.handleCredentialSave)
 		r.Post("/credentials/delete", s.handleCredentialDelete)
+		r.Get("/tokens", s.handleTokensPage)
+		r.Post("/tokens", s.handleTokenCreate)
+		r.Post("/tokens/delete", s.handleTokenDelete)
 
 		r.Post("/logout", s.handleLogout)
 

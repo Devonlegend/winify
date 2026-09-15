@@ -728,3 +728,95 @@ func (s *Store) DeleteCredential(ctx context.Context, name string) error {
 	}
 	return nil
 }
+
+// APIToken is a named bearer token for the REST API. The token value is never
+// stored — only its SHA-256 hash — and is never returned by any API.
+type APIToken struct {
+	ID         int64     `json:"id"`
+	Name       string    `json:"name"`
+	Scope      string    `json:"scope"` // read | write
+	CreatedAt  time.Time `json:"created_at"`
+	LastUsedAt time.Time `json:"last_used_at,omitempty"`
+}
+
+// CreateAPIToken stores a token hash and returns its id.
+func (s *Store) CreateAPIToken(ctx context.Context, name, tokenHash, scope string) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO api_tokens (name, token_hash, scope, created_at) VALUES (?, ?, ?, ?)`,
+		name, tokenHash, scope, time.Now().Unix())
+	if err != nil {
+		return 0, fmt.Errorf("create api token: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("api token id: %w", err)
+	}
+	return id, nil
+}
+
+// ListAPITokens returns token metadata (never the value), newest first.
+func (s *Store) ListAPITokens(ctx context.Context) ([]APIToken, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, scope, created_at, last_used_at FROM api_tokens ORDER BY id DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("list api tokens: %w", err)
+	}
+	defer rows.Close()
+
+	var out []APIToken
+	for rows.Next() {
+		var (
+			t        APIToken
+			created  int64
+			lastUsed int64
+		)
+		if err := rows.Scan(&t.ID, &t.Name, &t.Scope, &created, &lastUsed); err != nil {
+			return nil, fmt.Errorf("scan api token: %w", err)
+		}
+		t.CreatedAt = time.Unix(created, 0)
+		if lastUsed > 0 {
+			t.LastUsedAt = time.Unix(lastUsed, 0)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// APITokenByHash looks up a token by its hash, or ErrNotFound.
+func (s *Store) APITokenByHash(ctx context.Context, tokenHash string) (APIToken, error) {
+	var (
+		t        APIToken
+		created  int64
+		lastUsed int64
+	)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, name, scope, created_at, last_used_at FROM api_tokens WHERE token_hash = ?`, tokenHash,
+	).Scan(&t.ID, &t.Name, &t.Scope, &created, &lastUsed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return APIToken{}, ErrNotFound
+	}
+	if err != nil {
+		return APIToken{}, fmt.Errorf("lookup api token: %w", err)
+	}
+	t.CreatedAt = time.Unix(created, 0)
+	if lastUsed > 0 {
+		t.LastUsedAt = time.Unix(lastUsed, 0)
+	}
+	return t, nil
+}
+
+// TouchAPIToken records the last time a token was used.
+func (s *Store) TouchAPIToken(ctx context.Context, id int64, when time.Time) error {
+	if _, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, when.Unix(), id); err != nil {
+		return fmt.Errorf("touch api token: %w", err)
+	}
+	return nil
+}
+
+// DeleteAPIToken revokes a token.
+func (s *Store) DeleteAPIToken(ctx context.Context, id int64) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM api_tokens WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete api token: %w", err)
+	}
+	return nil
+}

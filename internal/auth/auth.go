@@ -86,7 +86,7 @@ func (s *Service) StartSession(ctx context.Context, w http.ResponseWriter, userI
 	token := base64.RawURLEncoding.EncodeToString(raw)
 
 	expires := s.now().Add(s.ttl)
-	if err := s.store.CreateSession(ctx, hashToken(token), userID, expires); err != nil {
+	if err := s.store.CreateSession(ctx, HashToken(token), userID, expires); err != nil {
 		return err
 	}
 
@@ -105,7 +105,7 @@ func (s *Service) StartSession(ctx context.Context, w http.ResponseWriter, userI
 // EndSession deletes the current session and clears the cookie.
 func (s *Service) EndSession(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 	if c, err := r.Cookie(sessionCookieName); err == nil {
-		if err := s.store.DeleteSession(ctx, hashToken(c.Value)); err != nil {
+		if err := s.store.DeleteSession(ctx, HashToken(c.Value)); err != nil {
 			return err
 		}
 	}
@@ -144,7 +144,7 @@ func (s *Service) RequireAuth(next http.Handler) http.Handler {
 // validate resolves a raw cookie token to a username, or false when the session
 // is unknown or expired.
 func (s *Service) validate(ctx context.Context, token string) (string, bool) {
-	username, err := s.store.UsernameBySession(ctx, hashToken(token), s.now())
+	username, err := s.store.UsernameBySession(ctx, HashToken(token), s.now())
 	if err != nil {
 		return "", false
 	}
@@ -158,7 +158,9 @@ func UserFromContext(ctx context.Context) (string, bool) {
 	return username, ok
 }
 
-func hashToken(token string) string {
+// HashToken returns the hex SHA-256 of a token. Session and API tokens are
+// stored only as this hash, so a database leak exposes no usable token.
+func HashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }

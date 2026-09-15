@@ -1,0 +1,65 @@
+{{define "title"}}API Tokens &middot; Control Center{{end}}
+{{define "body"}}
+<main>
+  <h1>API Tokens</h1>
+  <p class="muted">Bearer tokens for the REST API at <span class="mono">/api/v1</span>. Tokens are shown once and stored only as a hash.</p>
+
+  {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+
+  {{if .NewToken}}
+  <div class="token-reveal">
+    <p>Copy this token now &mdash; it will not be shown again:</p>
+    <code>{{.NewToken}}</code>
+  </div>
+  {{end}}
+
+  {{if .Tokens}}
+  <table class="deploys">
+    <thead><tr><th>Name</th><th>Scope</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+    <tbody>
+      {{range .Tokens}}
+      <tr>
+        <td>{{.Name}}</td>
+        <td><span class="badge badge-{{.Scope}}">{{.Scope}}</span></td>
+        <td class="mono">{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+        <td class="mono">{{if .LastUsedAt.IsZero}}never{{else}}{{.LastUsedAt.Format "2006-01-02 15:04"}}{{end}}</td>
+        <td class="row-actions">
+          <form method="post" action="/tokens/delete" onsubmit="return confirm('Revoke token {{.Name}}?');">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button type="submit" class="link danger">Revoke</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+    <div class="placeholder">No API tokens yet.</div>
+  {{end}}
+
+  <h2 class="form-title">Create a token</h2>
+  <form method="post" action="/tokens" class="admin-form">
+    <label>Name<input name="name" placeholder="ci-deploy" required></label>
+    <label>Scope
+      <select name="scope">
+        <option value="write">write (read + deploy)</option>
+        <option value="read">read</option>
+      </select>
+    </label>
+    <div class="form-actions"><button type="submit">Create token</button></div>
+  </form>
+
+  <h2 class="form-title">API quick reference</h2>
+  <pre class="log">GET    /api/v1/servers
+GET    /api/v1/projects
+GET    /api/v1/projects/{id}/deployments
+POST   /api/v1/projects/{id}/deploy      {"commit":"","ref":""}
+POST   /api/v1/projects/{id}/rollback
+GET    /api/v1/deployments/{id}
+GET    /api/v1/metrics
+GET    /api/v1/audit
+
+Header: Authorization: Bearer &lt;token&gt;</pre>
+</main>
+{{end}}

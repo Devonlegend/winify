@@ -16,27 +16,27 @@ import (
 // Host is the address the reverse proxy forwards to; it falls back to SSHHost,
 // then to the host part of WinRMEndpoint.
 type Server struct {
-	ID            string `yaml:"id"`
-	Name          string `yaml:"name"`
-	Type          string `yaml:"type"`
-	Host          string `yaml:"host"`
-	WinRMEndpoint string `yaml:"winrm_endpoint"`
-	WinRMUser     string `yaml:"winrm_user"`
+	ID            string `yaml:"id" json:"id"`
+	Name          string `yaml:"name" json:"name"`
+	Type          string `yaml:"type" json:"type"`
+	Host          string `yaml:"host" json:"host,omitempty"`
+	WinRMEndpoint string `yaml:"winrm_endpoint" json:"winrm_endpoint,omitempty"`
+	WinRMUser     string `yaml:"winrm_user" json:"winrm_user,omitempty"`
 	// WinRMTransport is "ntlm" (default) or "basic".
-	WinRMTransport string `yaml:"winrm_transport"`
+	WinRMTransport string `yaml:"winrm_transport" json:"winrm_transport,omitempty"`
 	// WinRMInsecure skips TLS verification of the WinRM endpoint certificate.
-	WinRMInsecure bool   `yaml:"winrm_insecure"`
-	CredentialRef string `yaml:"credential_ref"`
-	SSHHost       string `yaml:"ssh_host"`
-	SSHPort       int    `yaml:"ssh_port"`
-	SSHUser       string `yaml:"ssh_user"`
-	SSHKeyRef     string `yaml:"ssh_key_ref"`
+	WinRMInsecure bool   `yaml:"winrm_insecure" json:"winrm_insecure,omitempty"`
+	CredentialRef string `yaml:"credential_ref" json:"credential_ref,omitempty"`
+	SSHHost       string `yaml:"ssh_host" json:"ssh_host,omitempty"`
+	SSHPort       int    `yaml:"ssh_port" json:"ssh_port,omitempty"`
+	SSHUser       string `yaml:"ssh_user" json:"ssh_user,omitempty"`
+	SSHKeyRef     string `yaml:"ssh_key_ref" json:"ssh_key_ref,omitempty"`
 	// Services lists service names whose status monitoring should report:
 	// systemd unit names on Linux, Windows service names on IIS targets.
-	Services []string `yaml:"services"`
+	Services []string `yaml:"services" json:"services,omitempty"`
 	// DiskPath is the filesystem/volume to report disk usage for. Defaults to
 	// "/" on Linux and "C:" on Windows.
-	DiskPath string `yaml:"disk_path"`
+	DiskPath string `yaml:"disk_path" json:"disk_path,omitempty"`
 }
 
 // Project is a deployable unit bound to one server. WebhookSecretRef points at
@@ -45,24 +45,24 @@ type Server struct {
 //
 // The IIS* fields are only used when the bound server's type is "iis".
 type Project struct {
-	ID               string            `yaml:"id"`
-	Name             string            `yaml:"name"`
-	ServerID         string            `yaml:"server_id"`
-	Strategy         string            `yaml:"strategy"` // "dockerfile" or "iis"
-	RepoURL          string            `yaml:"repo_url"`
-	DockerfilePath   string            `yaml:"dockerfile_path"`
-	IISSite          string            `yaml:"iis_site"`
-	IISPhysicalPath  string            `yaml:"iis_physical_path"`
-	IISAppPool       string            `yaml:"iis_app_pool"`
-	IISService       string            `yaml:"iis_service"`
-	IISBuildCommand  string            `yaml:"iis_build_command"`
-	IISSourceSubdir  string            `yaml:"iis_source_subdir"`
-	Branch           string            `yaml:"branch"`
-	Domain           string            `yaml:"domain"`
-	Port             int               `yaml:"port"`
-	HealthPath       string            `yaml:"health_path"`
-	WebhookSecretRef string            `yaml:"webhook_secret_ref"`
-	Env              map[string]string `yaml:"env"`
+	ID               string            `yaml:"id" json:"id"`
+	Name             string            `yaml:"name" json:"name"`
+	ServerID         string            `yaml:"server_id" json:"server_id"`
+	Strategy         string            `yaml:"strategy" json:"strategy,omitempty"` // "dockerfile" or "iis"
+	RepoURL          string            `yaml:"repo_url" json:"repo_url"`
+	DockerfilePath   string            `yaml:"dockerfile_path" json:"dockerfile_path,omitempty"`
+	IISSite          string            `yaml:"iis_site" json:"iis_site,omitempty"`
+	IISPhysicalPath  string            `yaml:"iis_physical_path" json:"iis_physical_path,omitempty"`
+	IISAppPool       string            `yaml:"iis_app_pool" json:"iis_app_pool,omitempty"`
+	IISService       string            `yaml:"iis_service" json:"iis_service,omitempty"`
+	IISBuildCommand  string            `yaml:"iis_build_command" json:"iis_build_command,omitempty"`
+	IISSourceSubdir  string            `yaml:"iis_source_subdir" json:"iis_source_subdir,omitempty"`
+	Branch           string            `yaml:"branch" json:"branch,omitempty"`
+	Domain           string            `yaml:"domain" json:"domain,omitempty"`
+	Port             int               `yaml:"port" json:"port"`
+	HealthPath       string            `yaml:"health_path" json:"health_path,omitempty"`
+	WebhookSecretRef string            `yaml:"webhook_secret_ref" json:"webhook_secret_ref,omitempty"`
+	Env              map[string]string `yaml:"env" json:"env,omitempty"`
 }
 
 type serversFile struct {
