@@ -69,6 +69,10 @@ type Project struct {
 	HealthPath       string            `yaml:"health_path" json:"health_path,omitempty"`
 	WebhookSecretRef string            `yaml:"webhook_secret_ref" json:"webhook_secret_ref,omitempty"`
 	Env              map[string]string `yaml:"env" json:"env,omitempty"`
+	// ProjectGroup is the Coolify-style "Project" grouping; Environment is the
+	// deployment environment (production, staging, ...). Both default when empty.
+	ProjectGroup string `yaml:"project_group" json:"project_group,omitempty"`
+	Environment  string `yaml:"environment" json:"environment,omitempty"`
 }
 
 type serversFile struct {

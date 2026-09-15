@@ -196,13 +196,19 @@ func boolToInt(b bool) int {
 
 // UpsertProject syncs one entry from projects.yaml into the database.
 func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
+	if p.ProjectGroup == "" {
+		p.ProjectGroup = "Default"
+	}
+	if p.Environment == "" {
+		p.Environment = "production"
+	}
 	envJSON, err := json.Marshal(p.Env)
 	if err != nil {
 		return fmt.Errorf("marshal project env: %w", err)
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO projects (`+projectColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			server_id = excluded.server_id,
@@ -225,11 +231,13 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 			health_path = excluded.health_path,
 			webhook_secret_ref = excluded.webhook_secret_ref,
 			env_json = excluded.env_json,
+			project_group = excluded.project_group,
+			environment = excluded.environment,
 			updated_at = CURRENT_TIMESTAMP`,
 		p.ID, p.Name, p.ServerID, p.Strategy, p.Source, p.RepoURL, p.DockerfilePath, p.ComposePath,
 		p.Image, p.ContainerPort, p.IISSite, p.IISPhysicalPath, p.IISAppPool, p.IISService,
 		p.IISBuildCommand, p.IISSourceSubdir, p.Branch, p.Domain, p.Port, p.HealthPath,
-		p.WebhookSecretRef, string(envJSON))
+		p.WebhookSecretRef, string(envJSON), p.ProjectGroup, p.Environment)
 	if err != nil {
 		return fmt.Errorf("upsert project %q: %w", p.ID, err)
 	}
@@ -239,7 +247,7 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 // projectColumns is the shared SELECT list for projects.
 const projectColumns = `id, name, server_id, strategy, source, repo_url, dockerfile_path, compose_path, image, container_port, iis_site,
 	iis_physical_path, iis_app_pool, iis_service, iis_build_command, iis_source_subdir,
-	branch, domain, port, health_path, webhook_secret_ref, env_json`
+	branch, domain, port, health_path, webhook_secret_ref, env_json, project_group, environment`
 
 // ListProjects returns all configured projects.
 func (s *Store) ListProjects(ctx context.Context) ([]config.Project, error) {
@@ -283,7 +291,8 @@ func scanProject(scan func(dest ...any) error) (config.Project, error) {
 	if err := scan(&p.ID, &p.Name, &p.ServerID, &p.Strategy, &p.Source, &p.RepoURL,
 		&p.DockerfilePath, &p.ComposePath, &p.Image, &p.ContainerPort, &p.IISSite, &p.IISPhysicalPath,
 		&p.IISAppPool, &p.IISService, &p.IISBuildCommand, &p.IISSourceSubdir, &p.Branch,
-		&p.Domain, &p.Port, &p.HealthPath, &p.WebhookSecretRef, &envJSON); err != nil {
+		&p.Domain, &p.Port, &p.HealthPath, &p.WebhookSecretRef, &envJSON,
+		&p.ProjectGroup, &p.Environment); err != nil {
 		return config.Project{}, err
 	}
 	if envJSON != "" {

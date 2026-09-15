@@ -18,6 +18,12 @@
       <a href="/dashboard" class="{{if eq .Active "dashboard"}}active{{end}}">Dashboard</a>
       <a href="/deployment" class="{{if eq .Active "deployment"}}active{{end}}">Deployments</a>
       <a href="/projects" class="{{if eq .Active "projects"}}active{{end}}">Projects</a>
+      {{range .Nav}}
+      <div class="nav-project">{{.Name}}</div>
+      {{range .Resources}}
+      <a href="/projects/{{.ID}}" class="nav-resource {{if eq $.ActiveResource .ID}}active{{end}}">{{.Name}}</a>
+      {{end}}
+      {{end}}
       <a href="/servers" class="{{if eq .Active "servers"}}active{{end}}">Servers</a>
       <a href="/monitoring" class="{{if eq .Active "monitoring"}}active{{end}}">Monitoring</a>
       <a href="/assistant" class="{{if eq .Active "assistant"}}active{{end}}">Assistant</a>

@@ -25,8 +25,8 @@ import (
 	"github.com/Devonlegend/winify/internal/static"
 )
 
-// pageTemplates are the page files parsed alongside layout.html.
-var pageTemplates = []string{"login", "dashboard", "deployment", "monitoring", "assistant", "servers", "projects", "credentials", "tokens"}
+// pageTemplates are the page files parsed alongside layout.html and partials.html.
+var pageTemplates = []string{"login", "dashboard", "deployment", "monitoring", "assistant", "servers", "projects", "project_new", "resource", "credentials", "tokens"}
 
 // Deployer is the subset of *deployment.Deployer the HTTP layer uses, so tests
 // can substitute a fake.
@@ -106,7 +106,8 @@ func navLabel(active string) string {
 func New(deps Deps) (*Server, error) {
 	pages := make(map[string]*template.Template, len(pageTemplates))
 	for _, name := range pageTemplates {
-		t, err := template.New(name).Funcs(templateFuncs).ParseFS(static.Templates, "templates/layout.html", "templates/"+name+".html")
+		t, err := template.New(name).Funcs(templateFuncs).ParseFS(static.Templates,
+			"templates/layout.html", "templates/partials.html", "templates/"+name+".html")
 		if err != nil {
 			return nil, fmt.Errorf("parse page %q: %w", name, err)
 		}
@@ -167,8 +168,11 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/servers", s.handleServerSave)
 		r.Post("/servers/delete", s.handleServerDelete)
 		r.Get("/projects", s.handleProjectsPage)
+		r.Get("/projects/new", s.handleProjectNew)
+		r.Get("/projects/{projectID}", s.handleResourcePage)
 		r.Post("/projects", s.handleProjectSave)
 		r.Post("/projects/delete", s.handleProjectDelete)
+		r.Post("/projects/env", s.handleProjectEnvSave)
 		r.Post("/projects/deploy/{projectID}", s.handleManualDeploy)
 		r.Get("/credentials", s.handleCredentialsPage)
 		r.Post("/credentials", s.handleCredentialSave)

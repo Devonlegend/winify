@@ -1,0 +1,14 @@
+{{define "title"}}New resource &middot; Control Center{{end}}
+{{define "body"}}
+<main>
+  <div class="page-head">
+    <div>
+      <div class="crumbs"><a href="/projects">Projects</a> / New</div>
+      <h1>New resource</h1>
+    </div>
+  </div>
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+  {{if not .Servers}}<p class="error">Add a server first (Servers &rarr; Add server).</p>{{end}}
+  {{template "projectForm" .}}
+</main>
+{{end}}

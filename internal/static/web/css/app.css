@@ -990,6 +990,130 @@ details summary {
   word-break: break-all;
 }
 
+/* Sidebar project tree */
+.nav-project {
+  margin: 0.6rem 0 0.15rem;
+  padding: 0 0.6rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--faint);
+}
+
+.nav a.nav-resource {
+  padding-left: 1.4rem;
+  font-size: 0.85rem;
+}
+
+/* Page header */
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.page-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.crumbs {
+  margin-bottom: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--faint);
+}
+
+.crumbs a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.crumbs a:hover {
+  color: var(--text);
+}
+
+/* In-page tabs */
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs a {
+  margin-bottom: -1px;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.tabs a:hover {
+  color: var(--text);
+}
+
+.tabs a.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.tab-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+/* Projects overview */
+.env-block {
+  margin: 0.75rem 0 1.5rem;
+}
+
+.env-label {
+  margin-bottom: 0.5rem;
+  color: var(--faint);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.resource-card {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.resource-card:hover {
+  border-color: var(--border-strong);
+  background: var(--panel-2);
+}
+
+.resource-card h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.card-foot {
+  margin-top: 0.9rem;
+}
+
+.hook-hint {
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+}
+
+.danger-zone {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .app {

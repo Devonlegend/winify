@@ -18,17 +18,18 @@ import (
 	"github.com/Devonlegend/winify/internal/models"
 )
 
-// pageData is embedded by every page so the layout can render the current user
-// and highlight the active tab. User is empty on the login page, which hides
-// the nav.
+// pageData is embedded by every page so the layout can render the current user,
+// the sidebar tree and highlight the active section/resource.
 type pageData struct {
-	User   string
-	Active string
+	User           string
+	Active         string
+	ActiveResource string
+	Nav            []navProject
 }
 
 func (s *Server) page(r *http.Request) pageData {
 	user, _ := auth.UserFromContext(r.Context())
-	return pageData{User: user}
+	return pageData{User: user, Nav: s.navTree(r.Context())}
 }
 
 // ---- Auth ----

@@ -117,6 +117,80 @@ func TestAdminServerDeleteBlockedByProjects(t *testing.T) {
 	}
 }
 
+func TestResourcePageAndEnvSave(t *testing.T) {
+	s, store := newTestServerWithStore(t)
+	cookie := login(t, s)
+	ctx := context.Background()
+	if err := store.UpsertServer(ctx, config.Server{ID: "s1", Type: "docker", SSHHost: "h", SSHUser: "u", SSHKeyRef: "vault:k"}); err != nil {
+		t.Fatalf("UpsertServer: %v", err)
+	}
+	if err := store.UpsertProject(ctx, config.Project{
+		ID: "r1", Name: "App", ServerID: "s1", RepoURL: "x", Branch: "main",
+		Port: 8080, HealthPath: "/", ProjectGroup: "Storefront", Environment: "production",
+	}); err != nil {
+		t.Fatalf("UpsertProject: %v", err)
+	}
+
+	for _, path := range []string{"/projects/r1", "/projects/r1?tab=deployments", "/projects/r1?tab=environment", "/projects/r1?tab=settings"} {
+		rec := getWithCookie(t, s, path, cookie)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want 200", path, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "App") {
+			t.Fatalf("GET %s missing resource name", path)
+		}
+	}
+
+	rec := postForm(t, s, "/projects/env", url.Values{"id": {"r1"}, "env": {"FOO=bar\nBAZ=qux"}}, cookie)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("env save status = %d, want 303", rec.Code)
+	}
+	p, err := store.GetProject(ctx, "r1")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+	if p.Env["FOO"] != "bar" || p.Env["BAZ"] != "qux" {
+		t.Fatalf("env = %v", p.Env)
+	}
+}
+
+func TestProjectsGrouping(t *testing.T) {
+	s, store := newTestServerWithStore(t)
+	cookie := login(t, s)
+	ctx := context.Background()
+	if err := store.UpsertServer(ctx, config.Server{ID: "s1", Type: "docker", SSHHost: "h", SSHUser: "u", SSHKeyRef: "vault:k"}); err != nil {
+		t.Fatalf("UpsertServer: %v", err)
+	}
+	for _, p := range []config.Project{
+		{ID: "a", Name: "Alpha App", ServerID: "s1", RepoURL: "x", Port: 80, ProjectGroup: "Alpha", Environment: "production"},
+		{ID: "b", Name: "Beta App", ServerID: "s1", RepoURL: "x", Port: 81, ProjectGroup: "Beta", Environment: "staging"},
+	} {
+		if err := store.UpsertProject(ctx, p); err != nil {
+			t.Fatalf("UpsertProject: %v", err)
+		}
+	}
+
+	rec := getWithCookie(t, s, "/projects", cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"Alpha", "Beta", "production", "staging", "Alpha App", "Beta App"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("projects page missing %q", want)
+		}
+	}
+}
+
+func TestResourceUnknown(t *testing.T) {
+	s, _ := newTestServerWithStore(t)
+	cookie := login(t, s)
+	rec := getWithCookie(t, s, "/projects/nope", cookie)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
 func TestAdminProjectImageSourceValidation(t *testing.T) {
 	s, store := newTestServerWithStore(t)
 	cookie := login(t, s)

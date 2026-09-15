@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Devonlegend/winify/internal/config"
+	"github.com/Devonlegend/winify/internal/models"
 )
 
 // ---- Servers ----
@@ -162,34 +163,38 @@ func validateServer(srv config.Server) error {
 	return nil
 }
 
-// ---- Projects ----
+// ---- Projects (project group -> environment -> resources) ----
 
-type projectRow struct {
+type resourceCard struct {
 	Project    config.Project
 	ServerType string
+	LastStatus string
+	HasDeploy  bool
+}
+
+type envGroup struct {
+	Name      string
+	Resources []resourceCard
+}
+
+type projectGroup struct {
+	Name         string
+	Environments []envGroup
+	Count        int
 }
 
 type projectsPageData struct {
 	pageData
-	Projects []projectRow
-	Servers  []config.Server
-	Edit     *config.Project
-	EditEnv  string
-	Error    string
-	Notice   string
+	Groups []projectGroup
+	Error  string
+	Notice string
 }
 
 func (s *Server) handleProjectsPage(w http.ResponseWriter, r *http.Request) {
-	var edit *config.Project
-	if id := r.URL.Query().Get("edit"); id != "" {
-		if p, err := s.store.GetProject(r.Context(), id); err == nil {
-			edit = &p
-		}
-	}
-	s.renderProjects(w, r, http.StatusOK, edit, r.URL.Query().Get("error"))
+	s.renderProjects(w, r, http.StatusOK, r.URL.Query().Get("error"))
 }
 
-func (s *Server) renderProjects(w http.ResponseWriter, r *http.Request, status int, edit *config.Project, errMsg string) {
+func (s *Server) renderProjects(w http.ResponseWriter, r *http.Request, status int, errMsg string) {
 	ctx := r.Context()
 	projects, err := s.store.ListProjects(ctx)
 	if err != nil {
@@ -207,41 +212,177 @@ func (s *Server) renderProjects(w http.ResponseWriter, r *http.Request, status i
 	for _, srv := range servers {
 		serverType[srv.ID] = srv.Type
 	}
-	rows := make([]projectRow, 0, len(projects))
+
+	byGroup := make(map[string]map[string][]resourceCard)
+	envOrder := make(map[string][]string)
+	var groupOrder []string
 	for _, p := range projects {
-		rows = append(rows, projectRow{Project: p, ServerType: serverType[p.ServerID]})
+		group := p.ProjectGroup
+		if group == "" {
+			group = "Default"
+		}
+		env := p.Environment
+		if env == "" {
+			env = "production"
+		}
+		if _, ok := byGroup[group]; !ok {
+			byGroup[group] = make(map[string][]resourceCard)
+			groupOrder = append(groupOrder, group)
+		}
+		if _, ok := byGroup[group][env]; !ok {
+			envOrder[group] = append(envOrder[group], env)
+		}
+		card := resourceCard{Project: p, ServerType: serverType[p.ServerID]}
+		if deploys, err := s.store.ListDeployments(ctx, p.ID, 1); err == nil && len(deploys) > 0 {
+			card.LastStatus = deploys[0].Status
+			card.HasDeploy = true
+		}
+		byGroup[group][env] = append(byGroup[group][env], card)
+	}
+	sort.Strings(groupOrder)
+
+	groups := make([]projectGroup, 0, len(groupOrder))
+	for _, g := range groupOrder {
+		envs := envOrder[g]
+		sort.Strings(envs)
+		pg := projectGroup{Name: g}
+		for _, e := range envs {
+			cards := byGroup[g][e]
+			sort.Slice(cards, func(i, j int) bool { return cards[i].Project.Name < cards[j].Project.Name })
+			pg.Environments = append(pg.Environments, envGroup{Name: e, Resources: cards})
+			pg.Count += len(cards)
+		}
+		groups = append(groups, pg)
 	}
 
 	data := projectsPageData{
 		pageData: s.page(r),
-		Projects: rows,
-		Servers:  servers,
-		Edit:     edit,
+		Groups:   groups,
 		Error:    errMsg,
 		Notice:   r.URL.Query().Get("notice"),
-	}
-	if edit != nil {
-		data.EditEnv = formatEnv(edit.Env)
 	}
 	data.Active = "projects"
 	s.render(w, status, "projects", data)
 }
 
+type projectFormPageData struct {
+	pageData
+	Form    *config.Project
+	Servers []config.Server
+	EditEnv string
+	Error   string
+}
+
+func (s *Server) handleProjectNew(w http.ResponseWriter, r *http.Request) {
+	s.renderProjectForm(w, r, http.StatusOK, nil, r.URL.Query().Get("error"))
+}
+
+func (s *Server) renderProjectForm(w http.ResponseWriter, r *http.Request, status int, form *config.Project, errMsg string) {
+	servers, err := s.store.ListServers(r.Context())
+	if err != nil {
+		log.Printf("projects: servers: %v", err)
+		http.Error(w, "failed to load servers", http.StatusInternalServerError)
+		return
+	}
+	data := projectFormPageData{pageData: s.page(r), Form: form, Servers: servers, Error: errMsg}
+	if form != nil {
+		data.EditEnv = formatEnv(form.Env)
+	}
+	data.Active = "projects"
+	s.render(w, status, "project_new", data)
+}
+
+type resourcePageData struct {
+	pageData
+	Project     config.Project
+	ServerType  string
+	Tab         string
+	Deployments []models.Deployment
+	CanRollback bool
+	Servers     []config.Server
+	Form        *config.Project
+	EditEnv     string
+	Error       string
+	Notice      string
+}
+
+func (s *Server) handleResourcePage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id := chi.URLParam(r, "projectID")
+	project, err := s.store.GetProject(ctx, id)
+	if errors.Is(err, models.ErrNotFound) {
+		http.Error(w, "unknown resource", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		log.Printf("resource: get: %v", err)
+		http.Error(w, "error", http.StatusInternalServerError)
+		return
+	}
+	serverType := ""
+	if srv, err := s.store.GetServer(ctx, project.ServerID); err == nil {
+		serverType = srv.Type
+	}
+	tab := r.URL.Query().Get("tab")
+	switch tab {
+	case "overview", "deployments", "environment", "settings":
+	default:
+		tab = "overview"
+	}
+	deploys, _ := s.store.ListDeployments(ctx, id, 20)
+	successes, _ := s.store.SuccessfulDeployments(ctx, id, 2)
+	servers, _ := s.store.ListServers(ctx)
+
+	data := resourcePageData{
+		pageData:    s.page(r),
+		Project:     project,
+		ServerType:  serverType,
+		Tab:         tab,
+		Deployments: deploys,
+		CanRollback: len(successes) >= 2,
+		Servers:     servers,
+		Form:        &project,
+		EditEnv:     formatEnv(project.Env),
+		Error:       r.URL.Query().Get("error"),
+		Notice:      r.URL.Query().Get("notice"),
+	}
+	data.Active = "projects"
+	data.ActiveResource = id
+	s.render(w, http.StatusOK, "resource", data)
+}
+
+func (s *Server) handleProjectEnvSave(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id := strings.TrimSpace(r.FormValue("id"))
+	project, err := s.store.GetProject(ctx, id)
+	if err != nil {
+		http.Redirect(w, r, "/projects?error="+urlQuery("Unknown resource"), http.StatusSeeOther)
+		return
+	}
+	project.Env = parseEnv(r.FormValue("env"))
+	if err := s.store.UpsertProject(ctx, project); err != nil {
+		log.Printf("projects: env: %v", err)
+		http.Redirect(w, r, "/projects/"+id+"?tab=environment&error="+urlQuery("Failed to save environment"), http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/projects/"+id+"?tab=environment&notice="+urlQuery("Environment saved"), http.StatusSeeOther)
+}
+
 func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		s.renderProjects(w, r, http.StatusBadRequest, nil, "Malformed form submission.")
+		s.renderProjectForm(w, r, http.StatusBadRequest, nil, "Malformed form submission.")
 		return
 	}
 	port, err := strconv.Atoi(strings.TrimSpace(r.FormValue("port")))
 	if err != nil {
-		s.renderProjects(w, r, http.StatusBadRequest, nil, "port must be a number.")
+		s.renderProjectForm(w, r, http.StatusBadRequest, nil, "port must be a number.")
 		return
 	}
 	containerPort := 0
 	if v := strings.TrimSpace(r.FormValue("container_port")); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			s.renderProjects(w, r, http.StatusBadRequest, nil, "container_port must be a number.")
+			s.renderProjectForm(w, r, http.StatusBadRequest, nil, "container_port must be a number.")
 			return
 		}
 		containerPort = n
@@ -268,6 +409,8 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 		HealthPath:       strings.TrimSpace(r.FormValue("health_path")),
 		WebhookSecretRef: strings.TrimSpace(r.FormValue("webhook_secret_ref")),
 		Env:              parseEnv(r.FormValue("env")),
+		ProjectGroup:     strings.TrimSpace(r.FormValue("project_group")),
+		Environment:      strings.TrimSpace(r.FormValue("environment")),
 	}
 	if p.Branch == "" {
 		p.Branch = "main"
@@ -279,21 +422,21 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 	// Strategy follows the bound server's type; the deploy pipeline selects on it.
 	srv, err := s.store.GetServer(r.Context(), p.ServerID)
 	if err != nil {
-		s.renderProjects(w, r, http.StatusBadRequest, &p, "Select a valid server.")
+		s.renderProjectForm(w, r, http.StatusBadRequest, &p, "Select a valid server.")
 		return
 	}
 	p.Strategy = srv.Type
 
 	if err := validateProject(p, srv); err != nil {
-		s.renderProjects(w, r, http.StatusBadRequest, &p, err.Error())
+		s.renderProjectForm(w, r, http.StatusBadRequest, &p, err.Error())
 		return
 	}
 	if err := s.store.UpsertProject(r.Context(), p); err != nil {
 		log.Printf("projects: save: %v", err)
-		s.renderProjects(w, r, http.StatusInternalServerError, &p, "Failed to save project.")
+		s.renderProjectForm(w, r, http.StatusInternalServerError, &p, "Failed to save project.")
 		return
 	}
-	http.Redirect(w, r, "/projects?notice=Project+saved", http.StatusSeeOther)
+	http.Redirect(w, r, "/projects/"+p.ID+"?notice="+urlQuery("Saved"), http.StatusSeeOther)
 }
 
 func (s *Server) handleProjectDelete(w http.ResponseWriter, r *http.Request) {

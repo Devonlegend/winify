@@ -1,0 +1,102 @@
+{{define "title"}}{{.Project.Name}} &middot; Control Center{{end}}
+{{define "body"}}
+<main>
+  <div class="page-head">
+    <div>
+      <div class="crumbs"><a href="/projects">Projects</a> / {{.Project.ProjectGroup}} / {{.Project.Environment}}</div>
+      <h1>{{.Project.Name}} <span class="badge badge-{{.ServerType}}">{{.ServerType}}</span></h1>
+      <p class="muted">{{.Project.RepoURL}}{{if .Project.Domain}} &middot; <a href="https://{{.Project.Domain}}" target="_blank" rel="noopener">https://{{.Project.Domain}}</a>{{end}}</p>
+    </div>
+    <div class="page-actions">
+      <form method="post" action="/projects/deploy/{{.Project.ID}}">
+        <button type="submit" class="btn-primary">Deploy</button>
+      </form>
+      {{if .CanRollback}}
+      <form method="post" action="/deployment/rollback/{{.Project.ID}}">
+        <button type="submit" class="btn">Roll back</button>
+      </form>
+      {{end}}
+    </div>
+  </div>
+
+  {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+
+  <nav class="tabs">
+    <a href="/projects/{{.Project.ID}}?tab=overview" class="{{if eq .Tab "overview"}}active{{end}}">Overview</a>
+    <a href="/projects/{{.Project.ID}}?tab=deployments" class="{{if eq .Tab "deployments"}}active{{end}}">Deployments</a>
+    <a href="/projects/{{.Project.ID}}?tab=environment" class="{{if eq .Tab "environment"}}active{{end}}">Environment</a>
+    <a href="/projects/{{.Project.ID}}?tab=settings" class="{{if eq .Tab "settings"}}active{{end}}">Settings</a>
+  </nav>
+
+  {{if eq .Tab "overview"}}
+  <div class="tab-panel">
+    <dl class="stats">
+      <div>
+        <dt>Last deploy</dt>
+        <dd>{{if .Deployments}}<span class="status status-{{(index .Deployments 0).Status}}">{{(index .Deployments 0).Status}}</span>{{else}}<span class="status">none</span>{{end}}</dd>
+      </div>
+      <div><dt>Source</dt><dd>{{if .Project.Source}}{{.Project.Source}}{{else}}dockerfile{{end}}</dd></div>
+      <div><dt>Branch</dt><dd>{{.Project.Branch}}</dd></div>
+      <div><dt>Port</dt><dd>{{.Project.Port}}</dd></div>
+    </dl>
+    <p class="muted hook-hint">Webhook: <span class="mono">POST /webhooks/github/{{.Project.ID}}</span></p>
+  </div>
+  {{end}}
+
+  {{if eq .Tab "deployments"}}
+  <div class="tab-panel">
+    {{if .Deployments}}
+    <table class="deploys">
+      <thead>
+        <tr><th>#</th><th>Commit</th><th>Status</th><th>Trigger</th><th>Artifact</th><th>Finished</th></tr>
+      </thead>
+      <tbody>
+        {{range .Deployments}}
+        <tr>
+          <td>{{.ID}}</td>
+          <td class="mono">{{.CommitSHA}}</td>
+          <td><span class="status status-{{.Status}}">{{.Status}}</span></td>
+          <td>{{.Trigger}}</td>
+          <td class="mono">{{.ImageTag}}</td>
+          <td class="mono">{{if .FinishedAt.IsZero}}&mdash;{{else}}{{.FinishedAt.Format "2006-01-02 15:04:05"}}{{end}}</td>
+        </tr>
+        <tr class="logrow">
+          <td colspan="6">
+            {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+            <details><summary>Log</summary><pre class="log">{{.Log}}</pre></details>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+      <div class="placeholder">No deployments yet. Push to the branch or click Deploy.</div>
+    {{end}}
+  </div>
+  {{end}}
+
+  {{if eq .Tab "environment"}}
+  <div class="tab-panel">
+    <p class="muted">KEY=VALUE per line. Injected into the container, or written to a <span class="mono">.env</span> file for compose deploys.</p>
+    <form method="post" action="/projects/env" class="admin-form">
+      <input type="hidden" name="id" value="{{.Project.ID}}">
+      <label>Environment
+        <textarea name="env" rows="8" placeholder="KEY=VALUE">{{.EditEnv}}</textarea>
+      </label>
+      <div class="form-actions"><button type="submit">Save environment</button></div>
+    </form>
+  </div>
+  {{end}}
+
+  {{if eq .Tab "settings"}}
+  <div class="tab-panel">
+    {{template "projectForm" .}}
+    <form method="post" action="/projects/delete" class="danger-zone" onsubmit="return confirm('Delete {{.Project.Name}}? This cannot be undone.');">
+      <input type="hidden" name="id" value="{{.Project.ID}}">
+      <button type="submit" class="btn btn-danger">Delete resource</button>
+    </form>
+  </div>
+  {{end}}
+</main>
+{{end}}

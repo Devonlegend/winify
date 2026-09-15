@@ -1,0 +1,2 @@
+ALTER TABLE projects ADD COLUMN project_group TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN environment TEXT NOT NULL DEFAULT '';
