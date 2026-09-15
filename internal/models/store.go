@@ -208,7 +208,7 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO projects (`+projectColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			server_id = excluded.server_id,
@@ -233,11 +233,12 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 			env_json = excluded.env_json,
 			project_group = excluded.project_group,
 			environment = excluded.environment,
+			disable_health_check = excluded.disable_health_check,
 			updated_at = CURRENT_TIMESTAMP`,
 		p.ID, p.Name, p.ServerID, p.Strategy, p.Source, p.RepoURL, p.DockerfilePath, p.ComposePath,
 		p.Image, p.ContainerPort, p.IISSite, p.IISPhysicalPath, p.IISAppPool, p.IISService,
 		p.IISBuildCommand, p.IISSourceSubdir, p.Branch, p.Domain, p.Port, p.HealthPath,
-		p.WebhookSecretRef, string(envJSON), p.ProjectGroup, p.Environment)
+		p.WebhookSecretRef, string(envJSON), p.ProjectGroup, p.Environment, boolToInt(p.DisableHealthCheck))
 	if err != nil {
 		return fmt.Errorf("upsert project %q: %w", p.ID, err)
 	}
@@ -247,7 +248,7 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 // projectColumns is the shared SELECT list for projects.
 const projectColumns = `id, name, server_id, strategy, source, repo_url, dockerfile_path, compose_path, image, container_port, iis_site,
 	iis_physical_path, iis_app_pool, iis_service, iis_build_command, iis_source_subdir,
-	branch, domain, port, health_path, webhook_secret_ref, env_json, project_group, environment`
+	branch, domain, port, health_path, webhook_secret_ref, env_json, project_group, environment, disable_health_check`
 
 // ListProjects returns all configured projects.
 func (s *Store) ListProjects(ctx context.Context) ([]config.Project, error) {
@@ -285,16 +286,18 @@ func (s *Store) GetProject(ctx context.Context, id string) (config.Project, erro
 // works for both *sql.Row and *sql.Rows.
 func scanProject(scan func(dest ...any) error) (config.Project, error) {
 	var (
-		p       config.Project
-		envJSON string
+		p        config.Project
+		envJSON  string
+		disabled int
 	)
 	if err := scan(&p.ID, &p.Name, &p.ServerID, &p.Strategy, &p.Source, &p.RepoURL,
 		&p.DockerfilePath, &p.ComposePath, &p.Image, &p.ContainerPort, &p.IISSite, &p.IISPhysicalPath,
 		&p.IISAppPool, &p.IISService, &p.IISBuildCommand, &p.IISSourceSubdir, &p.Branch,
 		&p.Domain, &p.Port, &p.HealthPath, &p.WebhookSecretRef, &envJSON,
-		&p.ProjectGroup, &p.Environment); err != nil {
+		&p.ProjectGroup, &p.Environment, &disabled); err != nil {
 		return config.Project{}, err
 	}
+	p.DisableHealthCheck = disabled != 0
 	if envJSON != "" {
 		if err := json.Unmarshal([]byte(envJSON), &p.Env); err != nil {
 			return config.Project{}, fmt.Errorf("decode project %q env: %w", p.ID, err)

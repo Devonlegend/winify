@@ -73,6 +73,9 @@ type Project struct {
 	// deployment environment (production, staging, ...). Both default when empty.
 	ProjectGroup string `yaml:"project_group" json:"project_group,omitempty"`
 	Environment  string `yaml:"environment" json:"environment,omitempty"`
+	// DisableHealthCheck skips the post-deploy HTTP health check for projects
+	// that have no HTTP endpoint (workers, cron jobs, ...).
+	DisableHealthCheck bool `yaml:"disable_health_check" json:"disable_health_check,omitempty"`
 }
 
 type serversFile struct {

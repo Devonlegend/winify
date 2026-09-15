@@ -266,6 +266,10 @@ func (t *dockerTarget) composeUpRepo(ctx context.Context, workdir, composePath s
 // healthCheck polls the running container through the published port until it
 // answers or the timeout elapses.
 func (t *dockerTarget) healthCheck(ctx context.Context, job deployJob, logf loggerFunc) error {
+	if job.project.DisableHealthCheck {
+		logf("health check disabled; skipping")
+		return nil
+	}
 	if job.project.Port == 0 {
 		logf("no port configured; skipping health check")
 		return nil

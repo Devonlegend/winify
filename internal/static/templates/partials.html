@@ -17,6 +17,7 @@
   <label>Domain<input name="domain" value="{{if .Form}}{{.Form.Domain}}{{end}}" placeholder="app.example.com"></label>
   <label>Port<input name="port" value="{{if .Form}}{{.Form.Port}}{{end}}" placeholder="8080" required></label>
   <label>Health path<input name="health_path" value="{{if .Form}}{{.Form.HealthPath}}{{end}}" placeholder="/healthz"></label>
+  <label class="check"><input type="checkbox" name="disable_health_check" {{if .Form}}{{if .Form.DisableHealthCheck}}checked{{end}}{{end}}> Skip the post-deploy health check</label>
   <label>Webhook secret ref<input name="webhook_secret_ref" value="{{if .Form}}{{.Form.WebhookSecretRef}}{{end}}" placeholder="vault:app-webhook"></label>
 
   <fieldset>

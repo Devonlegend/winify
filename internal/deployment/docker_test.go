@@ -106,6 +106,24 @@ func TestDockerHealthCheckFailure(t *testing.T) {
 	}
 }
 
+func TestDockerHealthCheckOptional(t *testing.T) {
+	runner := &fakeRunner{failOn: "curl"}
+	tgt := NewDockerTarget(config.Default(), runner)
+	p := dockerProject()
+	p.DisableHealthCheck = true
+
+	artifact, err := tgt.Deploy(context.Background(), deployJob{project: p, commit: "abc1234"}, noopLogf)
+	if err != nil {
+		t.Fatalf("Deploy with the health check disabled failed: %v", err)
+	}
+	if artifact == "" {
+		t.Fatal("no artifact returned")
+	}
+	if strings.Contains(runner.joined(), "curl") {
+		t.Error("health check ran even though it was disabled")
+	}
+}
+
 func TestDockerImageSource(t *testing.T) {
 	runner := &fakeRunner{}
 	tgt := NewDockerTarget(config.Default(), runner)

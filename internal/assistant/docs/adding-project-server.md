@@ -41,6 +41,8 @@ All sources also use:
 - `port` — the published host port (also used for the health check and proxy)
 - `container_port` — the port inside the container; defaults to `port`
 - `health_path` — a path that returns 2xx/3xx (for example `/healthz`)
+- `disable_health_check` — set to `true` to skip the post-deploy health check
+  entirely (workers or cron jobs with no HTTP endpoint)
 - `webhook_secret_ref` — the name of an encrypted credential used to verify the
   push webhook (dockerfile and compose sources)
 - `env` — optional `KEY=VALUE` lines

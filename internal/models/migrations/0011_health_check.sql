@@ -1,0 +1,1 @@
+ALTER TABLE projects ADD COLUMN disable_health_check INTEGER NOT NULL DEFAULT 0;

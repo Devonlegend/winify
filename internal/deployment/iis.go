@@ -127,6 +127,10 @@ func (t *iisTarget) Rollback(ctx context.Context, job deployJob, logf loggerFunc
 }
 
 func (t *iisTarget) smokeTest(ctx context.Context, p config.Project, logf loggerFunc) error {
+	if p.DisableHealthCheck {
+		logf("health check disabled; skipping smoke test")
+		return nil
+	}
 	if p.Port == 0 {
 		logf("no port configured; skipping smoke test")
 		return nil
