@@ -71,6 +71,33 @@ type Server struct {
 	assets      fs.FS
 }
 
+// templateFuncs are available to every page template.
+var templateFuncs = template.FuncMap{"navLabel": navLabel}
+
+// navLabel maps a page's active key to its sidebar/topbar label.
+func navLabel(active string) string {
+	switch active {
+	case "dashboard":
+		return "Dashboard"
+	case "deployment":
+		return "Deployments"
+	case "projects":
+		return "Projects"
+	case "servers":
+		return "Servers"
+	case "monitoring":
+		return "Monitoring"
+	case "assistant":
+		return "Assistant"
+	case "credentials":
+		return "Credentials"
+	case "tokens":
+		return "API tokens"
+	default:
+		return ""
+	}
+}
+
 // New parses the templates and prepares the asset FS. Each page is parsed as
 // its own set (layout + page) because every page defines the same "title" and
 // "body" block names; parsing them together would let later files overwrite
@@ -79,7 +106,7 @@ type Server struct {
 func New(deps Deps) (*Server, error) {
 	pages := make(map[string]*template.Template, len(pageTemplates))
 	for _, name := range pageTemplates {
-		t, err := template.ParseFS(static.Templates, "templates/layout.html", "templates/"+name+".html")
+		t, err := template.New(name).Funcs(templateFuncs).ParseFS(static.Templates, "templates/layout.html", "templates/"+name+".html")
 		if err != nil {
 			return nil, fmt.Errorf("parse page %q: %w", name, err)
 		}

@@ -88,7 +88,7 @@ type dashboardData struct {
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	data := dashboardData{pageData: s.page(r), DBStatus: "ok"}
-	data.Active = "deployment"
+	data.Active = "dashboard"
 
 	if err := s.store.DB().PingContext(r.Context()); err != nil {
 		data.DBStatus = "unavailable"

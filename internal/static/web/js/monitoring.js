@@ -82,7 +82,7 @@
     if (val) val.textContent = fmtPct(pct);
     if (bar) {
       var clamped = Math.min(100, Math.max(0, pct));
-      bar.style.width = clamped + '%';
+      bar.style.transform = 'scaleX(' + (clamped / 100) + ')';
       bar.setAttribute('data-level', pct >= 90 ? 'crit' : pct >= 75 ? 'warn' : 'ok');
     }
   }

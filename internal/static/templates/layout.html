@@ -7,26 +7,46 @@
   <link rel="stylesheet" href="/assets/css/app.css">
 </head>
 <body>
-  {{if .User}}
-  <header class="topbar">
-    <span class="brand">DevOps Control Center</span>
-    <nav class="tabs">
-      <a href="/deployment" class="{{if eq .Active "deployment"}}active{{end}}">Deployment</a>
+{{if .User}}
+<div class="app" id="app">
+  <aside class="sidebar">
+    <a class="brand" href="/dashboard">
+      <span class="brand-mark" aria-hidden="true">CC</span>
+      <span class="brand-name">Control Center</span>
+    </a>
+    <nav class="nav">
+      <a href="/dashboard" class="{{if eq .Active "dashboard"}}active{{end}}">Dashboard</a>
+      <a href="/deployment" class="{{if eq .Active "deployment"}}active{{end}}">Deployments</a>
+      <a href="/projects" class="{{if eq .Active "projects"}}active{{end}}">Projects</a>
+      <a href="/servers" class="{{if eq .Active "servers"}}active{{end}}">Servers</a>
       <a href="/monitoring" class="{{if eq .Active "monitoring"}}active{{end}}">Monitoring</a>
       <a href="/assistant" class="{{if eq .Active "assistant"}}active{{end}}">Assistant</a>
-      <a href="/servers" class="{{if eq .Active "servers"}}active{{end}}">Servers</a>
-      <a href="/projects" class="{{if eq .Active "projects"}}active{{end}}">Projects</a>
+      <div class="nav-label">Settings</div>
       <a href="/credentials" class="{{if eq .Active "credentials"}}active{{end}}">Credentials</a>
-      <a href="/tokens" class="{{if eq .Active "tokens"}}active{{end}}">Tokens</a>
+      <a href="/tokens" class="{{if eq .Active "tokens"}}active{{end}}">API tokens</a>
     </nav>
-    <div class="account">
-      <span class="user">{{.User}}</span>
+    <div class="sidebar-foot">
+      <span class="user" title="{{.User}}">{{.User}}</span>
       <form method="post" action="/logout">
-        <button type="submit" class="link">Log out</button>
+        <button type="submit" class="btn btn-ghost btn-sm">Log out</button>
       </form>
     </div>
-  </header>
-  {{end}}
-  {{template "body" .}}
+  </aside>
+  <div class="content">
+    <header class="topbar">
+      <button type="button" class="menu-toggle" id="menu-toggle" aria-label="Toggle navigation">
+        <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" fill="none">
+          <path d="M2.5 4.5h13M2.5 9h13M2.5 13.5h13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <span class="crumb">{{navLabel .Active}}</span>
+    </header>
+    {{template "body" .}}
+  </div>
+</div>
+<script src="/assets/js/app.js"></script>
+{{else}}
+{{template "body" .}}
+{{end}}
 </body>
 </html>{{end}}
