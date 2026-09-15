@@ -53,11 +53,11 @@
 <div class="drawer" id="deploy-drawer" hidden>
   <div class="drawer-head">
     <span class="drawer-title">Deploy</span>
-    <span class="status status-running" id="drawer-status">starting</span>
+    <span class="status status-running" id="drawer-status" aria-live="polite">starting</span>
     <a class="link" id="drawer-link" href="/deployment">History</a>
     <button type="button" class="btn btn-ghost btn-sm" id="drawer-close">Close</button>
   </div>
-  <pre class="log" id="drawer-log"></pre>
+  <pre class="log" id="drawer-log" aria-live="polite"></pre>
 </div>
 <script src="/assets/js/app.js"></script>
 <script src="/assets/js/deploy.js"></script>

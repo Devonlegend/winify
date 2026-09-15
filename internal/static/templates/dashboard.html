@@ -1,8 +1,34 @@
 {{define "title"}}Dashboard &middot; Control Center{{end}}
 {{define "body"}}
 <main>
-  <h1>Dashboard</h1>
-  <p class="muted">Phase 1 shell is online.</p>
+  <div class="page-head">
+    <div>
+      <h1>Dashboard</h1>
+      <p class="muted">Deploy and monitor your servers from one place.</p>
+    </div>
+    <div class="page-actions">
+      <a class="btn-primary" href="/projects/new">New resource</a>
+    </div>
+  </div>
+
+  {{if eq .ServerCount 0}}
+  <section class="onboard card">
+    <h2>Get started</h2>
+    <ol class="onboard-steps">
+      <li><a href="/servers">Add a server</a> &mdash; a Docker host over SSH or a Windows/IIS host over WinRM.</li>
+      <li><a href="/credentials">Add its credential</a> &mdash; an SSH key or WinRM password, encrypted at rest.</li>
+      <li><a href="/projects/new">Create a resource</a> &mdash; point it at a git repository or a prebuilt image.</li>
+      <li>Click <strong>Deploy</strong> and watch the live log.</li>
+    </ol>
+  </section>
+  {{else if eq .ProjectCount 0}}
+  <section class="onboard card">
+    <h2>Create your first resource</h2>
+    <p class="muted">You have {{.ServerCount}} server{{if ne .ServerCount 1}}s{{end}} ready. Add an application to deploy.</p>
+    <div class="form-actions"><a class="btn-primary" href="/projects/new">New resource</a></div>
+  </section>
+  {{end}}
+
   <dl class="stats">
     <div>
       <dt>Database</dt>
@@ -13,7 +39,7 @@
       <dd>{{.ServerCount}}</dd>
     </div>
     <div>
-      <dt>Projects</dt>
+      <dt>Resources</dt>
       <dd>{{.ProjectCount}}</dd>
     </div>
   </dl>
