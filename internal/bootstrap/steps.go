@@ -1,0 +1,168 @@
+package bootstrap
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/Devonlegend/winify/internal/deployment"
+)
+
+// psQuote wraps s in single quotes for a PowerShell script.
+func psQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+// lastLine returns the last non-empty line of output.
+func lastLine(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// dirsStep creates the winify directory tree (under ProgramData on Windows).
+type dirsStep struct{ paths []string }
+
+func (s dirsStep) Name() string     { return "dirs" }
+func (s dirsStep) Privileged() bool { return true }
+
+func (s dirsStep) Check(ctx context.Context, r deployment.Runner) (bool, error) {
+	var b strings.Builder
+	b.WriteString("$ErrorActionPreference='Stop'\n$ok=$true\n")
+	for _, p := range s.paths {
+		fmt.Fprintf(&b, "if (-not (Test-Path -LiteralPath %s)) { $ok=$false }\n", psQuote(p))
+	}
+	b.WriteString("if ($ok) { 'done' } else { 'pending' }\n")
+	out, err := r.Run(ctx, b.String())
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(out, "done"), nil
+}
+
+func (s dirsStep) Apply(ctx context.Context, r deployment.Runner) error {
+	var b strings.Builder
+	b.WriteString("$ErrorActionPreference='Stop'\n")
+	for _, p := range s.paths {
+		fmt.Fprintf(&b, "New-Item -ItemType Directory -Force -Path %s | Out-Null\n", psQuote(p))
+	}
+	_, err := r.Run(ctx, b.String())
+	return err
+}
+
+// nssmStep ensures nssm.exe exists at a stable path, uploading it from the
+// control-center host when a source is configured.
+type nssmStep struct {
+	path   string
+	source string
+	sha256 string
+	logf   func(format string, args ...any)
+}
+
+func (s nssmStep) Name() string     { return "nssm" }
+func (s nssmStep) Privileged() bool { return true }
+
+func (s nssmStep) Check(ctx context.Context, r deployment.Runner) (bool, error) {
+	if strings.TrimSpace(s.source) == "" {
+		out, err := r.Run(ctx, fmt.Sprintf("if (Test-Path -LiteralPath %s) { 'done' } else { 'pending' }", psQuote(s.path)))
+		if err != nil {
+			return false, err
+		}
+		return strings.Contains(out, "done"), nil
+	}
+	// Hash-aware: re-upload when the source binary differs from the target's.
+	data, err := os.ReadFile(s.source)
+	if err != nil {
+		return false, fmt.Errorf("read nssm source %s: %w", s.source, err)
+	}
+	sum := sha256.Sum256(data)
+	want := hex.EncodeToString(sum[:])
+	got, err := deployment.RemoteFileSHA256(ctx, r, s.path)
+	if err != nil {
+		return false, err
+	}
+	return strings.EqualFold(got, want), nil
+}
+
+func (s nssmStep) Apply(ctx context.Context, r deployment.Runner) error {
+	logf := s.logf
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	_, err := deployment.EnsureNSSM(ctx, r, s.path, s.source, s.sha256, logf)
+	return err
+}
+
+// selfServiceStep installs winify as a native Windows service so it starts on
+// boot. New-Service is used instead of sc.exe to avoid command-line quoting.
+type selfServiceStep struct {
+	name   string
+	exe    string
+	config string
+}
+
+func (s selfServiceStep) Name() string     { return "self-service" }
+func (s selfServiceStep) Privileged() bool { return true }
+
+func (s selfServiceStep) Check(ctx context.Context, r deployment.Runner) (bool, error) {
+	script := fmt.Sprintf(
+		"$svc = Get-CimInstance Win32_Service -Filter %s -ErrorAction SilentlyContinue\n"+
+			"if ($null -ne $svc) { 'done' } else { 'pending' }\n",
+		psQuote("Name='"+s.name+"'"))
+	out, err := r.Run(ctx, script)
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(out, "done"), nil
+}
+
+func (s selfServiceStep) Apply(ctx context.Context, r deployment.Runner) error {
+	var b strings.Builder
+	b.WriteString("$ErrorActionPreference='Stop'\n")
+	fmt.Fprintf(&b, "$exe = %s\n", psQuote(s.exe))
+	fmt.Fprintf(&b, "$cfg = %s\n", psQuote(s.config))
+	b.WriteString("$bin = '\"' + $exe + '\" serve -config \"' + $cfg + '\"'\n")
+	fmt.Fprintf(&b, "if (Get-Service -Name %s -ErrorAction SilentlyContinue) {\n", psQuote(s.name))
+	fmt.Fprintf(&b, "  Stop-Service -Name %s -Force -ErrorAction SilentlyContinue\n", psQuote(s.name))
+	fmt.Fprintf(&b, "  & sc.exe delete %s | Out-Null\n", psQuote(s.name))
+	b.WriteString("  Start-Sleep -Seconds 1\n}\n")
+	fmt.Fprintf(&b, "New-Service -Name %s -BinaryPathName $bin -StartupType Automatic -DisplayName %s | Out-Null\n",
+		psQuote(s.name), psQuote(s.name))
+	fmt.Fprintf(&b, "& sc.exe failure %s reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null\n",
+		psQuote(s.name))
+	_, err := r.Run(ctx, b.String())
+	return err
+}
+
+// winrmStep enables PowerShell Remoting so the host can be a deploy target.
+type winrmStep struct{}
+
+func (winrmStep) Name() string     { return "winrm" }
+func (winrmStep) Privileged() bool { return true }
+
+func (winrmStep) Check(ctx context.Context, r deployment.Runner) (bool, error) {
+	script := "$ErrorActionPreference='Stop'\n" +
+		"$svc = Get-Service -Name WinRM -ErrorAction SilentlyContinue\n" +
+		"if ($null -ne $svc -and $svc.Status -eq 'Running') { 'done' } else { 'pending' }\n"
+	out, err := r.Run(ctx, script)
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(out, "done"), nil
+}
+
+func (winrmStep) Apply(ctx context.Context, r deployment.Runner) error {
+	// -SkipNetworkProfileCheck allows enabling on a Public network; fall back to
+	// a plain enable on hosts where the parameter is unavailable.
+	script := "$ErrorActionPreference='Stop'\n" +
+		"try { Enable-PSRemoting -Force -SkipNetworkProfileCheck } catch { Enable-PSRemoting -Force }\n"
+	_, err := r.Run(ctx, script)
+	return err
+}

@@ -33,7 +33,7 @@ type RunnerFactory func(ctx context.Context, srv config.Server) (deployment.Runn
 func NewRunnerFactory(cfg config.Config, secrets deployment.SecretResolver, audit deployment.AuditRecorder) RunnerFactory {
 	return func(ctx context.Context, srv config.Server) (deployment.Runner, error) {
 		switch srv.Type {
-		case config.ServerTypeIIS:
+		case config.ServerTypeIIS, config.ServerTypeWindowsService:
 			password, err := deployment.ResolveRef(ctx, secrets, srv.CredentialRef)
 			if err != nil {
 				return nil, fmt.Errorf("resolve winrm credential: %w", err)

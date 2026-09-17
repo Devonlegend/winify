@@ -127,3 +127,41 @@ func TestEndSessionRevokes(t *testing.T) {
 		t.Fatal("session still valid after logout")
 	}
 }
+
+func TestRegisterOnlyOnce(t *testing.T) {
+	db, err := models.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := models.Migrate(db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	svc := NewService(models.NewStore(db), false, time.Hour)
+	ctx := context.Background()
+
+	if ok, err := svc.HasUsers(ctx); err != nil || ok {
+		t.Fatalf("HasUsers = %v, %v; want false", ok, err)
+	}
+	user, err := svc.Register(ctx, "admin", "hunter2hunter2")
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if user.Username != "admin" {
+		t.Fatalf("user = %+v", user)
+	}
+	if ok, _ := svc.HasUsers(ctx); !ok {
+		t.Fatal("HasUsers = false after registration")
+	}
+	if _, err := svc.Authenticate(ctx, "admin", "hunter2hunter2"); err != nil {
+		t.Fatalf("Authenticate after register: %v", err)
+	}
+
+	// A second registration is closed and must not overwrite the admin.
+	if _, err := svc.Register(ctx, "other", "anotherpass"); !errors.Is(err, ErrRegistrationClosed) {
+		t.Fatalf("second Register err = %v, want ErrRegistrationClosed", err)
+	}
+	if _, err := svc.Authenticate(ctx, "admin", "hunter2hunter2"); err != nil {
+		t.Fatalf("admin password changed after second register: %v", err)
+	}
+}

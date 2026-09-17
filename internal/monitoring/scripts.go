@@ -11,7 +11,7 @@ import (
 // target's native shell. Both scripts print the same keys, so parsing is shared.
 func scriptFor(srv config.Server) string {
 	var script string
-	if srv.Type == config.ServerTypeIIS {
+	if srv.Type == config.ServerTypeIIS || srv.Type == config.ServerTypeWindowsService {
 		script = windowsScript(srv)
 	} else {
 		script = linuxScript(srv)

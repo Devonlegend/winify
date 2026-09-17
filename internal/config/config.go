@@ -18,6 +18,18 @@ import (
 const (
 	ServerTypeDocker = "docker"
 	ServerTypeIIS    = "iis"
+	// ServerTypeWindowsService runs a native Windows executable as a service
+	// managed by NSSM over WinRM, optionally fronted by Caddy on the target.
+	// It is the lightweight alternative to IIS for non-IIS Windows workloads.
+	ServerTypeWindowsService = "winsvc"
+)
+
+// Caddy modes for a winsvc project's per-target Caddy. "none" leaves Caddy off
+// the target and relies on the central reverse proxy only.
+const (
+	CaddyModeNone   = "none"
+	CaddyModeProxy  = "proxy"
+	CaddyModeStatic = "static"
 )
 
 // Docker deploy sources. A Docker project builds a Dockerfile, deploys the
@@ -37,8 +49,39 @@ type Config struct {
 	Files       FilesConfig       `yaml:"files"`
 	Proxy       ProxyConfig       `yaml:"proxy"`
 	Deploy      DeployConfig      `yaml:"deploy"`
+	Bootstrap   BootstrapConfig   `yaml:"bootstrap"`
 	Monitoring  MonitoringConfig  `yaml:"monitoring"`
 	Assistant   AssistantConfig   `yaml:"assistant"`
+}
+
+// BootstrapConfig controls zero-touch provisioning of the host winify runs on.
+type BootstrapConfig struct {
+	// Enabled allows the bootstrap command and first-run trigger.
+	Enabled bool `yaml:"enabled"`
+	// InstallDir is the on-host root. Empty means %ProgramData%\winify on
+	// Windows (or /var/lib/winify elsewhere).
+	InstallDir string `yaml:"install_dir"`
+	// ServiceName is the Windows service name winify installs for itself.
+	ServiceName string `yaml:"service_name"`
+	// EnableWinRM enables PowerShell Remoting so the host is a deploy target.
+	EnableWinRM bool `yaml:"enable_winrm"`
+	// Caddy provisions the reverse proxy on this host.
+	Caddy CaddyBootstrapConfig `yaml:"caddy"`
+}
+
+// CaddyBootstrapConfig configures Caddy provisioning during bootstrap.
+type CaddyBootstrapConfig struct {
+	// Enabled installs Caddy (binary + service) and opens 80/443. Requires
+	// Source or URL to supply the binary.
+	Enabled bool `yaml:"enabled"`
+	// Source is a local path on the control-center host to caddy.exe.
+	Source string `yaml:"source"`
+	// URL downloads a Caddy release zip when Source is empty.
+	URL string `yaml:"url"`
+	// SHA256 optionally pins the expected hash of the binary.
+	SHA256 string `yaml:"sha256"`
+	// Admin is the Caddy admin API address.
+	Admin string `yaml:"admin"`
 }
 
 // ServerConfig controls the HTTP listener.
@@ -135,6 +178,14 @@ type DeployConfig struct {
 	// IISBackupDir is where timestamped pre-deploy copies of the live IIS
 	// directory are stored for rollback.
 	IISBackupDir string `yaml:"iis_backup_dir"`
+	// NSSMSource is the path on the control-center host to the nssm.exe that
+	// gets uploaded to a winsvc target on first deploy (public-domain binary).
+	// The target path is Server.NSSMPath. Empty disables upload and requires
+	// NSSM to already be present on the target.
+	NSSMSource string `yaml:"nssm_source"`
+	// NSSMSHA256 pins the expected SHA-256 (hex) of the uploaded nssm.exe.
+	// Empty skips the check; set it to detect a tampered/incorrect binary.
+	NSSMSHA256 string `yaml:"nssm_sha256"`
 	// KnownHostsFile enables SSH host-key verification. Empty disables it
 	// (insecure; only acceptable for throwaway environments).
 	KnownHostsFile string `yaml:"known_hosts_file"`
@@ -168,9 +219,18 @@ func Default() Config {
 			WorkDir:               "/opt/control-center",
 			IISWorkDir:            `C:\control-center`,
 			IISBackupDir:          `C:\control-center\backups`,
+			NSSMSource:            "tools/nssm.exe",
 			HealthTimeoutSeconds:  60,
 			HealthIntervalSeconds: 3,
 			TimeoutMinutes:        30,
+		},
+		Bootstrap: BootstrapConfig{
+			Enabled:     true,
+			ServiceName: "winify",
+			EnableWinRM: true,
+			Caddy: CaddyBootstrapConfig{
+				Admin: "127.0.0.1:2019",
+			},
 		},
 		Monitoring: MonitoringConfig{
 			Enabled:         true,
@@ -264,6 +324,12 @@ func (cfg *Config) applyEnv() error {
 	if v := os.Getenv("CC_DEPLOY_IIS_BACKUP_DIR"); v != "" {
 		cfg.Deploy.IISBackupDir = v
 	}
+	if v := os.Getenv("CC_DEPLOY_NSSM_SOURCE"); v != "" {
+		cfg.Deploy.NSSMSource = v
+	}
+	if v := os.Getenv("CC_DEPLOY_NSSM_SHA256"); v != "" {
+		cfg.Deploy.NSSMSHA256 = v
+	}
 	if v := os.Getenv("CC_DEPLOY_KNOWN_HOSTS"); v != "" {
 		cfg.Deploy.KnownHostsFile = v
 	}
@@ -273,6 +339,39 @@ func (cfg *Config) applyEnv() error {
 			return fmt.Errorf("CC_DEPLOY_TIMEOUT_MINUTES: %w", err)
 		}
 		cfg.Deploy.TimeoutMinutes = n
+	}
+	if v := os.Getenv("CC_BOOTSTRAP_ENABLED"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("CC_BOOTSTRAP_ENABLED: %w", err)
+		}
+		cfg.Bootstrap.Enabled = b
+	}
+	if v := os.Getenv("CC_BOOTSTRAP_INSTALL_DIR"); v != "" {
+		cfg.Bootstrap.InstallDir = v
+	}
+	if v := os.Getenv("CC_BOOTSTRAP_ENABLE_WINRM"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("CC_BOOTSTRAP_ENABLE_WINRM: %w", err)
+		}
+		cfg.Bootstrap.EnableWinRM = b
+	}
+	if v := os.Getenv("CC_BOOTSTRAP_CADDY_ENABLED"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("CC_BOOTSTRAP_CADDY_ENABLED: %w", err)
+		}
+		cfg.Bootstrap.Caddy.Enabled = b
+	}
+	if v := os.Getenv("CC_BOOTSTRAP_CADDY_SOURCE"); v != "" {
+		cfg.Bootstrap.Caddy.Source = v
+	}
+	if v := os.Getenv("CC_BOOTSTRAP_CADDY_URL"); v != "" {
+		cfg.Bootstrap.Caddy.URL = v
+	}
+	if v := os.Getenv("CC_BOOTSTRAP_CADDY_SHA256"); v != "" {
+		cfg.Bootstrap.Caddy.SHA256 = v
 	}
 	if v := os.Getenv("CC_MONITOR_ENABLED"); v != "" {
 		b, err := strconv.ParseBool(v)

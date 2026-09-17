@@ -54,6 +54,8 @@
 
     var iisGroup = form.querySelector('[data-group=iis]');
     if (iisGroup) iisGroup.hidden = fam !== 'iis';
+    var winsvcGroup = form.querySelector('[data-group=winsvc]');
+    if (winsvcGroup) winsvcGroup.hidden = fam !== 'winsvc';
 
     form.querySelectorAll('[data-src]').forEach(function (el) {
       var kind = el.getAttribute('data-src');
@@ -64,7 +66,7 @@
       }
     });
 
-    var port = form.querySelector('[name=port]');
+    var port = form.querySelector('[name=ports_exposes]');
     if (port && !port.dataset.touched) port.value = fam === 'iis' ? '80' : '8080';
     var health = form.querySelector('[name=health_path]');
     if (health && !health.dataset.touched) health.value = fam === 'iis' ? '/' : '/healthz';
@@ -79,15 +81,16 @@
     if (!review) return;
     var fam = family();
     var src = source();
+    var familyLabel = fam === 'iis' ? 'Windows IIS' : fam === 'winsvc' ? 'Windows service (NSSM)' : 'Docker';
     var rows = [
-      ['Type', fam === 'iis' ? 'Windows IIS' : 'Docker'],
-      ['Source', fam === 'iis' ? 'Git repository' : src],
+      ['Type', familyLabel],
+      ['Source', fam === 'docker' ? src : 'Git repository'],
       ['Name', value('name')],
       ['ID', value('id')],
       ['Server', value('server_id')],
       ['Repository', fam === 'docker' && src === 'image' ? 'prebuilt image' : value('repo_url')],
       ['Domain', value('domain')],
-      ['Port', value('port')]
+      ['Ports exposes', value('ports_exposes')]
     ];
     review.textContent = '';
     rows.forEach(function (row) {
@@ -149,7 +152,7 @@
       idInput.value = nameInput.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     });
   }
-  ['port', 'health_path'].forEach(function (n) {
+  ['ports_exposes', 'health_path'].forEach(function (n) {
     var el = form.querySelector('[name=' + n + ']');
     if (el) el.addEventListener('input', function () { el.dataset.touched = '1'; });
   });

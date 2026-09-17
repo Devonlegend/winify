@@ -40,10 +40,25 @@ type loginData struct {
 }
 
 func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
+	hasUsers, err := s.auth.HasUsers(r.Context())
+	if err != nil {
+		log.Printf("login: check users: %v", err)
+		http.Error(w, "error", http.StatusInternalServerError)
+		return
+	}
+	if !hasUsers {
+		http.Redirect(w, r, "/register", http.StatusSeeOther)
+		return
+	}
 	s.render(w, http.StatusOK, "login", loginData{})
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	// A fresh install has no account yet: send the visitor to registration.
+	if hasUsers, err := s.auth.HasUsers(r.Context()); err == nil && !hasUsers {
+		http.Redirect(w, r, "/register", http.StatusSeeOther)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		s.render(w, http.StatusBadRequest, "login", loginData{Error: "Malformed form submission."})
 		return
@@ -66,6 +81,77 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err := s.auth.StartSession(r.Context(), w, user.ID); err != nil {
 		log.Printf("start session: %v", err)
 		s.render(w, http.StatusInternalServerError, "login", loginData{Error: "Sign-in failed. Try again."})
+		return
+	}
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+// registerData backs the first-run setup page. User is always empty (the layout
+// checks it to decide whether to render the authenticated shell).
+type registerData struct {
+	User  string
+	Error string
+}
+
+// handleRegisterForm shows the first-run setup page, or redirects to login once
+// an admin account exists.
+func (s *Server) handleRegisterForm(w http.ResponseWriter, r *http.Request) {
+	hasUsers, err := s.auth.HasUsers(r.Context())
+	if err != nil {
+		log.Printf("register: check users: %v", err)
+		http.Error(w, "error", http.StatusInternalServerError)
+		return
+	}
+	if hasUsers {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	s.render(w, http.StatusOK, "register", registerData{})
+}
+
+// handleRegister creates the first admin account and signs it in. It is closed
+// as soon as an account exists, so it cannot be used to overwrite the admin.
+func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
+	if hasUsers, err := s.auth.HasUsers(r.Context()); err != nil {
+		log.Printf("register: check users: %v", err)
+		s.render(w, http.StatusInternalServerError, "register", registerData{Error: "Setup failed. Try again."})
+		return
+	} else if hasUsers {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		s.render(w, http.StatusBadRequest, "register", registerData{Error: "Malformed form submission."})
+		return
+	}
+	username := strings.TrimSpace(r.FormValue("username"))
+	password := r.FormValue("password")
+	switch {
+	case username == "":
+		s.render(w, http.StatusBadRequest, "register", registerData{Error: "Username is required."})
+		return
+	case len(password) < 8:
+		s.render(w, http.StatusBadRequest, "register", registerData{Error: "Password must be at least 8 characters."})
+		return
+	case password != r.FormValue("confirm"):
+		s.render(w, http.StatusBadRequest, "register", registerData{Error: "Passwords do not match."})
+		return
+	}
+
+	user, err := s.auth.Register(r.Context(), username, password)
+	if errors.Is(err, auth.ErrRegistrationClosed) {
+		// Another request won the race; send them to sign in.
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	if err != nil {
+		log.Printf("register: %v", err) // err has no password
+		s.render(w, http.StatusInternalServerError, "register", registerData{Error: "Setup failed. Try again."})
+		return
+	}
+	if err := s.auth.StartSession(r.Context(), w, user.ID); err != nil {
+		log.Printf("register: start session: %v", err)
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)

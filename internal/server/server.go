@@ -19,6 +19,7 @@ import (
 
 	"github.com/Devonlegend/winify/internal/assistant"
 	"github.com/Devonlegend/winify/internal/auth"
+	"github.com/Devonlegend/winify/internal/bootstrap"
 	"github.com/Devonlegend/winify/internal/config"
 	"github.com/Devonlegend/winify/internal/deployment"
 	"github.com/Devonlegend/winify/internal/models"
@@ -26,7 +27,7 @@ import (
 )
 
 // pageTemplates are the page files parsed alongside layout.html and partials.html.
-var pageTemplates = []string{"login", "dashboard", "deployment", "monitoring", "assistant", "servers", "projects", "project_new", "project_wizard", "resource", "credentials", "tokens"}
+var pageTemplates = []string{"login", "register", "dashboard", "deployment", "monitoring", "assistant", "servers", "projects", "project_new", "project_wizard", "resource", "credentials", "variables", "setup", "tokens"}
 
 // Deployer is the subset of *deployment.Deployer the HTTP layer uses, so tests
 // can substitute a fake.
@@ -56,19 +57,32 @@ type Deps struct {
 	Deployer        Deployer
 	Assistant       Assistant
 	CredentialAdmin CredentialAdmin
+	// Bootstrap backs the Setup page. Nil disables it.
+	Bootstrap *bootstrap.Bootstrap
+	// BootstrapRun applies bootstrap steps now. Only safe when already elevated.
+	BootstrapRun func(ctx context.Context) error
+	// BootstrapElevate relaunches bootstrap elevated (UAC prompt).
+	BootstrapElevate func() error
+	// BootstrapElevated reports whether the process can apply steps directly.
+	// Nil falls back to a live elevation check.
+	BootstrapElevated func(ctx context.Context) (bool, error)
 }
 
 // Server holds the dependencies shared by every handler.
 type Server struct {
-	cfg         config.Config
-	store       *models.Store
-	auth        *auth.Service
-	secrets     deployment.SecretResolver
-	deployer    Deployer
-	assistant   Assistant
-	credentials CredentialAdmin
-	pages       map[string]*template.Template
-	assets      fs.FS
+	cfg               config.Config
+	store             *models.Store
+	auth              *auth.Service
+	secrets           deployment.SecretResolver
+	deployer          Deployer
+	assistant         Assistant
+	credentials       CredentialAdmin
+	bootstrap         *bootstrap.Bootstrap
+	bootstrapRun      func(ctx context.Context) error
+	bootstrapElevate  func() error
+	bootstrapElevated func(ctx context.Context) (bool, error)
+	pages             map[string]*template.Template
+	assets            fs.FS
 }
 
 // templateFuncs are available to every page template.
@@ -91,6 +105,10 @@ func navLabel(active string) string {
 		return "Assistant"
 	case "credentials":
 		return "Credentials"
+	case "variables":
+		return "Shared variables"
+	case "setup":
+		return "Setup"
 	case "tokens":
 		return "API tokens"
 	default:
@@ -120,15 +138,19 @@ func New(deps Deps) (*Server, error) {
 	}
 
 	return &Server{
-		cfg:         deps.Cfg,
-		store:       deps.Store,
-		auth:        deps.Auth,
-		secrets:     deps.Secrets,
-		deployer:    deps.Deployer,
-		assistant:   deps.Assistant,
-		credentials: deps.CredentialAdmin,
-		pages:       pages,
-		assets:      sub,
+		cfg:               deps.Cfg,
+		store:             deps.Store,
+		auth:              deps.Auth,
+		secrets:           deps.Secrets,
+		deployer:          deps.Deployer,
+		assistant:         deps.Assistant,
+		credentials:       deps.CredentialAdmin,
+		bootstrap:         deps.Bootstrap,
+		bootstrapRun:      deps.BootstrapRun,
+		bootstrapElevate:  deps.BootstrapElevate,
+		bootstrapElevated: deps.BootstrapElevated,
+		pages:             pages,
+		assets:            sub,
 	}, nil
 }
 
@@ -142,6 +164,9 @@ func (s *Server) Handler() http.Handler {
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/login", s.handleLoginForm)
 	r.Post("/login", s.handleLogin)
+	// First-run setup. Both handlers redirect to /login once an admin exists.
+	r.Get("/register", s.handleRegisterForm)
+	r.Post("/register", s.handleRegister)
 	r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.FS(s.assets))))
 
 	// Webhooks are authenticated by their per-project signature, not a session.
@@ -179,6 +204,12 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/credentials", s.handleCredentialsPage)
 		r.Post("/credentials", s.handleCredentialSave)
 		r.Post("/credentials/delete", s.handleCredentialDelete)
+		r.Get("/variables", s.handleVariablesPage)
+		r.Post("/variables", s.handleVariableSave)
+		r.Post("/variables/delete", s.handleVariableDelete)
+		r.Get("/setup", s.handleSetupPage)
+		r.Post("/setup/run", s.handleSetupRun)
+		r.Post("/setup/local-target", s.handleSetupLocalTarget)
 		r.Get("/tokens", s.handleTokensPage)
 		r.Post("/tokens", s.handleTokenCreate)
 		r.Post("/tokens/delete", s.handleTokenDelete)

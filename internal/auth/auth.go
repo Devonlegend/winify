@@ -28,6 +28,10 @@ const sessionCookieName = "cc_session"
 // password" so callers cannot distinguish the two.
 var ErrInvalidCredentials = errors.New("invalid credentials")
 
+// ErrRegistrationClosed is returned when the first-run registration is
+// attempted after an admin account already exists.
+var ErrRegistrationClosed = errors.New("registration is closed")
+
 // dummyHash is compared against when the user does not exist, so a missing
 // user takes the same time as a wrong password (mitigates user enumeration).
 var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("not-a-real-password"), bcrypt.DefaultCost)
@@ -57,6 +61,34 @@ func HashPassword(plain string) (string, error) {
 		return "", fmt.Errorf("hash password: %w", err)
 	}
 	return string(h), nil
+}
+
+// HasUsers reports whether any admin account exists. The HTTP layer uses it to
+// route first-run visitors to registration instead of login.
+func (s *Service) HasUsers(ctx context.Context) (bool, error) {
+	n, err := s.store.CountUsers(ctx)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// Register creates the first admin account and returns it. It is only valid
+// while no account exists: once one does, it returns ErrRegistrationClosed and
+// never overwrites the existing account.
+func (s *Service) Register(ctx context.Context, username, password string) (models.User, error) {
+	hash, err := HashPassword(password)
+	if err != nil {
+		return models.User{}, err
+	}
+	user, err := s.store.CreateFirstUser(ctx, username, hash)
+	if errors.Is(err, models.ErrAlreadyInitialized) {
+		return models.User{}, ErrRegistrationClosed
+	}
+	if err != nil {
+		return models.User{}, err
+	}
+	return user, nil
 }
 
 // Authenticate verifies a username/password pair. The error never contains the

@@ -84,7 +84,9 @@ func (d *Deployer) Trigger(ctx context.Context, project config.Project, srv conf
 // the target, so it does not require two prior successes.
 func (d *Deployer) Rollback(ctx context.Context, project config.Project, srv config.Server) (int64, error) {
 	var prev models.Deployment
-	if srv.Type != config.ServerTypeIIS {
+	// IIS and winsvc roll back by restoring a timestamped backup discovered on
+	// the target, so they do not need the previous image/commit from history.
+	if srv.Type != config.ServerTypeIIS && srv.Type != config.ServerTypeWindowsService {
 		p, err := d.previousSuccessful(ctx, project.ID)
 		if err != nil {
 			return 0, err
@@ -171,6 +173,13 @@ func (d *Deployer) run(ctx context.Context, job deployJob) {
 		DeploymentID: job.id,
 	})
 
+	// Resolve {{project.KEY}} / {{environment.KEY}} references before the target
+	// reads the env maps.
+	if err := d.resolveSharedVars(ctx, &job.project); err != nil {
+		fail(err)
+		return
+	}
+
 	target, err := d.newTarget(ctx, job, d.secrets)
 	if err != nil {
 		fail(err)
@@ -207,6 +216,25 @@ func (d *Deployer) run(ctx context.Context, job deployJob) {
 	log.Printf("%s %d (%s) succeeded", verb, job.id, job.project.ID)
 }
 
+// resolveSharedVars expands shared-variable references in the project's runtime
+// and build env maps. It only queries the store when a reference is present.
+func (d *Deployer) resolveSharedVars(ctx context.Context, p *config.Project) error {
+	if !hasSharedRefs(p.Env) && !hasSharedRefs(p.BuildEnv) {
+		return nil
+	}
+	vars, err := d.store.SharedVariablesFor(ctx, p.ProjectGroup, p.Environment)
+	if err != nil {
+		return err
+	}
+	if p.Env, err = expandSharedVars(p.Env, vars); err != nil {
+		return err
+	}
+	if p.BuildEnv, err = expandSharedVars(p.BuildEnv, vars); err != nil {
+		return err
+	}
+	return nil
+}
+
 // registerProxy makes the app live at its domain through the reverse proxy.
 // This is shared by Docker and IIS; only the upstream host resolution differs.
 func (d *Deployer) registerProxy(ctx context.Context, job deployJob, logf loggerFunc) error {
@@ -222,7 +250,7 @@ func (d *Deployer) registerProxy(ctx context.Context, job deployJob, logf logger
 	if host == "" {
 		return fmt.Errorf("no target host configured for proxy registration")
 	}
-	upstream := fmt.Sprintf("%s:%d", host, job.project.Port)
+	upstream := fmt.Sprintf("%s:%d", host, job.project.EffectiveHostPort())
 	if err := d.proxy.Register(ctx, job.project.Domain, upstream); err != nil {
 		return fmt.Errorf("register %s: %w", job.project.Domain, err)
 	}

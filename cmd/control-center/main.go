@@ -5,6 +5,8 @@
 // Usage:
 //
 //	control-center [serve] [-config config.yaml]
+//	control-center bootstrap [-config config.yaml] [--dry-run]
+//	control-center bootstrap -config config.yaml --remote http://host:5985/wsman --user DOMAIN\user
 //	control-center hash-password
 //	control-center cred add <name>
 //	control-center cred list
@@ -29,12 +31,14 @@ import (
 
 	"github.com/Devonlegend/winify/internal/assistant"
 	"github.com/Devonlegend/winify/internal/auth"
+	"github.com/Devonlegend/winify/internal/bootstrap"
 	"github.com/Devonlegend/winify/internal/config"
 	"github.com/Devonlegend/winify/internal/deployment"
 	"github.com/Devonlegend/winify/internal/models"
 	"github.com/Devonlegend/winify/internal/monitoring"
 	"github.com/Devonlegend/winify/internal/proxy"
 	"github.com/Devonlegend/winify/internal/server"
+	"github.com/Devonlegend/winify/internal/service"
 )
 
 func main() {
@@ -44,6 +48,9 @@ func main() {
 		case "serve":
 			runServe(args[1:])
 			return
+		case "bootstrap":
+			runBootstrap(args[1:])
+			return
 		case "hash-password":
 			runHashPassword(args[1:])
 			return
@@ -51,7 +58,7 @@ func main() {
 			runCred(args[1:])
 			return
 		default:
-			log.Fatalf("unknown command %q (want: serve, hash-password, cred)", args[0])
+			log.Fatalf("unknown command %q (want: serve, bootstrap, hash-password, cred)", args[0])
 		}
 	}
 	runServe(args)
@@ -65,10 +72,32 @@ func runServe(args []string) {
 	fs.Parse(args)
 
 	cfg := mustConfig(*configPath)
+
+	// Started by the Windows SCM: serve until the SCM asks us to stop.
+	if service.IsWindowsService() {
+		if err := service.Run(cfg.Bootstrap.ServiceName, func(ctx context.Context) error {
+			return serve(cfg, *configPath, ctx)
+		}); err != nil {
+			log.Fatalf("windows service: %v", err)
+		}
+		return
+	}
+
+	// Interactive: stop on Ctrl-C / SIGINT. signal.NotifyContext is the modern
+	// way to turn a signal into a context instead of a global handler.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := serve(cfg, *configPath, ctx); err != nil {
+		log.Fatalf("serve: %v", err)
+	}
+}
+
+// serve runs the control center until ctx is cancelled. It is shared by the
+// interactive and Windows-service entry points.
+func serve(cfg config.Config, configPath string, ctx context.Context) error {
 	store, cleanup := mustStore(cfg)
 	defer cleanup()
 
-	ctx := context.Background()
 	if err := store.DeleteExpiredSessions(ctx, time.Now()); err != nil {
 		log.Printf("prune sessions: %v", err)
 	}
@@ -143,6 +172,49 @@ func runServe(args []string) {
 		assistantSvc = buildAssistant(ctx, cfg, store)
 	}
 
+	// Bootstrap status backs the Setup page. Applying steps is the `bootstrap`
+	// subcommand (elevated); here it is read-only.
+	var boot *bootstrap.Bootstrap
+	if cfg.Bootstrap.Enabled {
+		root := cfg.Bootstrap.InstallDir
+		if root == "" {
+			root = bootstrap.DefaultRoot()
+		}
+		exe, _ := os.Executable()
+		boot = bootstrap.New(bootstrap.Options{
+			Paths:        bootstrap.DefaultPaths(root),
+			NSSMSource:   cfg.Deploy.NSSMSource,
+			NSSMSHA256:   cfg.Deploy.NSSMSHA256,
+			EnableWinRM:  cfg.Bootstrap.EnableWinRM,
+			ServiceName:  cfg.Bootstrap.ServiceName,
+			ExePath:      exe,
+			ConfigPath:   configPath,
+			CaddyEnabled: cfg.Bootstrap.Caddy.Enabled,
+			CaddySource:  cfg.Bootstrap.Caddy.Source,
+			CaddyURL:     cfg.Bootstrap.Caddy.URL,
+			CaddySHA256:  cfg.Bootstrap.Caddy.SHA256,
+			CaddyAdmin:   cfg.Bootstrap.Caddy.Admin,
+			Meta:         store,
+			Runner:       bootstrap.NewLocalRunner(),
+			Logf:         log.Printf,
+		})
+	}
+
+	// First-run: a Windows service is already elevated, so provision the host on
+	// boot. An interactive non-elevated start waits for the Setup page button.
+	if boot != nil && service.IsWindowsService() {
+		go func() {
+			complete, err := boot.Complete(context.Background())
+			if err != nil || complete {
+				return
+			}
+			log.Printf("bootstrap: host not fully provisioned; running bootstrap")
+			if _, err := boot.Run(context.Background()); err != nil {
+				log.Printf("bootstrap: %v", err)
+			}
+		}()
+	}
+
 	srv, err := server.New(server.Deps{
 		Cfg:             cfg,
 		Store:           store,
@@ -151,6 +223,24 @@ func runServe(args []string) {
 		Deployer:        deployer,
 		Assistant:       assistantSvc,
 		CredentialAdmin: credStore,
+		Bootstrap:       boot,
+		BootstrapRun: func(runCtx context.Context) error {
+			if boot == nil {
+				return errors.New("bootstrap is disabled")
+			}
+			_, err := boot.Run(runCtx)
+			return err
+		},
+		BootstrapElevate: func() error {
+			exe, err := os.Executable()
+			if err != nil {
+				return err
+			}
+			return service.RelaunchElevated(exe, configPath)
+		},
+		BootstrapElevated: func(ctx context.Context) (bool, error) {
+			return bootstrap.IsElevated(ctx, bootstrap.NewLocalRunner())
+		},
 	})
 	if err != nil {
 		log.Fatalf("server: %v", err)
@@ -162,31 +252,35 @@ func runServe(args []string) {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	// ctx is cancelled on Ctrl-C / SIGINT. signal.NotifyContext is the modern
-	// way to turn a signal into a context instead of a global handler.
-	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-
+	listenErr := make(chan error, 1)
 	go func() {
 		log.Printf("control-center listening on %s", cfg.Server.Addr)
-		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("listen: %v", err)
-		}
+		listenErr <- httpServer.ListenAndServe()
 	}()
 
-	<-signalCtx.Done()
-	log.Println("shutting down")
+	select {
+	case <-ctx.Done():
+		log.Println("shutting down")
+	case err := <-listenErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("listen: %w", err)
+		}
+		return nil
+	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+	return nil
 }
 
-// seedAdmin ensures the configured admin account exists. The password comes
-// from CC_ADMIN_PASSWORD (hashed here) or a pre-hashed auth.admin_password_hash.
-// Neither value is ever logged.
+// seedAdmin creates the admin account when a password is supplied out of band
+// (CC_ADMIN_PASSWORD, hashed here, or a pre-hashed auth.admin_password_hash) —
+// useful for headless/automated installs. When neither is set, it does nothing
+// and the operator creates the first account in the browser via /register. No
+// password is ever logged.
 func seedAdmin(ctx context.Context, store *models.Store, cfg config.Config) {
 	hash := cfg.Auth.AdminPasswordHash
 	if plaintext := os.Getenv("CC_ADMIN_PASSWORD"); plaintext != "" {
@@ -197,8 +291,10 @@ func seedAdmin(ctx context.Context, store *models.Store, cfg config.Config) {
 		hash = h
 	}
 	if hash == "" {
-		log.Fatal("no admin password configured: set CC_ADMIN_PASSWORD, or set auth.admin_password_hash " +
-			"(generate one with: control-center hash-password)")
+		if n, err := store.CountUsers(ctx); err == nil && n == 0 {
+			log.Printf("no admin account yet: open the control-center in a browser to create one")
+		}
+		return
 	}
 	if err := store.UpsertUser(ctx, cfg.Auth.AdminUser, hash); err != nil {
 		log.Fatalf("seed admin user: %v", err)
@@ -284,6 +380,295 @@ func buildAssistant(ctx context.Context, cfg config.Config, store *models.Store)
 	}
 	log.Printf("assistant: %d doc chunks ready (store=%s, model=%s)", len(docs), primary.Name(), cfg.Assistant.Model)
 	return svc
+}
+
+// ---- bootstrap ----
+
+// runBootstrap provisions this host (directories, NSSM, WinRM). It must run
+// elevated; use --dry-run to preview the changes without applying them.
+func runBootstrap(args []string) {
+	fs := flag.NewFlagSet("bootstrap", flag.ExitOnError)
+	configPath := fs.String("config", defaultConfigPath(), "path to YAML config")
+	dryRun := fs.Bool("dry-run", false, "report intended changes without applying them")
+	remote := fs.String("remote", "", "WinRM endpoint of a remote Windows server to provision")
+	remoteUser := fs.String("user", "", "WinRM user for --remote (or CC_REMOTE_WINRM_USER)")
+	remoteID := fs.String("id", "", "server id to create for --remote (default derived from the host)")
+	remoteName := fs.String("name", "", "server display name for --remote")
+	fs.Parse(args)
+
+	cfg := mustConfig(*configPath)
+	if !cfg.Bootstrap.Enabled {
+		log.Fatal("bootstrap is disabled (set bootstrap.enabled: true to enable it)")
+	}
+	store, cleanup := mustStore(cfg)
+	defer cleanup()
+
+	if *remote != "" {
+		runRemoteBootstrap(cfg, store, *remote, *remoteUser, *remoteID, *remoteName, *dryRun)
+		return
+	}
+
+	root := cfg.Bootstrap.InstallDir
+	if root == "" {
+		root = bootstrap.DefaultRoot()
+	}
+	runner := bootstrap.NewLocalRunner()
+	ctx := context.Background()
+
+	if !*dryRun {
+		elevated, err := bootstrap.IsElevated(ctx, runner)
+		if err != nil {
+			log.Fatalf("bootstrap: check elevation: %v", err)
+		}
+		if !elevated {
+			log.Fatal("bootstrap must run elevated: open PowerShell as Administrator, or run it from the winify service")
+		}
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		log.Fatalf("bootstrap: locate executable: %v", err)
+	}
+	paths := bootstrap.DefaultPaths(root)
+	opts := bootstrap.Options{
+		Paths:        paths,
+		NSSMSource:   cfg.Deploy.NSSMSource,
+		NSSMSHA256:   cfg.Deploy.NSSMSHA256,
+		EnableWinRM:  cfg.Bootstrap.EnableWinRM,
+		ServiceName:  cfg.Bootstrap.ServiceName,
+		ExePath:      exe,
+		ConfigPath:   *configPath,
+		CaddyEnabled: cfg.Bootstrap.Caddy.Enabled,
+		CaddySource:  cfg.Bootstrap.Caddy.Source,
+		CaddyURL:     cfg.Bootstrap.Caddy.URL,
+		CaddySHA256:  cfg.Bootstrap.Caddy.SHA256,
+		CaddyAdmin:   cfg.Bootstrap.Caddy.Admin,
+		DryRun:       *dryRun,
+		Meta:         store,
+		Runner:       runner,
+		Logf:         log.Printf,
+	}
+
+	// The local target needs a WinRM account/password. When it is available
+	// (env vars or an interactive prompt) bootstrap creates the winsvc server
+	// too; otherwise the Setup page form does it.
+	if user, password, ok := localWinRMCredentials(); ok {
+		key, err := auth.LoadMasterKey(cfg.Credentials.MasterKey, masterKeyPath(cfg))
+		if err != nil {
+			log.Fatalf("master key: %v", err)
+		}
+		credStore, err := auth.NewCredentialStore(store, key)
+		if err != nil {
+			log.Fatalf("credential store: %v", err)
+		}
+		opts.TargetStepName = "local-target"
+		opts.TargetCheck, opts.TargetApply = targetSteps(store, credStore, localTargetServer(paths, user), localWinRMRef, password)
+	}
+
+	b := bootstrap.New(opts)
+	results, err := b.Run(ctx)
+	for _, r := range results {
+		line := string(r.Status)
+		if r.Error != "" {
+			line += ": " + r.Error
+		}
+		log.Printf("bootstrap: %-6s %s", r.Name, line)
+	}
+	if err != nil {
+		log.Fatalf("bootstrap failed: %v", err)
+	}
+	log.Printf("bootstrap complete (root %s)", root)
+}
+
+// localWinRMRef is the credential name holding the local WinRM password.
+const localWinRMRef = "local-winrm"
+
+// localWinRMCredentials returns the local WinRM account and password from the
+// environment, or prompts interactively. ok is false when neither is available
+// (for example a non-interactive service start); the Setup page form is then
+// the way to create the local target.
+func localWinRMCredentials() (user, password string, ok bool) {
+	user = strings.TrimSpace(os.Getenv("CC_LOCAL_WINRM_USER"))
+	password = os.Getenv("CC_LOCAL_WINRM_PASSWORD")
+	if password != "" {
+		if user == "" {
+			user = defaultLocalUser()
+		}
+		return user, password, true
+	}
+	info, err := os.Stdin.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return "", "", false
+	}
+	if user == "" {
+		user = defaultLocalUser()
+	}
+	fmt.Fprintf(os.Stderr, "Local WinRM account [%s]: ", user)
+	if line, err := bufio.NewReader(os.Stdin).ReadString('\n'); err == nil {
+		if v := strings.TrimSpace(line); v != "" {
+			user = v
+		}
+	}
+	pw, err := readSecret("Local WinRM password (input is echoed): ")
+	if err != nil || pw == "" {
+		return "", "", false
+	}
+	return user, pw, true
+}
+
+// defaultLocalUser is the account the control center is running as.
+func defaultLocalUser() string {
+	if u := os.Getenv("USERNAME"); u != "" {
+		return u
+	}
+	return os.Getenv("USER")
+}
+
+// localTargetServer is the winsvc server entry for the machine winify runs on.
+func localTargetServer(paths bootstrap.Paths, user string) config.Server {
+	return config.Server{
+		ID:             "local",
+		Name:           "This machine",
+		Type:           config.ServerTypeWindowsService,
+		WinRMEndpoint:  "http://127.0.0.1:5985/wsman",
+		WinRMUser:      user,
+		WinRMTransport: "ntlm",
+		CredentialRef:  "vault:" + localWinRMRef,
+		NSSMPath:       paths.NSSM,
+		Host:           "127.0.0.1",
+	}
+}
+
+// targetSteps returns the closures that store a WinRM credential and create a
+// winsvc server entry. Used for the local host and for remote bootstrap.
+func targetSteps(store *models.Store, credStore *auth.CredentialStore, srv config.Server, refName, password string) (func(context.Context) (bool, error), func(context.Context) error) {
+	check := func(ctx context.Context) (bool, error) {
+		_, err := store.GetServer(ctx, srv.ID)
+		if err == nil {
+			return true, nil
+		}
+		if errors.Is(err, models.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	apply := func(ctx context.Context) error {
+		if err := credStore.Put(ctx, refName, password); err != nil {
+			return fmt.Errorf("store credential: %w", err)
+		}
+		return store.UpsertServer(ctx, srv)
+	}
+	return check, apply
+}
+
+// runRemoteBootstrap provisions a remote Windows server over WinRM: directories,
+// NSSM, WinRM and (optionally) Caddy, then creates a winsvc server entry. It does
+// not install winify itself on the target.
+func runRemoteBootstrap(cfg config.Config, store *models.Store, endpoint, user, id, name string, dryRun bool) {
+	if user == "" {
+		user = strings.TrimSpace(os.Getenv("CC_REMOTE_WINRM_USER"))
+	}
+	if user == "" {
+		log.Fatal("--user is required for --remote (or set CC_REMOTE_WINRM_USER)")
+	}
+	password := os.Getenv("CC_REMOTE_WINRM_PASSWORD")
+	if password == "" {
+		pw, err := readSecret("Remote WinRM password (input is echoed): ")
+		if err != nil || pw == "" {
+			log.Fatal("no remote password provided")
+		}
+		password = pw
+	}
+	if id == "" {
+		id = remoteServerID(endpoint)
+	}
+	if name == "" {
+		name = id
+	}
+
+	srv := config.Server{
+		ID:             id,
+		Name:           name,
+		Type:           config.ServerTypeWindowsService,
+		WinRMEndpoint:  endpoint,
+		WinRMUser:      user,
+		WinRMTransport: "ntlm",
+	}
+	runner, err := deployment.DialWinRM(srv, password)
+	if err != nil {
+		log.Fatalf("connect %s: %v", endpoint, err)
+	}
+	defer runner.Close()
+
+	key, err := auth.LoadMasterKey(cfg.Credentials.MasterKey, masterKeyPath(cfg))
+	if err != nil {
+		log.Fatalf("master key: %v", err)
+	}
+	credStore, err := auth.NewCredentialStore(store, key)
+	if err != nil {
+		log.Fatalf("credential store: %v", err)
+	}
+
+	root := cfg.Bootstrap.InstallDir
+	if root == "" {
+		root = bootstrap.DefaultRoot()
+	}
+	refName := id + "-winrm"
+	srv.CredentialRef = "vault:" + refName
+
+	opts := bootstrap.Options{
+		Paths:          bootstrap.DefaultPaths(root),
+		NSSMSource:     cfg.Deploy.NSSMSource,
+		NSSMSHA256:     cfg.Deploy.NSSMSHA256,
+		EnableWinRM:    cfg.Bootstrap.EnableWinRM,
+		CaddyEnabled:   cfg.Bootstrap.Caddy.Enabled,
+		CaddySource:    cfg.Bootstrap.Caddy.Source,
+		CaddyURL:       cfg.Bootstrap.Caddy.URL,
+		CaddySHA256:    cfg.Bootstrap.Caddy.SHA256,
+		CaddyAdmin:     cfg.Bootstrap.Caddy.Admin,
+		TargetStepName: "target",
+		DryRun:         dryRun,
+		Meta:           store,
+		Runner:         runner,
+		Logf:           log.Printf,
+	}
+	opts.TargetCheck, opts.TargetApply = targetSteps(store, credStore, srv, refName, password)
+
+	results, err := bootstrap.New(opts).Run(context.Background())
+	for _, res := range results {
+		line := string(res.Status)
+		if res.Error != "" {
+			line += ": " + res.Error
+		}
+		log.Printf("bootstrap: %-8s %s", res.Name, line)
+	}
+	if err != nil {
+		log.Fatalf("remote bootstrap failed: %v", err)
+	}
+	log.Printf("remote bootstrap complete: %s (%s)", id, endpoint)
+}
+
+// remoteServerID derives a server id from a WinRM endpoint host.
+func remoteServerID(endpoint string) string {
+	host := endpoint
+	if u, err := url.Parse(endpoint); err == nil && u.Hostname() != "" {
+		host = u.Hostname()
+	}
+	return "remote-" + sanitizeID(host)
+}
+
+// sanitizeID lowercases and replaces non-alphanumerics for use in an id.
+func sanitizeID(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 // ---- hash-password ----

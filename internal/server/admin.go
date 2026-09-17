@@ -75,6 +75,9 @@ func (s *Server) handleServerSave(w http.ResponseWriter, r *http.Request) {
 		WinRMTransport: strings.TrimSpace(r.FormValue("winrm_transport")),
 		WinRMInsecure:  r.FormValue("winrm_insecure") != "",
 		CredentialRef:  strings.TrimSpace(r.FormValue("credential_ref")),
+		NSSMPath:       strings.TrimSpace(r.FormValue("nssm_path")),
+		CaddyPath:      strings.TrimSpace(r.FormValue("caddy_path")),
+		PublicIP:       strings.TrimSpace(r.FormValue("public_ip")),
 		SSHHost:        strings.TrimSpace(r.FormValue("ssh_host")),
 		SSHUser:        strings.TrimSpace(r.FormValue("ssh_user")),
 		SSHKeyRef:      strings.TrimSpace(r.FormValue("ssh_key_ref")),
@@ -147,18 +150,18 @@ func validateServer(srv config.Server) error {
 		if srv.SSHKeyRef == "" {
 			return errors.New("ssh_key_ref is required for a docker server")
 		}
-	case config.ServerTypeIIS:
+	case config.ServerTypeIIS, config.ServerTypeWindowsService:
 		if srv.WinRMEndpoint == "" {
-			return errors.New("winrm_endpoint is required for an IIS server")
+			return fmt.Errorf("winrm_endpoint is required for a %s server", srv.Type)
 		}
 		if srv.WinRMUser == "" {
-			return errors.New("winrm_user is required for an IIS server")
+			return fmt.Errorf("winrm_user is required for a %s server", srv.Type)
 		}
 		if srv.CredentialRef == "" {
-			return errors.New("credential_ref is required for an IIS server")
+			return fmt.Errorf("credential_ref is required for a %s server", srv.Type)
 		}
 	default:
-		return fmt.Errorf("type must be %q or %q", config.ServerTypeDocker, config.ServerTypeIIS)
+		return fmt.Errorf("type must be %q, %q or %q", config.ServerTypeDocker, config.ServerTypeIIS, config.ServerTypeWindowsService)
 	}
 	return nil
 }
@@ -267,10 +270,11 @@ func (s *Server) renderProjects(w http.ResponseWriter, r *http.Request, status i
 
 type projectFormPageData struct {
 	pageData
-	Form    *config.Project
-	Servers []config.Server
-	EditEnv string
-	Error   string
+	Form         *config.Project
+	Servers      []config.Server
+	EditEnv      string
+	EditBuildEnv string
+	Error        string
 }
 
 func (s *Server) handleProjectNew(w http.ResponseWriter, r *http.Request) {
@@ -301,6 +305,7 @@ func (s *Server) renderProjectForm(w http.ResponseWriter, r *http.Request, statu
 	data := projectFormPageData{pageData: s.page(r), Form: form, Servers: servers, Error: errMsg}
 	if form != nil {
 		data.EditEnv = formatEnv(form.Env)
+		data.EditBuildEnv = formatEnv(form.BuildEnv)
 	}
 	data.Active = "projects"
 	s.render(w, status, "project_new", data)
@@ -308,16 +313,17 @@ func (s *Server) renderProjectForm(w http.ResponseWriter, r *http.Request, statu
 
 type resourcePageData struct {
 	pageData
-	Project     config.Project
-	ServerType  string
-	Tab         string
-	Deployments []models.Deployment
-	CanRollback bool
-	Servers     []config.Server
-	Form        *config.Project
-	EditEnv     string
-	Error       string
-	Notice      string
+	Project      config.Project
+	ServerType   string
+	Tab          string
+	Deployments  []models.Deployment
+	CanRollback  bool
+	Servers      []config.Server
+	Form         *config.Project
+	EditEnv      string
+	EditBuildEnv string
+	Error        string
+	Notice       string
 }
 
 func (s *Server) handleResourcePage(w http.ResponseWriter, r *http.Request) {
@@ -348,17 +354,18 @@ func (s *Server) handleResourcePage(w http.ResponseWriter, r *http.Request) {
 	servers, _ := s.store.ListServers(ctx)
 
 	data := resourcePageData{
-		pageData:    s.page(r),
-		Project:     project,
-		ServerType:  serverType,
-		Tab:         tab,
-		Deployments: deploys,
-		CanRollback: len(successes) >= 2,
-		Servers:     servers,
-		Form:        &project,
-		EditEnv:     formatEnv(project.Env),
-		Error:       r.URL.Query().Get("error"),
-		Notice:      r.URL.Query().Get("notice"),
+		pageData:     s.page(r),
+		Project:      project,
+		ServerType:   serverType,
+		Tab:          tab,
+		Deployments:  deploys,
+		CanRollback:  len(successes) >= 2,
+		Servers:      servers,
+		Form:         &project,
+		EditEnv:      formatEnv(project.Env),
+		EditBuildEnv: formatEnv(project.BuildEnv),
+		Error:        r.URL.Query().Get("error"),
+		Notice:       r.URL.Query().Get("notice"),
 	}
 	data.Active = "projects"
 	data.ActiveResource = id
@@ -374,6 +381,9 @@ func (s *Server) handleProjectEnvSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	project.Env = parseEnv(r.FormValue("env"))
+	if _, ok := r.Form["build_env"]; ok {
+		project.BuildEnv = parseEnv(r.FormValue("build_env"))
+	}
 	if err := s.store.UpsertProject(ctx, project); err != nil {
 		log.Printf("projects: env: %v", err)
 		http.Redirect(w, r, "/projects/"+id+"?tab=environment&error="+urlQuery("Failed to save environment"), http.StatusSeeOther)
@@ -387,45 +397,79 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 		s.renderProjectForm(w, r, http.StatusBadRequest, nil, "Malformed form submission.")
 		return
 	}
-	port, err := strconv.Atoi(strings.TrimSpace(r.FormValue("port")))
+	exposes, err := formInt(r, "ports_exposes")
 	if err != nil {
-		s.renderProjectForm(w, r, http.StatusBadRequest, nil, "port must be a number.")
+		s.renderProjectForm(w, r, http.StatusBadRequest, nil, err.Error())
 		return
 	}
-	containerPort := 0
-	if v := strings.TrimSpace(r.FormValue("container_port")); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			s.renderProjectForm(w, r, http.StatusBadRequest, nil, "container_port must be a number.")
-			return
-		}
-		containerPort = n
+	if exposes == 0 {
+		// Backwards compatibility with the old single "port" field.
+		exposes, _ = formInt(r, "port")
+	}
+	mappings, err := parsePortMappings(r.FormValue("ports_mappings"))
+	if err != nil {
+		s.renderProjectForm(w, r, http.StatusBadRequest, nil, err.Error())
+		return
+	}
+	healthInterval, err := formInt(r, "health_interval_seconds")
+	if err != nil {
+		s.renderProjectForm(w, r, http.StatusBadRequest, nil, err.Error())
+		return
+	}
+	healthTimeout, err := formInt(r, "health_timeout_seconds")
+	if err != nil {
+		s.renderProjectForm(w, r, http.StatusBadRequest, nil, err.Error())
+		return
+	}
+	healthRetries, err := formInt(r, "health_retries")
+	if err != nil {
+		s.renderProjectForm(w, r, http.StatusBadRequest, nil, err.Error())
+		return
+	}
+	healthStart, err := formInt(r, "health_start_period_seconds")
+	if err != nil {
+		s.renderProjectForm(w, r, http.StatusBadRequest, nil, err.Error())
+		return
 	}
 	p := config.Project{
-		ID:                 strings.TrimSpace(r.FormValue("id")),
-		Name:               strings.TrimSpace(r.FormValue("name")),
-		ServerID:           strings.TrimSpace(r.FormValue("server_id")),
-		Source:             strings.TrimSpace(r.FormValue("source")),
-		RepoURL:            strings.TrimSpace(r.FormValue("repo_url")),
-		DockerfilePath:     strings.TrimSpace(r.FormValue("dockerfile_path")),
-		ComposePath:        strings.TrimSpace(r.FormValue("compose_path")),
-		Image:              strings.TrimSpace(r.FormValue("image")),
-		ContainerPort:      containerPort,
-		IISSite:            strings.TrimSpace(r.FormValue("iis_site")),
-		IISPhysicalPath:    strings.TrimSpace(r.FormValue("iis_physical_path")),
-		IISAppPool:         strings.TrimSpace(r.FormValue("iis_app_pool")),
-		IISService:         strings.TrimSpace(r.FormValue("iis_service")),
-		IISBuildCommand:    strings.TrimSpace(r.FormValue("iis_build_command")),
-		IISSourceSubdir:    strings.TrimSpace(r.FormValue("iis_source_subdir")),
-		Branch:             strings.TrimSpace(r.FormValue("branch")),
-		Domain:             strings.TrimSpace(r.FormValue("domain")),
-		Port:               port,
-		HealthPath:         strings.TrimSpace(r.FormValue("health_path")),
-		WebhookSecretRef:   strings.TrimSpace(r.FormValue("webhook_secret_ref")),
-		Env:                parseEnv(r.FormValue("env")),
-		ProjectGroup:       strings.TrimSpace(r.FormValue("project_group")),
-		Environment:        strings.TrimSpace(r.FormValue("environment")),
-		DisableHealthCheck: r.FormValue("disable_health_check") != "",
+		ID:                       strings.TrimSpace(r.FormValue("id")),
+		Name:                     strings.TrimSpace(r.FormValue("name")),
+		ServerID:                 strings.TrimSpace(r.FormValue("server_id")),
+		Source:                   strings.TrimSpace(r.FormValue("source")),
+		RepoURL:                  strings.TrimSpace(r.FormValue("repo_url")),
+		DockerfilePath:           strings.TrimSpace(r.FormValue("dockerfile_path")),
+		ComposePath:              strings.TrimSpace(r.FormValue("compose_path")),
+		Image:                    strings.TrimSpace(r.FormValue("image")),
+		PortsExposes:             exposes,
+		PortsMappings:            mappings,
+		IISSite:                  strings.TrimSpace(r.FormValue("iis_site")),
+		IISPhysicalPath:          strings.TrimSpace(r.FormValue("iis_physical_path")),
+		IISAppPool:               strings.TrimSpace(r.FormValue("iis_app_pool")),
+		IISService:               strings.TrimSpace(r.FormValue("iis_service")),
+		IISBuildCommand:          strings.TrimSpace(r.FormValue("iis_build_command")),
+		IISSourceSubdir:          strings.TrimSpace(r.FormValue("iis_source_subdir")),
+		ServiceName:              strings.TrimSpace(r.FormValue("service_name")),
+		ServiceExe:               strings.TrimSpace(r.FormValue("service_exe")),
+		ServiceArgs:              strings.TrimSpace(r.FormValue("service_args")),
+		ServiceWorkDir:           strings.TrimSpace(r.FormValue("service_work_dir")),
+		ServiceBuildCommand:      strings.TrimSpace(r.FormValue("service_build_command")),
+		ServiceSourceSubdir:      strings.TrimSpace(r.FormValue("service_source_subdir")),
+		ServiceLogDir:            strings.TrimSpace(r.FormValue("service_log_dir")),
+		ServiceAccount:           strings.TrimSpace(r.FormValue("service_account")),
+		CaddyMode:                strings.TrimSpace(r.FormValue("caddy_mode")),
+		Branch:                   strings.TrimSpace(r.FormValue("branch")),
+		Domain:                   strings.TrimSpace(r.FormValue("domain")),
+		HealthPath:               strings.TrimSpace(r.FormValue("health_path")),
+		WebhookSecretRef:         strings.TrimSpace(r.FormValue("webhook_secret_ref")),
+		Env:                      parseEnv(r.FormValue("env")),
+		BuildEnv:                 parseEnv(r.FormValue("build_env")),
+		HealthIntervalSeconds:    healthInterval,
+		HealthTimeoutSeconds:     healthTimeout,
+		HealthRetries:            healthRetries,
+		HealthStartPeriodSeconds: healthStart,
+		ProjectGroup:             strings.TrimSpace(r.FormValue("project_group")),
+		Environment:              strings.TrimSpace(r.FormValue("environment")),
+		DisableHealthCheck:       r.FormValue("disable_health_check") != "",
 	}
 	if p.Branch == "" {
 		p.Branch = "main"
@@ -433,6 +477,8 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 	if p.HealthPath == "" {
 		p.HealthPath = "/"
 	}
+	// The host port is derived; keep the legacy field in sync for records.
+	p.Port = p.EffectiveHostPort()
 
 	// Strategy follows the bound server's type; the deploy pipeline selects on it.
 	srv, err := s.store.GetServer(r.Context(), p.ServerID)
@@ -441,7 +487,7 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.Strategy = srv.Type
-	if srv.Type == config.ServerTypeIIS {
+	if srv.Type == config.ServerTypeIIS || srv.Type == config.ServerTypeWindowsService {
 		p.Source = ""
 	}
 
@@ -479,8 +525,8 @@ func validateProject(p config.Project, srv config.Server) error {
 		return errors.New("name is required")
 	case p.ServerID == "":
 		return errors.New("server is required")
-	case p.Port < 1 || p.Port > 65535:
-		return errors.New("port must be between 1 and 65535")
+	case p.EffectiveHostPort() < 1 || p.EffectiveHostPort() > 65535:
+		return errors.New("ports_exposes must be between 1 and 65535")
 	}
 	if srv.Type == config.ServerTypeIIS {
 		if p.RepoURL == "" {
@@ -491,6 +537,26 @@ func validateProject(p config.Project, srv config.Server) error {
 		}
 		if p.IISAppPool == "" {
 			return errors.New("iis_app_pool is required for an IIS project")
+		}
+		return nil
+	}
+	if srv.Type == config.ServerTypeWindowsService {
+		if p.RepoURL == "" {
+			return errors.New("repo_url is required for a Windows service project")
+		}
+		if p.ServiceName == "" {
+			return errors.New("service_name is required for a Windows service project")
+		}
+		if p.ServiceExe == "" {
+			return errors.New("service_exe is required for a Windows service project")
+		}
+		if p.ServiceWorkDir == "" {
+			return errors.New("service_work_dir is required for a Windows service project")
+		}
+		switch p.CaddyMode {
+		case "", config.CaddyModeNone, config.CaddyModeProxy, config.CaddyModeStatic:
+		default:
+			return fmt.Errorf("caddy_mode must be %q, %q or %q", config.CaddyModeNone, config.CaddyModeProxy, config.CaddyModeStatic)
 		}
 		return nil
 	}
@@ -634,6 +700,37 @@ func parseList(raw string) []string {
 		return nil
 	}
 	return out
+}
+
+// formInt parses an optional integer form field; empty means zero.
+func formInt(r *http.Request, key string) (int, error) {
+	v := strings.TrimSpace(r.FormValue(key))
+	if v == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a number", key)
+	}
+	return n, nil
+}
+
+// parsePortMappings parses "host:container" mappings, one per line or
+// comma-separated, validating each.
+func parsePortMappings(raw string) ([]string, error) {
+	fields := strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '\n' })
+	var out []string
+	for _, f := range fields {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		if _, _, err := config.ParsePortMapping(f); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, nil
 }
 
 // parseEnv parses "KEY=VALUE" lines into a map, ignoring blanks and # comments.

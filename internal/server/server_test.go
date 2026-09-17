@@ -11,9 +11,17 @@ import (
 	"time"
 
 	"github.com/Devonlegend/winify/internal/auth"
+	"github.com/Devonlegend/winify/internal/bootstrap"
 	"github.com/Devonlegend/winify/internal/config"
 	"github.com/Devonlegend/winify/internal/models"
 )
+
+// noopRunner satisfies deployment.Runner for tests that only read bootstrap
+// status (no commands are executed).
+type noopRunner struct{}
+
+func (noopRunner) Run(context.Context, string) (string, error) { return "", nil }
+func (noopRunner) Close() error                                { return nil }
 
 const testPassword = "correct horse"
 
@@ -62,6 +70,19 @@ func newTestServerWithStore(t *testing.T) (*Server, *models.Store) {
 
 func newTestServerFull(t *testing.T) (*Server, *models.Store, *fakeDeployer) {
 	t.Helper()
+	return newTestServerOpts(t, true)
+}
+
+// newTestServerNoUsers builds a server on an empty database, i.e. a fresh
+// install where first-run registration is available.
+func newTestServerNoUsers(t *testing.T) (*Server, *models.Store) {
+	t.Helper()
+	srv, store, _ := newTestServerOpts(t, false)
+	return srv, store
+}
+
+func newTestServerOpts(t *testing.T, seedAdmin bool) (*Server, *models.Store, *fakeDeployer) {
+	t.Helper()
 	db, err := models.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -72,15 +93,23 @@ func newTestServerFull(t *testing.T) (*Server, *models.Store, *fakeDeployer) {
 	}
 	store := models.NewStore(db)
 
-	hash, err := auth.HashPassword(testPassword)
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
-	if err := store.UpsertUser(context.Background(), "admin", hash); err != nil {
-		t.Fatalf("UpsertUser: %v", err)
+	if seedAdmin {
+		hash, err := auth.HashPassword(testPassword)
+		if err != nil {
+			t.Fatalf("HashPassword: %v", err)
+		}
+		if err := store.UpsertUser(context.Background(), "admin", hash); err != nil {
+			t.Fatalf("UpsertUser: %v", err)
+		}
 	}
 
 	deployer := &fakeDeployer{}
+	boot := bootstrap.New(bootstrap.Options{
+		Paths:       bootstrap.DefaultPaths(`C:\ProgramData\winify`),
+		EnableWinRM: true,
+		Meta:        store,
+		Runner:      noopRunner{},
+	})
 	srv, err := New(Deps{
 		Cfg:             config.Default(),
 		Store:           store,
@@ -89,6 +118,7 @@ func newTestServerFull(t *testing.T) (*Server, *models.Store, *fakeDeployer) {
 		Deployer:        deployer,
 		Assistant:       &fakeAssistant{},
 		CredentialAdmin: stubSecrets{value: "test-secret"},
+		Bootstrap:       boot,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -217,6 +247,32 @@ func TestLogoutRevokesSession(t *testing.T) {
 	after := getWithCookie(t, s, "/dashboard", cookie)
 	if after.Code != http.StatusSeeOther {
 		t.Fatalf("dashboard after logout = %d, want 303", after.Code)
+	}
+}
+
+func TestProjectFormAndWizardRender(t *testing.T) {
+	s, store := newTestServerWithStore(t)
+	cookie := login(t, s)
+	if err := store.UpsertProject(context.Background(), config.Project{
+		ID: "p1", Name: "App", ServerID: "s1", RepoURL: "https://x/y", Branch: "main",
+		PortsExposes: 3000, PortsMappings: []string{"8080:3000"},
+		Env: map[string]string{"A": "1"}, BuildEnv: map[string]string{"TOKEN": "x"},
+		HealthIntervalSeconds: 5, HealthRetries: 4,
+	}); err != nil {
+		t.Fatalf("UpsertProject: %v", err)
+	}
+
+	rec := getWithCookie(t, s, "/projects/new", cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Ports exposes") {
+		t.Fatalf("wizard = %d, want 200 with ports_exposes field", rec.Code)
+	}
+
+	rec = getWithCookie(t, s, "/projects/p1?tab=settings", cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "8080:3000") {
+		t.Fatalf("settings tab = %d, want 200 with the port mapping", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "TOKEN=x") {
+		t.Fatalf("settings tab did not render build env")
 	}
 }
 

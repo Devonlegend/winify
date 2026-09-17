@@ -8,6 +8,7 @@ projects:
     dockerfile_path: "Dockerfile"
     branch: "main"
     domain: ""
-    port: 18080
+    ports_exposes: 18080
+    ports_mappings: ["18080:18080"]
     health_path: "/healthz"
     webhook_secret_ref: "vault:demo-webhook"

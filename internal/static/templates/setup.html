@@ -1,0 +1,59 @@
+{{define "title"}}Setup &middot; Control Center{{end}}
+{{define "body"}}
+<main>
+  <div class="page-head">
+    <div>
+      <h1>Setup</h1>
+      <p class="muted">Zero-touch provisioning of this host. Apply pending steps with <span class="mono">winify bootstrap</span> from an elevated shell.</p>
+    </div>
+  </div>
+
+  {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+
+  {{if not .Available}}
+    <div class="placeholder">Bootstrap is not enabled in this configuration.</div>
+  {{else}}
+    <table class="deploys">
+      <thead><tr><th>Step</th><th>Status</th></tr></thead>
+      <tbody>
+        {{range .Steps}}
+        <tr>
+          <td class="mono">{{.Name}}</td>
+          <td>
+            {{if .Done}}<span class="status status-success">done</span>
+            {{else if .Error}}<span class="status status-failed" title="{{.Error}}">error</span>
+            {{else}}<span class="status status-queued">pending</span>{{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    <form method="post" action="/setup/run" class="form-actions">
+      <button type="submit">Run bootstrap</button>
+    </form>
+    <p class="muted">Or run from an elevated shell: <span class="mono">winify bootstrap -config config.yaml</span> &middot; add <span class="mono">--dry-run</span> to preview.</p>
+  {{end}}
+
+  <h2 class="form-title">Local target</h2>
+  {{if .LocalServer}}
+    <p class="muted">A <span class="mono">winsvc</span> target for this machine already exists (server <span class="mono">local</span>).</p>
+  {{else}}
+    <p class="muted">Create a <span class="mono">winsvc</span> target for this machine so you can deploy native services to it. The password is stored encrypted and used over WinRM.</p>
+    <form method="post" action="/setup/local-target" class="admin-form">
+      <label>WinRM account<input name="winrm_user" placeholder="user or DOMAIN\user" required></label>
+      <label>WinRM password<input type="password" name="winrm_password" required></label>
+      <label>Public IP (optional, for sslip.io domains)<input name="public_ip" placeholder="203.0.113.10"></label>
+      <div class="form-actions"><button type="submit">Create local target</button></div>
+    </form>
+  {{end}}
+
+  <details class="advanced">
+    <summary>Provisioning a remote Windows server</summary>
+    <p class="muted">On the remote host (elevated), enable WinRM once:</p>
+    <pre class="log">Enable-PSRemoting -Force</pre>
+    <p class="muted">Then provision it from here (prompts for the password):</p>
+    <pre class="log">winify bootstrap -config config.yaml --remote http://HOST:5985/wsman --user DOMAIN\user</pre>
+  </details>
+</main>
+{{end}}

@@ -203,9 +203,18 @@ func (t *dockerTarget) cloneAndBuild(ctx context.Context, job deployJob, workdir
 	if dockerfile == "" {
 		dockerfile = "Dockerfile"
 	}
-	build := fmt.Sprintf("docker build -t %s -f %s %s",
-		shellQuote(tag), shellQuote(path.Join(workdir, dockerfile)), shellQuote(workdir))
-	if out, err := execCmd(ctx, t.runner, build, "docker build -t "+tag, logf); err != nil {
+	build := fmt.Sprintf("docker build -t %s -f %s", shellQuote(tag), shellQuote(path.Join(workdir, dockerfile)))
+	for _, k := range sortedKeys(job.project.BuildEnv) {
+		build += fmt.Sprintf(" --build-arg %s", shellQuote(k+"="+job.project.BuildEnv[k]))
+	}
+	build += " " + shellQuote(workdir)
+
+	// Build args can hold secrets, so keep the payload out of the audit log.
+	buildCtx := ctx
+	if len(job.project.BuildEnv) > 0 {
+		buildCtx = withAuditRedaction(ctx, "docker build (build args redacted)")
+	}
+	if out, err := execCmd(buildCtx, t.runner, build, "docker build -t "+tag, logf); err != nil {
 		return fmt.Errorf("docker build: %w\n%s", err, out)
 	}
 	return nil
@@ -232,10 +241,19 @@ func (t *dockerTarget) writeGeneratedCompose(ctx context.Context, job deployJob,
 // writeEnvFile writes project env values to .env so the repo's compose file can
 // reference them. Contents are redacted from the audit log.
 func (t *dockerTarget) writeEnvFile(ctx context.Context, job deployJob, workdir string, logf loggerFunc) error {
-	if len(job.project.Env) == 0 {
+	// The .env feeds compose variable substitution, so build-time values that
+	// the compose file references under build.args must be included too.
+	merged := make(map[string]string, len(job.project.Env)+len(job.project.BuildEnv))
+	for k, v := range job.project.Env {
+		merged[k] = v
+	}
+	for k, v := range job.project.BuildEnv {
+		merged[k] = v
+	}
+	if len(merged) == 0 {
 		return nil
 	}
-	encoded := base64.StdEncoding.EncodeToString([]byte(envFileContent(job.project.Env)))
+	encoded := base64.StdEncoding.EncodeToString([]byte(envFileContent(merged)))
 	cmd := fmt.Sprintf("echo %s | base64 -d > %s", encoded, shellQuote(path.Join(workdir, ".env")))
 	writeCtx := withAuditRedaction(ctx, "write .env (contents redacted)")
 	if out, err := execCmd(writeCtx, t.runner, cmd, "write .env", logf); err != nil {
@@ -271,19 +289,24 @@ func (t *dockerTarget) healthCheck(ctx context.Context, job deployJob, workdir, 
 		logf("health check disabled; skipping")
 		return nil
 	}
-	if job.project.Port == 0 {
+	hostPort := job.project.EffectiveHostPort()
+	if hostPort == 0 {
 		logf("no port configured; skipping health check")
 		return nil
 	}
-	interval, attempts := healthTiming(t.cfg)
+	plan := healthPlanFor(t.cfg, job.project)
 	url := healthURL(job.project)
+	start := ""
+	if plan.startPeriod > 0 {
+		start = fmt.Sprintf("sleep %d; ", plan.startPeriod)
+	}
 	cmd := fmt.Sprintf(
-		"last=''; for i in $(seq 1 %d); do out=$(curl -fsS --max-time 3 %s 2>&1) && { echo healthy; exit 0; }; last=\"$out\"; sleep %d; done; echo \"health check failed: $last\"; exit 1",
-		attempts, shellQuote(url), interval)
+		"%slast=''; for i in $(seq 1 %d); do out=$(curl -fsS --max-time %d %s 2>&1) && { echo healthy; exit 0; }; last=\"$out\"; sleep %d; done; echo \"health check failed: $last\"; exit 1",
+		start, plan.attempts, plan.timeout, shellQuote(url), plan.interval)
 	if _, err := execCmd(ctx, t.runner, cmd, "health check "+url, logf); err != nil {
 		t.diagnose(ctx, workdir, composePath, logf)
-		return fmt.Errorf("health check failed for %s: %w (is the app listening on port %d inside the container? set container_port to the app's port, or a PORT env var)",
-			url, err, job.project.Port)
+		return fmt.Errorf("health check failed for %s: %w (is the app listening on port %d inside the container? set ports_exposes to the app's port, or a PORT env var)",
+			url, err, hostPort)
 	}
 	return nil
 }
@@ -301,17 +324,32 @@ func (t *dockerTarget) diagnose(ctx context.Context, workdir, composePath string
 	}
 }
 
+// composePorts returns the port publish entries for a generated compose file.
+// Explicit mappings win; otherwise the exposed port is published 1:1 so the
+// central reverse proxy can reach the workload.
+func composePorts(project config.Project) []string {
+	if len(project.PortsMappings) > 0 {
+		return project.PortsMappings
+	}
+	if project.PortsExposes > 0 {
+		return []string{fmt.Sprintf("%d:%d", project.PortsExposes, project.PortsExposes)}
+	}
+	if project.Port > 0 {
+		return []string{fmt.Sprintf("%d:%d", project.Port, project.Port)}
+	}
+	return nil
+}
+
 // composeFile renders a minimal compose file for the app image.
 func composeFile(project config.Project, image string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "services:\n  app:\n    image: %s\n    container_name: cc-%s\n    restart: unless-stopped\n",
 		image, sanitize(project.ID))
-	if project.Port > 0 {
-		containerPort := project.ContainerPort
-		if containerPort <= 0 {
-			containerPort = project.Port
+	if ports := composePorts(project); len(ports) > 0 {
+		b.WriteString("    ports:\n")
+		for _, port := range ports {
+			fmt.Fprintf(&b, "      - %q\n", port)
 		}
-		fmt.Fprintf(&b, "    ports:\n      - \"%d:%d\"\n", project.Port, containerPort)
 	}
 	if len(project.Env) > 0 {
 		b.WriteString("    environment:\n")

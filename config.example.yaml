@@ -40,12 +40,40 @@ deploy:
   iis_work_dir: 'C:\control-center'
   # Where timestamped pre-deploy IIS backups are stored for rollback.
   iis_backup_dir: 'C:\control-center\backups'
+  # Path on THIS host to the nssm.exe uploaded to winsvc targets on first
+  # deploy. The public-domain binary is ~300 KB. Empty disables upload and
+  # requires NSSM to already be present on the target.
+  nssm_source: "tools/nssm.exe"
+  # Optional pinned SHA-256 (hex) of nssm.exe; a mismatch aborts the deploy.
+  nssm_sha256: ""
   # Empty disables SSH host-key verification (insecure; set a known_hosts file).
   known_hosts_file: ""
   health_timeout_seconds: 60
   health_interval_seconds: 3
   # Bound a whole deploy so a hung remote command cannot leave it "running".
   timeout_minutes: 30
+
+bootstrap:
+  # Zero-touch provisioning of the host winify runs on. Apply with
+  # `winify bootstrap` from an elevated shell (or `--dry-run` to preview).
+  enabled: true
+  # On-host root. Empty means %ProgramData%\winify on Windows.
+  install_dir: ""
+  # Windows service name winify installs for itself (used in a later phase).
+  service_name: "winify"
+  # Enable PowerShell Remoting so this host can be a deploy target.
+  enable_winrm: true
+  caddy:
+    # Install Caddy (binary + NSSM service) and open 80/443. Requires source or
+    # url. After it is running, set proxy.enabled: true to register routes.
+    enabled: false
+    # Local path on THIS host to caddy.exe (takes precedence over url).
+    source: ""
+    # Or a Caddy release zip URL; the .exe is extracted and uploaded.
+    url: ""
+    # Optional pinned SHA-256 of the caddy.exe binary.
+    sha256: ""
+    admin: "127.0.0.1:2019"
 
 monitoring:
   # Poll each registered server over its existing SSH/WinRM connection.

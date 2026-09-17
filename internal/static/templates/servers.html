@@ -40,9 +40,11 @@
       <select name="type" id="server-type" required>
         <option value="docker" {{if .Edit}}{{if eq .Edit.Type "docker"}}selected{{end}}{{end}}>docker</option>
         <option value="iis" {{if .Edit}}{{if eq .Edit.Type "iis"}}selected{{end}}{{end}}>iis</option>
+        <option value="winsvc" {{if .Edit}}{{if eq .Edit.Type "winsvc"}}selected{{end}}{{end}}>winsvc (native Windows service via NSSM)</option>
       </select>
     </label>
     <label>Host (proxy upstream, optional)<input name="host" value="{{if .Edit}}{{.Edit.Host}}{{end}}"></label>
+    <label>Public IP (for sslip.io domains, optional)<input name="public_ip" value="{{if .Edit}}{{.Edit.PublicIP}}{{end}}" placeholder="203.0.113.10"></label>
 
     <fieldset data-server-group="docker">
       <legend>Docker / SSH</legend>
@@ -52,7 +54,7 @@
       <label>SSH key ref<input name="ssh_key_ref" value="{{if .Edit}}{{.Edit.SSHKeyRef}}{{end}}" placeholder="vault:server-002-ssh"></label>
     </fieldset>
 
-    <fieldset data-server-group="iis">
+    <fieldset data-server-group="iis winsvc">
       <legend>Windows / WinRM</legend>
       <label>WinRM endpoint<input name="winrm_endpoint" value="{{if .Edit}}{{.Edit.WinRMEndpoint}}{{end}}" placeholder="https://host:5986/wsman"></label>
       <label>WinRM user<input name="winrm_user" value="{{if .Edit}}{{.Edit.WinRMUser}}{{end}}"></label>
@@ -64,6 +66,12 @@
       </label>
       <label class="check"><input type="checkbox" name="winrm_insecure" {{if .Edit}}{{if .Edit.WinRMInsecure}}checked{{end}}{{end}}> Skip TLS verification</label>
       <label>WinRM credential ref<input name="credential_ref" value="{{if .Edit}}{{.Edit.CredentialRef}}{{end}}" placeholder="vault:server-001-winrm"></label>
+    </fieldset>
+
+    <fieldset data-server-group="winsvc">
+      <legend>Windows service (NSSM)</legend>
+      <label>NSSM path<input name="nssm_path" value="{{if .Edit}}{{.Edit.NSSMPath}}{{end}}" placeholder="C:\control-center\tools\nssm.exe"></label>
+      <label>Caddy path<input name="caddy_path" value="{{if .Edit}}{{.Edit.CaddyPath}}{{end}}" placeholder="C:\control-center\tools\caddy.exe"></label>
     </fieldset>
 
     <label>Services (comma-separated)<input name="services" value="{{if .Edit}}{{range $i, $s := .Edit.Services}}{{if $i}}, {{end}}{{$s}}{{end}}{{end}}" placeholder="docker, nginx"></label>

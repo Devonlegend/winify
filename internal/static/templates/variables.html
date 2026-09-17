@@ -1,0 +1,54 @@
+{{define "title"}}Shared variables &middot; Control Center{{end}}
+{{define "body"}}
+<main>
+  <div class="page-head">
+    <div>
+      <h1>Shared variables</h1>
+      <p class="muted">Reference these from a resource's env as <span class="mono">&#123;&#123;project.KEY&#125;&#125;</span> (project group) or <span class="mono">&#123;&#123;environment.KEY&#125;&#125;</span> (group/environment). Stored in plaintext, unlike Credentials.</p>
+    </div>
+  </div>
+
+  {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+
+  {{if .Variables}}
+  <table class="deploys">
+    <thead><tr><th>Scope</th><th>Scope ID</th><th>Key</th><th>Value</th><th></th></tr></thead>
+    <tbody>
+      {{range .Variables}}
+      <tr>
+        <td>{{.Scope}}</td>
+        <td class="mono">{{.ScopeID}}</td>
+        <td class="mono">{{.Key}}</td>
+        <td class="mono">{{.Value}}</td>
+        <td class="row-actions">
+          <form method="post" action="/variables/delete" onsubmit="return confirm('Delete {{.Key}}?');">
+            <input type="hidden" name="scope" value="{{.Scope}}">
+            <input type="hidden" name="scope_id" value="{{.ScopeID}}">
+            <input type="hidden" name="key" value="{{.Key}}">
+            <button type="submit" class="link danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+    <div class="placeholder">No shared variables yet.</div>
+  {{end}}
+
+  <h2 class="form-title">Add or update variable</h2>
+  <form method="post" action="/variables" class="admin-form">
+    <label>Scope
+      <select name="scope">
+        <option value="project">project (group)</option>
+        <option value="environment">environment (group/environment)</option>
+      </select>
+    </label>
+    <label>Scope ID<input name="scope_id" placeholder="Default or Default/production"></label>
+    <label>Key<input name="key" placeholder="DATABASE_URL"></label>
+    <label>Value<input name="value" placeholder="postgres://user:pass@host/db"></label>
+    <div class="form-actions"><button type="submit">Save variable</button></div>
+  </form>
+</main>
+{{end}}

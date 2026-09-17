@@ -6,7 +6,7 @@
     <select name="server_id" required>
       <option value="">&mdash; select &mdash;</option>
       {{range .Servers}}
-      <option value="{{.ID}}" {{if $.Form}}{{if eq $.Form.ServerID .ID}}selected{{end}}{{end}}>{{.ID}} ({{.Type}})</option>
+      <option value="{{.ID}}" data-ip="{{.PublicIP}}" {{if $.Form}}{{if eq $.Form.ServerID .ID}}selected{{end}}{{end}}>{{.ID}} ({{.Type}})</option>
       {{end}}
     </select>
   </label>
@@ -14,8 +14,8 @@
   <label>Environment<input name="environment" value="{{if .Form}}{{.Form.Environment}}{{end}}" placeholder="production"></label>
   <label>Repository URL<input name="repo_url" value="{{if .Form}}{{.Form.RepoURL}}{{end}}" placeholder="https://github.com/you/app"></label>
   <label>Branch<input name="branch" value="{{if .Form}}{{.Form.Branch}}{{end}}" placeholder="main"></label>
-  <label>Domain<input name="domain" value="{{if .Form}}{{.Form.Domain}}{{end}}" placeholder="app.example.com"></label>
-  <label>Port<input name="port" value="{{if .Form}}{{.Form.Port}}{{end}}" placeholder="8080" required></label>
+  <label>Domain<input name="domain" id="project-domain" value="{{if .Form}}{{.Form.Domain}}{{end}}" placeholder="app.example.com"></label>
+  <button type="button" class="btn btn-ghost btn-sm" id="generate-domain">Generate sslip.io domain</button>
   <label>Health path<input name="health_path" value="{{if .Form}}{{.Form.HealthPath}}{{end}}" placeholder="/healthz"></label>
   <label class="check"><input type="checkbox" name="disable_health_check" {{if .Form}}{{if .Form.DisableHealthCheck}}checked{{end}}{{end}}> Skip the post-deploy health check</label>
   <label>Webhook secret ref<input name="webhook_secret_ref" value="{{if .Form}}{{.Form.WebhookSecretRef}}{{end}}" placeholder="vault:app-webhook"></label>
@@ -32,7 +32,19 @@
     <label>Dockerfile path<input name="dockerfile_path" value="{{if .Form}}{{.Form.DockerfilePath}}{{end}}" placeholder="Dockerfile"></label>
     <label>Compose path<input name="compose_path" value="{{if .Form}}{{.Form.ComposePath}}{{end}}" placeholder="docker-compose.yml"></label>
     <label>Image<input name="image" value="{{if .Form}}{{.Form.Image}}{{end}}" placeholder="nginx:1.27"></label>
-    <label>Container port<input name="container_port" value="{{if .Form}}{{.Form.ContainerPort}}{{end}}" placeholder="defaults to Port"></label>
+    <label>Ports exposes (container port)<input name="ports_exposes" value="{{if .Form}}{{.Form.PortsExposes}}{{end}}" placeholder="3000"></label>
+    <label>Ports mappings (host:container, one per line)
+      <textarea name="ports_mappings" rows="2" placeholder="8080:3000">{{if .Form}}{{range .Form.PortsMappings}}{{.}}
+{{end}}{{end}}</textarea>
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Health check timing (optional; blank uses the global default)</legend>
+    <label>Interval (s)<input name="health_interval_seconds" value="{{if .Form}}{{.Form.HealthIntervalSeconds}}{{end}}" placeholder="3"></label>
+    <label>Timeout per attempt (s)<input name="health_timeout_seconds" value="{{if .Form}}{{.Form.HealthTimeoutSeconds}}{{end}}" placeholder="5"></label>
+    <label>Retries<input name="health_retries" value="{{if .Form}}{{.Form.HealthRetries}}{{end}}" placeholder="derived from the global timeout"></label>
+    <label>Start period (s)<input name="health_start_period_seconds" value="{{if .Form}}{{.Form.HealthStartPeriodSeconds}}{{end}}" placeholder="0"></label>
   </fieldset>
 
   <fieldset>
@@ -44,9 +56,32 @@
     <label>Source subdir<input name="iis_source_subdir" value="{{if .Form}}{{.Form.IISSourceSubdir}}{{end}}" placeholder="publish"></label>
   </fieldset>
 
-  <label>Environment (KEY=VALUE per line)
+  <fieldset>
+    <legend>Windows service (NSSM)</legend>
+    <label>Service name<input name="service_name" value="{{if .Form}}{{.Form.ServiceName}}{{end}}" placeholder="MyApp"></label>
+    <label>Executable path (on target)<input name="service_exe" value="{{if .Form}}{{.Form.ServiceExe}}{{end}}" placeholder="C:\control-center\apps\myapp\myapp.exe"></label>
+    <label>Arguments (optional)<input name="service_args" value="{{if .Form}}{{.Form.ServiceArgs}}{{end}}" placeholder="--port 8080"></label>
+    <label>Install directory<input name="service_work_dir" value="{{if .Form}}{{.Form.ServiceWorkDir}}{{end}}" placeholder="C:\control-center\apps\myapp"></label>
+    <label>Build command (optional)<input name="service_build_command" value="{{if .Form}}{{.Form.ServiceBuildCommand}}{{end}}" placeholder="go build -o myapp.exe ./cmd/myapp"></label>
+    <label>Source subdir<input name="service_source_subdir" value="{{if .Form}}{{.Form.ServiceSourceSubdir}}{{end}}" placeholder="."></label>
+    <label>Log directory (optional)<input name="service_log_dir" value="{{if .Form}}{{.Form.ServiceLogDir}}{{end}}" placeholder="C:\control-center\logs\myapp"></label>
+    <label>Service account (optional)<input name="service_account" value="{{if .Form}}{{.Form.ServiceAccount}}{{end}}" placeholder="LocalSystem"></label>
+    <label>Caddy mode
+      <select name="caddy_mode">
+        <option value="none" {{if .Form}}{{if eq .Form.CaddyMode "none"}}selected{{end}}{{end}}>none (central proxy only)</option>
+        <option value="static" {{if .Form}}{{if eq .Form.CaddyMode "static"}}selected{{end}}{{end}}>static (serve files)</option>
+        <option value="proxy" {{if .Form}}{{if eq .Form.CaddyMode "proxy"}}selected{{end}}{{end}}>proxy</option>
+      </select>
+    </label>
+  </fieldset>
+
+  <label>Environment (KEY=VALUE per line, runtime)
     <textarea name="env" rows="4" placeholder="ASPNETCORE_ENVIRONMENT=Production">{{.EditEnv}}</textarea>
   </label>
+  <label>Build environment (KEY=VALUE per line, build only)
+    <textarea name="build_env" rows="3" placeholder="NPM_TOKEN=...">{{.EditBuildEnv}}</textarea>
+  </label>
+  <p class="muted">Reference shared variables as <span class="mono">&#123;&#123;project.KEY&#125;&#125;</span> or <span class="mono">&#123;&#123;environment.KEY&#125;&#125;</span>.</p>
 
   <div class="form-actions">
     <button type="submit">Save resource</button>

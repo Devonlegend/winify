@@ -80,6 +80,40 @@ projects:
 	}
 }
 
+func TestParsePortMapping(t *testing.T) {
+	host, container, err := ParsePortMapping("8080:3000")
+	if err != nil || host != 8080 || container != 3000 {
+		t.Fatalf("8080:3000 = (%d, %d, %v)", host, container, err)
+	}
+	host, container, err = ParsePortMapping("3000")
+	if err != nil || host != 3000 || container != 3000 {
+		t.Fatalf("bare port = (%d, %d, %v)", host, container, err)
+	}
+	for _, bad := range []string{"", "abc", "0:80", "80:", "70000:80", "80:0"} {
+		if _, _, err := ParsePortMapping(bad); err == nil {
+			t.Errorf("ParsePortMapping(%q) succeeded, want error", bad)
+		}
+	}
+}
+
+func TestEffectiveHostPort(t *testing.T) {
+	cases := []struct {
+		name string
+		p    Project
+		want int
+	}{
+		{"mapping wins", Project{PortsMappings: []string{"8080:3000"}, PortsExposes: 3000}, 8080},
+		{"exposes fallback", Project{PortsExposes: 3000}, 3000},
+		{"legacy port", Project{Port: 9000}, 9000},
+		{"mapping over legacy", Project{PortsMappings: []string{"7070:3000"}, Port: 9000}, 7070},
+	}
+	for _, c := range cases {
+		if got := c.p.EffectiveHostPort(); got != c.want {
+			t.Errorf("%s: EffectiveHostPort = %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
 func TestLoadEntitiesMissingFilesAreEmpty(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "nope.yaml")
 	servers, err := LoadServers(missing)

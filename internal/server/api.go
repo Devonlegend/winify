@@ -195,6 +195,11 @@ func (s *Server) apiSaveProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.Strategy = srv.Type
+	if srv.Type == config.ServerTypeIIS || srv.Type == config.ServerTypeWindowsService {
+		p.Source = ""
+	}
+	// The host port is derived; keep the legacy field in sync for records.
+	p.Port = p.EffectiveHostPort()
 	if err := validateProject(p, srv); err != nil {
 		apiError(w, http.StatusBadRequest, err.Error())
 		return

@@ -51,7 +51,12 @@ func (t *iisTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) 
 
 	// 2. Optional build (for example: dotnet publish into the source subdir).
 	if p.IISBuildCommand != "" {
-		if _, err := execCmd(ctx, t.runner, buildScript(repoDir, p.IISBuildCommand), "iis build command", logf); err != nil {
+		buildCtx := ctx
+		if len(p.BuildEnv) > 0 {
+			// Build env values can hold secrets; keep them out of the audit log.
+			buildCtx = withAuditRedaction(ctx, "iis build command (build env redacted)")
+		}
+		if _, err := execCmd(buildCtx, t.runner, buildScript(repoDir, p.IISBuildCommand, p.BuildEnv), "iis build command", logf); err != nil {
 			return "", fmt.Errorf("build: %w", err)
 		}
 	}
@@ -135,9 +140,9 @@ func (t *iisTarget) smokeTest(ctx context.Context, p config.Project, logf logger
 		logf("no port configured; skipping smoke test")
 		return nil
 	}
-	interval, attempts := healthTiming(t.cfg)
+	plan := healthPlanFor(t.cfg, p)
 	url := healthURL(p)
-	if _, err := execCmd(ctx, t.runner, smokeScript(url, attempts, interval), "smoke test "+url, logf); err != nil {
+	if _, err := execCmd(ctx, t.runner, smokeScript(url, plan), "smoke test "+url, logf); err != nil {
 		return fmt.Errorf("smoke test failed: %w", err)
 	}
 	return nil
@@ -165,8 +170,15 @@ func syncRepoScript(repoDir, repoURL, commit string) string {
 	return b.String()
 }
 
-func buildScript(repoDir, buildCommand string) string {
-	return fmt.Sprintf("$ErrorActionPreference='Stop'\nSet-Location %s\n%s\n", psQuote(repoDir), buildCommand)
+func buildScript(repoDir, buildCommand string, env map[string]string) string {
+	var b strings.Builder
+	b.WriteString("$ErrorActionPreference='Stop'\n")
+	fmt.Fprintf(&b, "Set-Location %s\n", psQuote(repoDir))
+	for _, k := range sortedKeys(env) {
+		fmt.Fprintf(&b, "$env:%s = %s\n", k, psQuote(env[k]))
+	}
+	fmt.Fprintf(&b, "%s\n", buildCommand)
+	return b.String()
 }
 
 // validateScript checks the source tree, web.config XML and IIS prerequisites.
@@ -251,16 +263,19 @@ func copyScript(src, dst, label string) string {
 	return b.String()
 }
 
-func smokeScript(url string, attempts, interval int) string {
+func smokeScript(url string, plan healthPlan) string {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'\n")
 	fmt.Fprintf(&b, "$url = %s\n", psQuote(url))
-	fmt.Fprintf(&b, "for ($i=0; $i -lt %d; $i++) {\n", attempts)
+	if plan.startPeriod > 0 {
+		fmt.Fprintf(&b, "Start-Sleep -Seconds %d\n", plan.startPeriod)
+	}
+	fmt.Fprintf(&b, "for ($i=0; $i -lt %d; $i++) {\n", plan.attempts)
 	b.WriteString("  try {\n")
-	b.WriteString("    $r = Invoke-WebRequest -UseBasicParsing -Uri $url -TimeoutSec 3\n")
+	fmt.Fprintf(&b, "    $r = Invoke-WebRequest -UseBasicParsing -Uri $url -TimeoutSec %d\n", plan.timeout)
 	b.WriteString("    if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 400) { Write-Output 'smoke test ok'; exit 0 }\n")
 	b.WriteString("  } catch { }\n")
-	fmt.Fprintf(&b, "  Start-Sleep -Seconds %d\n", interval)
+	fmt.Fprintf(&b, "  Start-Sleep -Seconds %d\n", plan.interval)
 	b.WriteString("}\n")
 	fmt.Fprintf(&b, "throw \"smoke test failed: $url\"\n")
 	return b.String()

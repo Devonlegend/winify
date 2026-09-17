@@ -1,0 +1,12 @@
+ALTER TABLE servers ADD COLUMN nssm_path TEXT NOT NULL DEFAULT '';
+ALTER TABLE servers ADD COLUMN caddy_path TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE projects ADD COLUMN service_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN service_exe TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN service_args TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN service_work_dir TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN service_build_command TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN service_source_subdir TEXT NOT NULL DEFAULT '.';
+ALTER TABLE projects ADD COLUMN service_log_dir TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN service_account TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN caddy_mode TEXT NOT NULL DEFAULT 'none';

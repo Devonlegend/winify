@@ -78,11 +78,14 @@
 
   {{if eq .Tab "environment"}}
   <div class="tab-panel">
-    <p class="muted">KEY=VALUE per line. Injected into the container, or written to a <span class="mono">.env</span> file for compose deploys.</p>
+    <p class="muted">KEY=VALUE per line. Runtime values are injected into the container (or written to a <span class="mono">.env</span> for compose deploys); build values are passed only to the image build. Reference shared variables as <span class="mono">&#123;&#123;project.KEY&#125;&#125;</span> or <span class="mono">&#123;&#123;environment.KEY&#125;&#125;</span>.</p>
     <form method="post" action="/projects/env" class="admin-form">
       <input type="hidden" name="id" value="{{.Project.ID}}">
-      <label>Environment
+      <label>Environment (runtime)
         <textarea name="env" rows="8" placeholder="KEY=VALUE">{{.EditEnv}}</textarea>
+      </label>
+      <label>Build environment (build only)
+        <textarea name="build_env" rows="5" placeholder="KEY=VALUE">{{.EditBuildEnv}}</textarea>
       </label>
       <div class="form-actions"><button type="submit">Save environment</button></div>
     </form>

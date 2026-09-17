@@ -35,6 +35,11 @@
           <span class="choice-title">Windows IIS application</span>
           <span class="choice-desc">Publish files to an IIS site over WinRM with backup and rollback.</span>
         </label>
+        <label class="choice">
+          <input type="radio" name="wizard_family" value="winsvc">
+          <span class="choice-title">Windows native service</span>
+          <span class="choice-desc">Run a built executable as a Windows service via NSSM, optionally fronted by Caddy.</span>
+        </label>
       </div>
     </section>
 
@@ -85,7 +90,7 @@
         <label>Name<input name="name" id="wz-name" required placeholder="Storefront API"></label>
         <label>ID<input name="id" id="wz-id" required placeholder="storefront-api"></label>
         <label>Domain<input name="domain" placeholder="app.example.com"></label>
-        <label>Port<input name="port" value="8080" required></label>
+        <label>Ports exposes (container port)<input name="ports_exposes" value="8080" required></label>
         <label>Health path<input name="health_path" value="/healthz"></label>
         <label>Project group<input name="project_group" value="Default"></label>
         <label>Environment<input name="environment" value="production"></label>
@@ -96,6 +101,21 @@
         <label>Service (optional)<input name="iis_service"></label>
         <label>Build command (optional)<input name="iis_build_command" placeholder="dotnet publish -c Release -o publish"></label>
         <label>Source subdir<input name="iis_source_subdir" placeholder="publish"></label>
+      </div>
+      <div class="admin-form" data-group="winsvc" hidden>
+        <label>Service name<input name="service_name" placeholder="MyApp"></label>
+        <label>Executable path (on target)<input name="service_exe" placeholder="C:\control-center\apps\myapp\myapp.exe"></label>
+        <label>Arguments (optional)<input name="service_args" placeholder="--port 8080"></label>
+        <label>Install directory<input name="service_work_dir" placeholder="C:\control-center\apps\myapp"></label>
+        <label>Build command (optional)<input name="service_build_command" placeholder="go build -o myapp.exe ./cmd/myapp"></label>
+        <label>Source subdir<input name="service_source_subdir" placeholder="."></label>
+        <label>Log directory (optional)<input name="service_log_dir" placeholder="C:\control-center\logs\myapp"></label>
+        <label>Caddy mode
+          <select name="caddy_mode">
+            <option value="none">none (central proxy only)</option>
+            <option value="static">static (serve files)</option>
+          </select>
+        </label>
       </div>
     </section>
 
@@ -109,10 +129,11 @@
           <label data-src="dockerfile">Dockerfile path<input name="dockerfile_path" placeholder="Dockerfile"></label>
           <label data-src="compose">Compose path<input name="compose_path" placeholder="docker-compose.yml"></label>
           <label data-src="image">Image<input name="image" placeholder="nginx:1.27"></label>
-          <label data-src="docker">Container port<input name="container_port" placeholder="defaults to Port"></label>
+          <label data-src="docker">Ports mappings (host:container)<input name="ports_mappings" placeholder="8080:3000"></label>
         </div>
         <div class="admin-form">
-          <label>Environment (KEY=VALUE per line)<textarea name="env" rows="4" placeholder="ASPNETCORE_ENVIRONMENT=Production"></textarea></label>
+          <label>Environment (KEY=VALUE per line, runtime)<textarea name="env" rows="4" placeholder="ASPNETCORE_ENVIRONMENT=Production"></textarea></label>
+          <label>Build environment (KEY=VALUE per line, build only)<textarea name="build_env" rows="3" placeholder="NPM_TOKEN=..."></textarea></label>
         </div>
       </details>
     </section>

@@ -12,3 +12,6 @@ CLAUDE.md
 /dev/data/
 /dev/keys/
 /dev/control-center.exe
+
+# Public-domain tool binaries uploaded to targets (nssm.exe, caddy.exe)
+/tools/

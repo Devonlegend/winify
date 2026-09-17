@@ -241,6 +241,142 @@ func TestAdminCredentialsPageAndSave(t *testing.T) {
 	}
 }
 
+func TestAdminProjectPortsEnvAndHealth(t *testing.T) {
+	s, store := newTestServerWithStore(t)
+	cookie := login(t, s)
+	ctx := context.Background()
+	if err := store.UpsertServer(ctx, config.Server{ID: "s1", Type: "docker", SSHHost: "h", SSHUser: "u", SSHKeyRef: "vault:k"}); err != nil {
+		t.Fatalf("UpsertServer: %v", err)
+	}
+
+	rec := postForm(t, s, "/projects", url.Values{
+		"id":                          {"p1"},
+		"name":                        {"App"},
+		"server_id":                   {"s1"},
+		"repo_url":                    {"https://github.com/x/y"},
+		"branch":                      {"main"},
+		"ports_exposes":               {"3000"},
+		"ports_mappings":              {"8080:3000\n9090:9090"},
+		"health_path":                 {"/healthz"},
+		"health_interval_seconds":     {"5"},
+		"health_timeout_seconds":      {"2"},
+		"health_retries":              {"4"},
+		"health_start_period_seconds": {"1"},
+		"env":                         {"A=1"},
+		"build_env":                   {"TOKEN=abc"},
+	}, cookie)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("save status = %d, want 303 (body: %s)", rec.Code, rec.Body.String())
+	}
+	p, err := store.GetProject(ctx, "p1")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+	if p.PortsExposes != 3000 || len(p.PortsMappings) != 2 || p.PortsMappings[0] != "8080:3000" {
+		t.Fatalf("ports = exposes %d mappings %v", p.PortsExposes, p.PortsMappings)
+	}
+	if p.EffectiveHostPort() != 8080 {
+		t.Fatalf("EffectiveHostPort = %d, want 8080", p.EffectiveHostPort())
+	}
+	if p.Env["A"] != "1" || p.BuildEnv["TOKEN"] != "abc" {
+		t.Fatalf("env = %v build_env = %v", p.Env, p.BuildEnv)
+	}
+	if p.HealthIntervalSeconds != 5 || p.HealthTimeoutSeconds != 2 || p.HealthRetries != 4 || p.HealthStartPeriodSeconds != 1 {
+		t.Fatalf("health timing = %+v", p)
+	}
+}
+
+func TestAdminProjectRejectsBadPortMapping(t *testing.T) {
+	s, store := newTestServerWithStore(t)
+	cookie := login(t, s)
+	if err := store.UpsertServer(context.Background(), config.Server{ID: "s1", Type: "docker", SSHHost: "h", SSHUser: "u", SSHKeyRef: "vault:k"}); err != nil {
+		t.Fatalf("UpsertServer: %v", err)
+	}
+
+	rec := postForm(t, s, "/projects", url.Values{
+		"id": {"p1"}, "name": {"App"}, "server_id": {"s1"},
+		"repo_url": {"https://github.com/x/y"}, "ports_exposes": {"3000"},
+		"ports_mappings": {"not-a-port"},
+	}, cookie)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestAdminCreateWindowsServiceProject(t *testing.T) {
+	s, store := newTestServerWithStore(t)
+	cookie := login(t, s)
+	ctx := context.Background()
+
+	rec := postForm(t, s, "/servers", url.Values{
+		"id":             {"s-ws"},
+		"name":           {"Worker host"},
+		"type":           {"winsvc"},
+		"winrm_endpoint": {"https://10.0.0.6:5986/wsman"},
+		"winrm_user":     {"deploy"},
+		"credential_ref": {"vault:ws"},
+		"nssm_path":      {`C:\tools\nssm.exe`},
+	}, cookie)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("server save status = %d, want 303 (body: %s)", rec.Code, rec.Body.String())
+	}
+	srv, err := store.GetServer(ctx, "s-ws")
+	if err != nil {
+		t.Fatalf("GetServer: %v", err)
+	}
+	if srv.NSSMPath != `C:\tools\nssm.exe` {
+		t.Fatalf("nssm_path = %q", srv.NSSMPath)
+	}
+
+	rec = postForm(t, s, "/projects", url.Values{
+		"id":               {"p-ws"},
+		"name":             {"Worker"},
+		"server_id":        {"s-ws"},
+		"repo_url":         {"https://github.com/x/worker"},
+		"port":             {"8080"},
+		"service_name":     {"MyWorker"},
+		"service_exe":      {`C:\apps\worker\worker.exe`},
+		"service_work_dir": {`C:\apps\worker`},
+		"caddy_mode":       {"static"},
+	}, cookie)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("project save status = %d, want 303 (body: %s)", rec.Code, rec.Body.String())
+	}
+	p, err := store.GetProject(ctx, "p-ws")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+	if p.Strategy != config.ServerTypeWindowsService {
+		t.Fatalf("strategy = %q, want winsvc", p.Strategy)
+	}
+	if p.ServiceName != "MyWorker" || p.ServiceExe == "" || p.CaddyMode != "static" {
+		t.Fatalf("project = %+v", p)
+	}
+}
+
+func TestAdminWindowsServiceProjectValidation(t *testing.T) {
+	s, store := newTestServerWithStore(t)
+	cookie := login(t, s)
+	ctx := context.Background()
+	if err := store.UpsertServer(ctx, config.Server{
+		ID: "s-ws", Name: "WS", Type: config.ServerTypeWindowsService,
+		WinRMEndpoint: "https://10.0.0.6:5986/wsman", WinRMUser: "deploy", CredentialRef: "vault:ws",
+	}); err != nil {
+		t.Fatalf("UpsertServer: %v", err)
+	}
+
+	rec := postForm(t, s, "/projects", url.Values{
+		"id": {"p-ws"}, "name": {"Worker"}, "server_id": {"s-ws"},
+		"repo_url": {"https://github.com/x/worker"}, "port": {"8080"},
+	}, cookie)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "service_name is required") {
+		t.Fatalf("missing validation message: %s", rec.Body.String())
+	}
+}
+
 func TestAdminPagesRequireAuth(t *testing.T) {
 	s, _ := newTestServerWithStore(t)
 	for _, path := range []string{"/servers", "/projects", "/credentials"} {

@@ -15,6 +15,10 @@ import (
 // errors.Is instead of checking sql.ErrNoRows, so the SQL detail stays here.
 var ErrNotFound = errors.New("not found")
 
+// ErrAlreadyInitialized means a first-run action was attempted after the system
+// already had a user (for example, registering an admin when one exists).
+var ErrAlreadyInitialized = errors.New("already initialized")
+
 // Store is the typed data-access layer over *sql.DB. Handlers and services use
 // it instead of writing SQL inline.
 type Store struct {
@@ -62,6 +66,38 @@ func (s *Store) UserByUsername(ctx context.Context, username string) (User, erro
 	return u, nil
 }
 
+// CountUsers returns the number of admin accounts. It is how the first-run flow
+// decides whether to show registration or login.
+func (s *Store) CountUsers(ctx context.Context) (int, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count users: %w", err)
+	}
+	return n, nil
+}
+
+// CreateFirstUser creates the initial admin account only when no user exists.
+// It is a single atomic statement, so two concurrent registrations cannot both
+// succeed — the loser gets ErrAlreadyInitialized. It never overwrites an
+// existing account (unlike UpsertUser).
+func (s *Store) CreateFirstUser(ctx context.Context, username, passwordHash string) (User, error) {
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO users (username, password_hash)
+		SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM users)`,
+		username, passwordHash)
+	if err != nil {
+		return User{}, fmt.Errorf("create first user: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return User{}, fmt.Errorf("create first user: %w", err)
+	}
+	if n == 0 {
+		return User{}, ErrAlreadyInitialized
+	}
+	return s.UserByUsername(ctx, username)
+}
+
 // CreateSession stores a session row. tokenHash is a SHA-256 of the raw token
 // the browser holds, so a database leak does not expose usable cookies.
 func (s *Store) CreateSession(ctx context.Context, tokenHash string, userID int64, expires time.Time) error {
@@ -101,6 +137,31 @@ func (s *Store) DeleteSession(ctx context.Context, tokenHash string) error {
 	return nil
 }
 
+// GetMeta reads a value from app_meta. A missing key returns "" and no error,
+// so callers can treat absence as the zero state.
+func (s *Store) GetMeta(ctx context.Context, key string) (string, error) {
+	var value string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM app_meta WHERE key = ?`, key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get meta %q: %w", key, err)
+	}
+	return value, nil
+}
+
+// SetMeta writes a value to app_meta, creating or replacing the key.
+func (s *Store) SetMeta(ctx context.Context, key, value string) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO app_meta (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
+	if err != nil {
+		return fmt.Errorf("set meta %q: %w", key, err)
+	}
+	return nil
+}
+
 // DeleteExpiredSessions prunes stale rows; called at startup.
 func (s *Store) DeleteExpiredSessions(ctx context.Context, now time.Time) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at <= ?`, now.Unix()); err != nil {
@@ -111,13 +172,13 @@ func (s *Store) DeleteExpiredSessions(ctx context.Context, now time.Time) error 
 
 // serverColumns is the shared SELECT list for servers.
 const serverColumns = `id, name, type, host, winrm_endpoint, winrm_user, winrm_transport, winrm_insecure,
-	credential_ref, ssh_host, ssh_port, ssh_user, ssh_key_ref`
+	credential_ref, ssh_host, ssh_port, ssh_user, ssh_key_ref, nssm_path, caddy_path, public_ip`
 
 // UpsertServer syncs one entry from servers.yaml into the database.
 func (s *Store) UpsertServer(ctx context.Context, srv config.Server) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO servers (`+serverColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			type = excluded.type,
@@ -131,10 +192,13 @@ func (s *Store) UpsertServer(ctx context.Context, srv config.Server) error {
 			ssh_port = excluded.ssh_port,
 			ssh_user = excluded.ssh_user,
 			ssh_key_ref = excluded.ssh_key_ref,
+			nssm_path = excluded.nssm_path,
+			caddy_path = excluded.caddy_path,
+			public_ip = excluded.public_ip,
 			updated_at = CURRENT_TIMESTAMP`,
 		srv.ID, srv.Name, srv.Type, srv.Host, srv.WinRMEndpoint, srv.WinRMUser,
 		srv.WinRMTransport, boolToInt(srv.WinRMInsecure), srv.CredentialRef,
-		srv.SSHHost, srv.SSHPort, srv.SSHUser, srv.SSHKeyRef)
+		srv.SSHHost, srv.SSHPort, srv.SSHUser, srv.SSHKeyRef, srv.NSSMPath, srv.CaddyPath, srv.PublicIP)
 	if err != nil {
 		return fmt.Errorf("upsert server %q: %w", srv.ID, err)
 	}
@@ -180,7 +244,7 @@ func scanServer(scan func(dest ...any) error) (config.Server, error) {
 	)
 	if err := scan(&srv.ID, &srv.Name, &srv.Type, &srv.Host, &srv.WinRMEndpoint,
 		&srv.WinRMUser, &srv.WinRMTransport, &insecure, &srv.CredentialRef,
-		&srv.SSHHost, &srv.SSHPort, &srv.SSHUser, &srv.SSHKeyRef); err != nil {
+		&srv.SSHHost, &srv.SSHPort, &srv.SSHUser, &srv.SSHKeyRef, &srv.NSSMPath, &srv.CaddyPath, &srv.PublicIP); err != nil {
 		return config.Server{}, fmt.Errorf("scan server: %w", err)
 	}
 	srv.WinRMInsecure = insecure != 0
@@ -206,9 +270,17 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 	if err != nil {
 		return fmt.Errorf("marshal project env: %w", err)
 	}
+	buildEnvJSON, err := json.Marshal(p.BuildEnv)
+	if err != nil {
+		return fmt.Errorf("marshal project build env: %w", err)
+	}
+	mappingsJSON, err := json.Marshal(p.PortsMappings)
+	if err != nil {
+		return fmt.Errorf("marshal project ports mappings: %w", err)
+	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO projects (`+projectColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			server_id = excluded.server_id,
@@ -218,17 +290,32 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 			dockerfile_path = excluded.dockerfile_path,
 			compose_path = excluded.compose_path,
 			image = excluded.image,
-			container_port = excluded.container_port,
+			ports_exposes = excluded.ports_exposes,
 			iis_site = excluded.iis_site,
 			iis_physical_path = excluded.iis_physical_path,
 			iis_app_pool = excluded.iis_app_pool,
 			iis_service = excluded.iis_service,
 			iis_build_command = excluded.iis_build_command,
 			iis_source_subdir = excluded.iis_source_subdir,
+			service_name = excluded.service_name,
+			service_exe = excluded.service_exe,
+			service_args = excluded.service_args,
+			service_work_dir = excluded.service_work_dir,
+			service_build_command = excluded.service_build_command,
+			service_source_subdir = excluded.service_source_subdir,
+			service_log_dir = excluded.service_log_dir,
+			service_account = excluded.service_account,
+			caddy_mode = excluded.caddy_mode,
+			ports_mappings = excluded.ports_mappings,
+			build_env_json = excluded.build_env_json,
 			branch = excluded.branch,
 			domain = excluded.domain,
 			port = excluded.port,
 			health_path = excluded.health_path,
+			health_interval_seconds = excluded.health_interval_seconds,
+			health_timeout_seconds = excluded.health_timeout_seconds,
+			health_retries = excluded.health_retries,
+			health_start_period_seconds = excluded.health_start_period_seconds,
 			webhook_secret_ref = excluded.webhook_secret_ref,
 			env_json = excluded.env_json,
 			project_group = excluded.project_group,
@@ -236,8 +323,13 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 			disable_health_check = excluded.disable_health_check,
 			updated_at = CURRENT_TIMESTAMP`,
 		p.ID, p.Name, p.ServerID, p.Strategy, p.Source, p.RepoURL, p.DockerfilePath, p.ComposePath,
-		p.Image, p.ContainerPort, p.IISSite, p.IISPhysicalPath, p.IISAppPool, p.IISService,
-		p.IISBuildCommand, p.IISSourceSubdir, p.Branch, p.Domain, p.Port, p.HealthPath,
+		p.Image, p.PortsExposes, p.IISSite, p.IISPhysicalPath, p.IISAppPool, p.IISService,
+		p.IISBuildCommand, p.IISSourceSubdir,
+		p.ServiceName, p.ServiceExe, p.ServiceArgs, p.ServiceWorkDir, p.ServiceBuildCommand,
+		p.ServiceSourceSubdir, p.ServiceLogDir, p.ServiceAccount, p.CaddyMode,
+		string(mappingsJSON), string(buildEnvJSON),
+		p.Branch, p.Domain, p.Port, p.HealthPath,
+		p.HealthIntervalSeconds, p.HealthTimeoutSeconds, p.HealthRetries, p.HealthStartPeriodSeconds,
 		p.WebhookSecretRef, string(envJSON), p.ProjectGroup, p.Environment, boolToInt(p.DisableHealthCheck))
 	if err != nil {
 		return fmt.Errorf("upsert project %q: %w", p.ID, err)
@@ -246,9 +338,13 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 }
 
 // projectColumns is the shared SELECT list for projects.
-const projectColumns = `id, name, server_id, strategy, source, repo_url, dockerfile_path, compose_path, image, container_port, iis_site,
+const projectColumns = `id, name, server_id, strategy, source, repo_url, dockerfile_path, compose_path, image, ports_exposes, iis_site,
 	iis_physical_path, iis_app_pool, iis_service, iis_build_command, iis_source_subdir,
-	branch, domain, port, health_path, webhook_secret_ref, env_json, project_group, environment, disable_health_check`
+	service_name, service_exe, service_args, service_work_dir, service_build_command, service_source_subdir,
+	service_log_dir, service_account, caddy_mode,
+	ports_mappings, build_env_json,
+	branch, domain, port, health_path, health_interval_seconds, health_timeout_seconds, health_retries, health_start_period_seconds,
+	webhook_secret_ref, env_json, project_group, environment, disable_health_check`
 
 // ListProjects returns all configured projects.
 func (s *Store) ListProjects(ctx context.Context) ([]config.Project, error) {
@@ -286,24 +382,124 @@ func (s *Store) GetProject(ctx context.Context, id string) (config.Project, erro
 // works for both *sql.Row and *sql.Rows.
 func scanProject(scan func(dest ...any) error) (config.Project, error) {
 	var (
-		p        config.Project
-		envJSON  string
-		disabled int
+		p            config.Project
+		envJSON      string
+		buildEnvJSON string
+		mappingsJSON string
+		disabled     int
 	)
 	if err := scan(&p.ID, &p.Name, &p.ServerID, &p.Strategy, &p.Source, &p.RepoURL,
-		&p.DockerfilePath, &p.ComposePath, &p.Image, &p.ContainerPort, &p.IISSite, &p.IISPhysicalPath,
-		&p.IISAppPool, &p.IISService, &p.IISBuildCommand, &p.IISSourceSubdir, &p.Branch,
-		&p.Domain, &p.Port, &p.HealthPath, &p.WebhookSecretRef, &envJSON,
+		&p.DockerfilePath, &p.ComposePath, &p.Image, &p.PortsExposes, &p.IISSite, &p.IISPhysicalPath,
+		&p.IISAppPool, &p.IISService, &p.IISBuildCommand, &p.IISSourceSubdir,
+		&p.ServiceName, &p.ServiceExe, &p.ServiceArgs, &p.ServiceWorkDir, &p.ServiceBuildCommand,
+		&p.ServiceSourceSubdir, &p.ServiceLogDir, &p.ServiceAccount, &p.CaddyMode,
+		&mappingsJSON, &buildEnvJSON, &p.Branch,
+		&p.Domain, &p.Port, &p.HealthPath,
+		&p.HealthIntervalSeconds, &p.HealthTimeoutSeconds, &p.HealthRetries, &p.HealthStartPeriodSeconds,
+		&p.WebhookSecretRef, &envJSON,
 		&p.ProjectGroup, &p.Environment, &disabled); err != nil {
 		return config.Project{}, err
 	}
 	p.DisableHealthCheck = disabled != 0
-	if envJSON != "" {
-		if err := json.Unmarshal([]byte(envJSON), &p.Env); err != nil {
-			return config.Project{}, fmt.Errorf("decode project %q env: %w", p.ID, err)
+	if err := decodeJSONMap(envJSON, &p.Env); err != nil {
+		return config.Project{}, fmt.Errorf("decode project %q env: %w", p.ID, err)
+	}
+	if err := decodeJSONMap(buildEnvJSON, &p.BuildEnv); err != nil {
+		return config.Project{}, fmt.Errorf("decode project %q build env: %w", p.ID, err)
+	}
+	if mappingsJSON != "" && mappingsJSON != "null" {
+		if err := json.Unmarshal([]byte(mappingsJSON), &p.PortsMappings); err != nil {
+			return config.Project{}, fmt.Errorf("decode project %q ports mappings: %w", p.ID, err)
 		}
 	}
 	return p, nil
+}
+
+// decodeJSONMap unmarshals a JSON object string into a map, treating empty and
+// "null" as an absent map.
+func decodeJSONMap(raw string, out *map[string]string) error {
+	if raw == "" || raw == "null" {
+		return nil
+	}
+	return json.Unmarshal([]byte(raw), out)
+}
+
+// SharedVariable is a value referenced from project env/build env as
+// {{project.KEY}} (scope "project", scope_id = project group) or
+// {{environment.KEY}} (scope "environment", scope_id = "group/environment").
+type SharedVariable struct {
+	Scope   string `json:"scope"`
+	ScopeID string `json:"scope_id"`
+	Key     string `json:"key"`
+	Value   string `json:"value"`
+}
+
+// ListSharedVariables returns all shared variables ordered by scope and key.
+func (s *Store) ListSharedVariables(ctx context.Context) ([]SharedVariable, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT scope, scope_id, key, value FROM shared_variables ORDER BY scope, scope_id, key`)
+	if err != nil {
+		return nil, fmt.Errorf("list shared variables: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SharedVariable
+	for rows.Next() {
+		var v SharedVariable
+		if err := rows.Scan(&v.Scope, &v.ScopeID, &v.Key, &v.Value); err != nil {
+			return nil, fmt.Errorf("scan shared variable: %w", err)
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// UpsertSharedVariable stores one shared variable.
+func (s *Store) UpsertSharedVariable(ctx context.Context, v SharedVariable) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO shared_variables (scope, scope_id, key, value) VALUES (?, ?, ?, ?)
+		ON CONFLICT(scope, scope_id, key) DO UPDATE SET
+			value = excluded.value,
+			updated_at = CURRENT_TIMESTAMP`,
+		v.Scope, v.ScopeID, v.Key, v.Value)
+	if err != nil {
+		return fmt.Errorf("upsert shared variable: %w", err)
+	}
+	return nil
+}
+
+// DeleteSharedVariable removes one shared variable.
+func (s *Store) DeleteSharedVariable(ctx context.Context, scope, scopeID, key string) error {
+	if _, err := s.db.ExecContext(ctx,
+		`DELETE FROM shared_variables WHERE scope = ? AND scope_id = ? AND key = ?`,
+		scope, scopeID, key); err != nil {
+		return fmt.Errorf("delete shared variable: %w", err)
+	}
+	return nil
+}
+
+// SharedVariablesFor returns the values visible to a project, keyed by their
+// reference name ("project.KEY" / "environment.KEY"). Environment-scoped values
+// override project-scoped ones with the same key.
+func (s *Store) SharedVariablesFor(ctx context.Context, projectGroup, environment string) (map[string]string, error) {
+	out := make(map[string]string)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT scope, key, value FROM shared_variables
+		WHERE (scope = 'project' AND scope_id = ?)
+		   OR (scope = 'environment' AND scope_id = ?)`,
+		projectGroup, projectGroup+"/"+environment)
+	if err != nil {
+		return nil, fmt.Errorf("shared variables for project: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var scope, key, value string
+		if err := rows.Scan(&scope, &key, &value); err != nil {
+			return nil, fmt.Errorf("scan shared variable: %w", err)
+		}
+		out[scope+"."+key] = value
+	}
+	return out, rows.Err()
 }
 
 // PutCredential stores an encrypted secret (nonce + ciphertext). The plaintext
