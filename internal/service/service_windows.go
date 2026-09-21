@@ -69,13 +69,17 @@ func (h *handler) Execute(_ []string, r <-chan svc.ChangeRequest, changes chan<-
 	}
 }
 
-// RelaunchElevated starts `winify bootstrap` in a new elevated process so the
-// operator can approve a UAC prompt. It is used when winify runs interactively
-// without administrator rights.
-func RelaunchElevated(exePath, configPath string) error {
-	script := fmt.Sprintf(
-		"Start-Process -FilePath '%s' -ArgumentList 'bootstrap','-config','%s' -Verb RunAs",
-		escapePS(exePath), escapePS(configPath))
+// RelaunchElevated starts winify again with args in a new elevated process so
+// the operator can approve a UAC prompt. It is used when winify runs
+// interactively without administrator rights (for example `winify serve` on a
+// fresh install). It returns immediately; the elevated process does the work.
+func RelaunchElevated(exePath string, args []string) error {
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = "'" + escapePS(a) + "'"
+	}
+	script := fmt.Sprintf("Start-Process -FilePath '%s' -ArgumentList %s -Verb RunAs",
+		escapePS(exePath), strings.Join(quoted, ","))
 	return exec.Command("powershell", "-NoProfile", "-Command", script).Start()
 }
 

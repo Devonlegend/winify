@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -83,6 +84,23 @@ func runServe(args []string) {
 		return
 	}
 
+	// Fresh install on Windows: provisioning needs admin, so if we are not
+	// elevated, relaunch ourselves elevated (UAC) and let that instance do it.
+	if runtime.GOOS == "windows" && cfg.Bootstrap.Enabled && needsProvisioning(cfg, *configPath) {
+		if elevated, err := bootstrap.IsElevated(context.Background(), deployment.NewLocalRunner()); err == nil && !elevated {
+			exe, err := os.Executable()
+			if err != nil {
+				log.Fatalf("locate executable: %v", err)
+			}
+			if err := service.RelaunchElevated(exe, []string{"serve", "-config", *configPath}); err != nil {
+				log.Printf("bootstrap: elevate: %v", err)
+			} else {
+				log.Printf("bootstrap: requested elevation to provision this host; approve the UAC prompt. This window can be closed.")
+				return
+			}
+		}
+	}
+
 	// Interactive: stop on Ctrl-C / SIGINT. signal.NotifyContext is the modern
 	// way to turn a signal into a context instead of a global handler.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -90,6 +108,15 @@ func runServe(args []string) {
 	if err := serve(cfg, *configPath, ctx); err != nil {
 		log.Fatalf("serve: %v", err)
 	}
+}
+
+// needsProvisioning reports whether the host has unfinished bootstrap steps.
+func needsProvisioning(cfg config.Config, configPath string) bool {
+	store, cleanup := mustStore(cfg)
+	defer cleanup()
+	boot := buildBootstrap(cfg, store, configPath)
+	complete, err := boot.Complete(context.Background())
+	return err != nil || !complete
 }
 
 // serve runs the control center until ctx is cancelled. It is shared by the
@@ -172,47 +199,11 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 		assistantSvc = buildAssistant(ctx, cfg, store)
 	}
 
-	// Bootstrap status backs the Setup page. Applying steps is the `bootstrap`
-	// subcommand (elevated); here it is read-only.
+	// Bootstrap backs the Setup page and provisions the host on first run.
 	var boot *bootstrap.Bootstrap
 	if cfg.Bootstrap.Enabled {
-		root := cfg.Bootstrap.InstallDir
-		if root == "" {
-			root = bootstrap.DefaultRoot()
-		}
-		exe, _ := os.Executable()
-		boot = bootstrap.New(bootstrap.Options{
-			Paths:        bootstrap.DefaultPaths(root),
-			NSSMSource:   cfg.Deploy.NSSMSource,
-			NSSMSHA256:   cfg.Deploy.NSSMSHA256,
-			EnableWinRM:  cfg.Bootstrap.EnableWinRM,
-			ServiceName:  cfg.Bootstrap.ServiceName,
-			ExePath:      exe,
-			ConfigPath:   configPath,
-			CaddyEnabled: cfg.Bootstrap.Caddy.Enabled,
-			CaddySource:  cfg.Bootstrap.Caddy.Source,
-			CaddyURL:     cfg.Bootstrap.Caddy.URL,
-			CaddySHA256:  cfg.Bootstrap.Caddy.SHA256,
-			CaddyAdmin:   cfg.Bootstrap.Caddy.Admin,
-			Meta:         store,
-			Runner:       bootstrap.NewLocalRunner(),
-			Logf:         log.Printf,
-		})
-	}
-
-	// First-run: a Windows service is already elevated, so provision the host on
-	// boot. An interactive non-elevated start waits for the Setup page button.
-	if boot != nil && service.IsWindowsService() {
-		go func() {
-			complete, err := boot.Complete(context.Background())
-			if err != nil || complete {
-				return
-			}
-			log.Printf("bootstrap: host not fully provisioned; running bootstrap")
-			if _, err := boot.Run(context.Background()); err != nil {
-				log.Printf("bootstrap: %v", err)
-			}
-		}()
+		boot = buildBootstrap(cfg, store, configPath)
+		provisionIfNeeded(ctx, boot)
 	}
 
 	srv, err := server.New(server.Deps{
@@ -236,10 +227,10 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			return service.RelaunchElevated(exe, configPath)
+			return service.RelaunchElevated(exe, []string{"bootstrap", "-config", configPath})
 		},
 		BootstrapElevated: func(ctx context.Context) (bool, error) {
-			return bootstrap.IsElevated(ctx, bootstrap.NewLocalRunner())
+			return bootstrap.IsElevated(ctx, deployment.NewLocalRunner())
 		},
 	})
 	if err != nil {
@@ -412,7 +403,7 @@ func runBootstrap(args []string) {
 	if root == "" {
 		root = bootstrap.DefaultRoot()
 	}
-	runner := bootstrap.NewLocalRunner()
+	runner := deployment.NewLocalRunner()
 	ctx := context.Background()
 
 	if !*dryRun {
@@ -425,10 +416,7 @@ func runBootstrap(args []string) {
 		}
 	}
 
-	exe, err := os.Executable()
-	if err != nil {
-		log.Fatalf("bootstrap: locate executable: %v", err)
-	}
+	exe := usableExe()
 	paths := bootstrap.DefaultPaths(root)
 	opts := bootstrap.Options{
 		Paths:        paths,
@@ -449,21 +437,9 @@ func runBootstrap(args []string) {
 		Logf:         log.Printf,
 	}
 
-	// The local target needs a WinRM account/password. When it is available
-	// (env vars or an interactive prompt) bootstrap creates the winsvc server
-	// too; otherwise the Setup page form does it.
-	if user, password, ok := localWinRMCredentials(); ok {
-		key, err := auth.LoadMasterKey(cfg.Credentials.MasterKey, masterKeyPath(cfg))
-		if err != nil {
-			log.Fatalf("master key: %v", err)
-		}
-		credStore, err := auth.NewCredentialStore(store, key)
-		if err != nil {
-			log.Fatalf("credential store: %v", err)
-		}
-		opts.TargetStepName = "local-target"
-		opts.TargetCheck, opts.TargetApply = targetSteps(store, credStore, localTargetServer(paths, user), localWinRMRef, password)
-	}
+	// The local target runs PowerShell in-process, so it needs no credential.
+	opts.TargetStepName = "local-target"
+	opts.TargetCheck, opts.TargetApply = serverSteps(store, localTargetServer(paths))
 
 	b := bootstrap.New(opts)
 	results, err := b.Run(ctx)
@@ -480,67 +456,109 @@ func runBootstrap(args []string) {
 	log.Printf("bootstrap complete (root %s)", root)
 }
 
-// localWinRMRef is the credential name holding the local WinRM password.
-const localWinRMRef = "local-winrm"
-
-// localWinRMCredentials returns the local WinRM account and password from the
-// environment, or prompts interactively. ok is false when neither is available
-// (for example a non-interactive service start); the Setup page form is then
-// the way to create the local target.
-func localWinRMCredentials() (user, password string, ok bool) {
-	user = strings.TrimSpace(os.Getenv("CC_LOCAL_WINRM_USER"))
-	password = os.Getenv("CC_LOCAL_WINRM_PASSWORD")
-	if password != "" {
-		if user == "" {
-			user = defaultLocalUser()
-		}
-		return user, password, true
+// usableExe returns the running executable's path, or "" when it is a throwaway
+// build (`go run`, tests): installing that path as a service would leave a
+// broken service behind, so self-service is skipped.
+func usableExe() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
 	}
-	info, err := os.Stdin.Stat()
-	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
-		return "", "", false
+	if strings.Contains(exe, "go-build") || strings.HasPrefix(exe, os.TempDir()) {
+		log.Printf("bootstrap: running from a temporary build (%s); skipping self-service install", exe)
+		return ""
 	}
-	if user == "" {
-		user = defaultLocalUser()
-	}
-	fmt.Fprintf(os.Stderr, "Local WinRM account [%s]: ", user)
-	if line, err := bufio.NewReader(os.Stdin).ReadString('\n'); err == nil {
-		if v := strings.TrimSpace(line); v != "" {
-			user = v
-		}
-	}
-	pw, err := readSecret("Local WinRM password (input is echoed): ")
-	if err != nil || pw == "" {
-		return "", "", false
-	}
-	return user, pw, true
+	return exe
 }
 
-// defaultLocalUser is the account the control center is running as.
-func defaultLocalUser() string {
-	if u := os.Getenv("USERNAME"); u != "" {
-		return u
+// buildBootstrap assembles the host-provisioning steps for this configuration.
+func buildBootstrap(cfg config.Config, store *models.Store, configPath string) *bootstrap.Bootstrap {
+	root := cfg.Bootstrap.InstallDir
+	if root == "" {
+		root = bootstrap.DefaultRoot()
 	}
-	return os.Getenv("USER")
+	paths := bootstrap.DefaultPaths(root)
+	exe := usableExe()
+	opts := bootstrap.Options{
+		Paths:          paths,
+		NSSMSource:     cfg.Deploy.NSSMSource,
+		NSSMSHA256:     cfg.Deploy.NSSMSHA256,
+		EnableWinRM:    cfg.Bootstrap.EnableWinRM,
+		ServiceName:    cfg.Bootstrap.ServiceName,
+		ExePath:        exe,
+		ConfigPath:     configPath,
+		CaddyEnabled:   cfg.Bootstrap.Caddy.Enabled,
+		CaddySource:    cfg.Bootstrap.Caddy.Source,
+		CaddyURL:       cfg.Bootstrap.Caddy.URL,
+		CaddySHA256:    cfg.Bootstrap.Caddy.SHA256,
+		CaddyAdmin:     cfg.Bootstrap.Caddy.Admin,
+		TargetStepName: "local-target",
+		Meta:           store,
+		Runner:         deployment.NewLocalRunner(),
+		Logf:           log.Printf,
+	}
+	opts.TargetCheck, opts.TargetApply = serverSteps(store, localTargetServer(paths))
+	return bootstrap.New(opts)
+}
+
+// provisionIfNeeded runs bootstrap automatically when the host is not yet
+// provisioned and we can (elevated: a service, or after a UAC relaunch).
+func provisionIfNeeded(ctx context.Context, boot *bootstrap.Bootstrap) {
+	complete, err := boot.Complete(ctx)
+	if err != nil || complete {
+		return
+	}
+	elevated, err := bootstrap.IsElevated(ctx, deployment.NewLocalRunner())
+	if err != nil || !elevated {
+		log.Printf("bootstrap: host not fully provisioned; open the Setup page or run an elevated `winify bootstrap`")
+		return
+	}
+	log.Printf("bootstrap: host not fully provisioned; running bootstrap")
+	if _, err := boot.Run(ctx); err != nil {
+		log.Printf("bootstrap: %v", err)
+	}
 }
 
 // localTargetServer is the winsvc server entry for the machine winify runs on.
-func localTargetServer(paths bootstrap.Paths, user string) config.Server {
+// It is a local target: no WinRM, no credential.
+func localTargetServer(paths bootstrap.Paths) config.Server {
+	name := "This machine"
+	if h, err := os.Hostname(); err == nil && h != "" {
+		name = h
+	}
 	return config.Server{
-		ID:             "local",
-		Name:           "This machine",
-		Type:           config.ServerTypeWindowsService,
-		WinRMEndpoint:  "http://127.0.0.1:5985/wsman",
-		WinRMUser:      user,
-		WinRMTransport: "ntlm",
-		CredentialRef:  "vault:" + localWinRMRef,
-		NSSMPath:       paths.NSSM,
-		Host:           "127.0.0.1",
+		ID:       "local",
+		Name:     name,
+		Type:     config.ServerTypeWindowsService,
+		Local:    true,
+		NSSMPath: paths.NSSM,
+		Host:     "127.0.0.1",
 	}
 }
 
+// serverSteps returns the closures that create a server entry (no credential).
+func serverSteps(store *models.Store, srv config.Server) (func(context.Context) (bool, error), func(context.Context) error) {
+	check := func(ctx context.Context) (bool, error) {
+		_, err := store.GetServer(ctx, srv.ID)
+		if err == nil {
+			return true, nil
+		}
+		if errors.Is(err, models.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	apply := func(ctx context.Context) error {
+		if srv.Local && srv.PublicIP == "" {
+			srv.PublicIP = bootstrap.DetectPublicIP(ctx)
+		}
+		return store.UpsertServer(ctx, srv)
+	}
+	return check, apply
+}
+
 // targetSteps returns the closures that store a WinRM credential and create a
-// winsvc server entry. Used for the local host and for remote bootstrap.
+// winsvc server entry. Used for remote bootstrap.
 func targetSteps(store *models.Store, credStore *auth.CredentialStore, srv config.Server, refName, password string) (func(context.Context) (bool, error), func(context.Context) error) {
 	check := func(ctx context.Context) (bool, error) {
 		_, err := store.GetServer(ctx, srv.ID)

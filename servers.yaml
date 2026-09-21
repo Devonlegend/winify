@@ -1,26 +1,7 @@
 # Deployment targets. Credentials are referenced by name; secret values live
 # encrypted in SQLite (add with: control-center cred add <name>).
 #
-# `services` and `disk_path` are used by the Monitoring tab (Phases 4):
-# systemd unit names on Linux, Windows service names on IIS.
-servers:
-  - id: server-001
-    name: "Production IIS Server"
-    type: iis
-    host: "10.0.0.5"
-    winrm_endpoint: "https://10.0.0.5:5986/wsman"
-    winrm_user: 'CONTOSO\deploy'
-    winrm_transport: "ntlm"   # ntlm (default) or basic
-    winrm_insecure: false     # true only for self-signed WinRM certs
-    credential_ref: "vault:server-001-winrm"
-    services: ["W3SVC"]
-    disk_path: "C:"
-  - id: server-002
-    name: "Docker Host"
-    type: docker
-    ssh_host: "10.0.0.9"
-    ssh_port: 22
-    ssh_user: "deploy"
-    ssh_key_ref: "vault:server-002-ssh"
-    services: ["docker"]
-    disk_path: "/"
+# This file seeds the database only on a fresh install (empty tables). After
+# that the database is authoritative and the dashboard manages the inventory,
+# so add servers in the UI rather than here.
+servers: []

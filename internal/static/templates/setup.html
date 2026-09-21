@@ -39,10 +39,8 @@
   {{if .LocalServer}}
     <p class="muted">A <span class="mono">winsvc</span> target for this machine already exists (server <span class="mono">local</span>).</p>
   {{else}}
-    <p class="muted">Create a <span class="mono">winsvc</span> target for this machine so you can deploy native services to it. The password is stored encrypted and used over WinRM.</p>
+    <p class="muted">Create a <span class="mono">winsvc</span> target for this machine. It runs PowerShell directly on this host, so no WinRM credential is needed.</p>
     <form method="post" action="/setup/local-target" class="admin-form">
-      <label>WinRM account<input name="winrm_user" placeholder="user or DOMAIN\user" required></label>
-      <label>WinRM password<input type="password" name="winrm_password" required></label>
       <label>Public IP (optional, for sslip.io domains)<input name="public_ip" placeholder="203.0.113.10"></label>
       <div class="form-actions"><button type="submit">Create local target</button></div>
     </form>

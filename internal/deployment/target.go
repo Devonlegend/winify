@@ -43,6 +43,14 @@ func NewTargetFactory(cfg config.Config, sshDial SSHDialer, audit AuditRecorder)
 	return func(ctx context.Context, job deployJob, secrets SecretResolver) (Target, error) {
 		switch job.server.Type {
 		case config.ServerTypeIIS, config.ServerTypeWindowsService:
+			// A local target runs PowerShell in-process: no WinRM, no credential.
+			if job.server.Local {
+				runner := WithAuditRecorder(NewLocalRunner(), audit)
+				if job.server.Type == config.ServerTypeWindowsService {
+					return NewWindowsServiceTarget(cfg, runner), nil
+				}
+				return NewIISTarget(cfg, runner), nil
+			}
 			password, err := ResolveRef(ctx, secrets, job.server.CredentialRef)
 			if err != nil {
 				return nil, fmt.Errorf("resolve winrm credential: %w", err)

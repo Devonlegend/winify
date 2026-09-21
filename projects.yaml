@@ -2,35 +2,7 @@
 # deploy; `webhook_secret_ref` names the encrypted secret used to verify the
 # webhook signature. `domain` is registered with the reverse proxy on success.
 #
-# The pipeline is chosen by the bound server's type: "docker" uses
-# dockerfile_path; "iis" uses the iis_* fields.
-projects:
-  - id: proj-001
-    name: "Storefront API"
-    server_id: server-002
-    strategy: dockerfile
-    repo_url: "https://github.com/acme/storefront"
-    dockerfile_path: "deploy/Dockerfile"
-    branch: "main"
-    domain: "storefront.example.com"
-    port: 8080
-    health_path: "/healthz"
-    webhook_secret_ref: "vault:proj-001-webhook"
-    env:
-      ASPNETCORE_ENVIRONMENT: "Production"
-  - id: proj-002
-    name: "Legacy Portal"
-    server_id: server-001
-    strategy: iis
-    repo_url: "https://github.com/acme/portal"
-    branch: "main"
-    domain: "portal.example.com"
-    port: 80
-    health_path: "/health"
-    iis_physical_path: 'C:\inetpub\wwwroot\portal'
-    iis_app_pool: "PortalPool"
-    iis_service: "W3SVC"
-    # Optional: runs in the repo before validation (output lands in source_subdir).
-    iis_build_command: "dotnet publish -c Release -o publish"
-    iis_source_subdir: "publish"
-    webhook_secret_ref: "vault:proj-002-webhook"
+# This file seeds the database only on a fresh install (empty tables). After
+# that the database is authoritative and the dashboard manages the inventory,
+# so add resources in the UI rather than here.
+projects: []

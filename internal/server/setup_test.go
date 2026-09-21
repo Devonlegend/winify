@@ -47,9 +47,7 @@ func TestSetupLocalTargetCreatesServer(t *testing.T) {
 	}
 
 	rec = postForm(t, s, "/setup/local-target", url.Values{
-		"winrm_user":     {"dell"},
-		"winrm_password": {"s3cr3t"},
-		"public_ip":      {"203.0.113.5"},
+		"public_ip": {"203.0.113.5"},
 	}, cookie)
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("POST /setup/local-target = %d, want 303 (body: %s)", rec.Code, rec.Body.String())
@@ -59,31 +57,16 @@ func TestSetupLocalTargetCreatesServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("local server not created: %v", err)
 	}
-	if srv.Type != config.ServerTypeWindowsService || srv.WinRMUser != "dell" {
-		t.Fatalf("server = %+v", srv)
+	if srv.Type != config.ServerTypeWindowsService || !srv.Local {
+		t.Fatalf("server = %+v, want a local winsvc server", srv)
 	}
-	if srv.CredentialRef != "vault:local-winrm" || srv.PublicIP != "203.0.113.5" {
-		t.Fatalf("server = %+v", srv)
+	if srv.PublicIP != "203.0.113.5" {
+		t.Fatalf("public_ip = %q", srv.PublicIP)
 	}
 
 	rec = getWithCookie(t, s, "/setup", cookie)
 	if strings.Contains(rec.Body.String(), "Create local target") {
 		t.Error("local target form still shown after creation")
-	}
-}
-
-func TestSetupLocalTargetRequiresFields(t *testing.T) {
-	s, _ := newTestServerWithStore(t)
-	cookie := login(t, s)
-
-	rec := postForm(t, s, "/setup/local-target", url.Values{
-		"winrm_user": {"dell"}, "winrm_password": {""},
-	}, cookie)
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("status = %d, want redirect", rec.Code)
-	}
-	if loc := rec.Header().Get("Location"); !strings.Contains(loc, "error=") {
-		t.Fatalf("redirect = %q, want an error", loc)
 	}
 }
 

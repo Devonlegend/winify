@@ -34,6 +34,10 @@ func NewRunnerFactory(cfg config.Config, secrets deployment.SecretResolver, audi
 	return func(ctx context.Context, srv config.Server) (deployment.Runner, error) {
 		switch srv.Type {
 		case config.ServerTypeIIS, config.ServerTypeWindowsService:
+			// A local target runs PowerShell in-process: no WinRM, no credential.
+			if srv.Local {
+				return deployment.WithAuditRecorder(deployment.NewLocalRunner(), audit), nil
+			}
 			password, err := deployment.ResolveRef(ctx, secrets, srv.CredentialRef)
 			if err != nil {
 				return nil, fmt.Errorf("resolve winrm credential: %w", err)

@@ -172,13 +172,13 @@ func (s *Store) DeleteExpiredSessions(ctx context.Context, now time.Time) error 
 
 // serverColumns is the shared SELECT list for servers.
 const serverColumns = `id, name, type, host, winrm_endpoint, winrm_user, winrm_transport, winrm_insecure,
-	credential_ref, ssh_host, ssh_port, ssh_user, ssh_key_ref, nssm_path, caddy_path, public_ip`
+	credential_ref, ssh_host, ssh_port, ssh_user, ssh_key_ref, nssm_path, caddy_path, public_ip, local`
 
 // UpsertServer syncs one entry from servers.yaml into the database.
 func (s *Store) UpsertServer(ctx context.Context, srv config.Server) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO servers (`+serverColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			type = excluded.type,
@@ -195,10 +195,12 @@ func (s *Store) UpsertServer(ctx context.Context, srv config.Server) error {
 			nssm_path = excluded.nssm_path,
 			caddy_path = excluded.caddy_path,
 			public_ip = excluded.public_ip,
+			local = excluded.local,
 			updated_at = CURRENT_TIMESTAMP`,
 		srv.ID, srv.Name, srv.Type, srv.Host, srv.WinRMEndpoint, srv.WinRMUser,
 		srv.WinRMTransport, boolToInt(srv.WinRMInsecure), srv.CredentialRef,
-		srv.SSHHost, srv.SSHPort, srv.SSHUser, srv.SSHKeyRef, srv.NSSMPath, srv.CaddyPath, srv.PublicIP)
+		srv.SSHHost, srv.SSHPort, srv.SSHUser, srv.SSHKeyRef, srv.NSSMPath, srv.CaddyPath, srv.PublicIP,
+		boolToInt(srv.Local))
 	if err != nil {
 		return fmt.Errorf("upsert server %q: %w", srv.ID, err)
 	}
@@ -241,13 +243,16 @@ func scanServer(scan func(dest ...any) error) (config.Server, error) {
 	var (
 		srv      config.Server
 		insecure int
+		local    int
 	)
 	if err := scan(&srv.ID, &srv.Name, &srv.Type, &srv.Host, &srv.WinRMEndpoint,
 		&srv.WinRMUser, &srv.WinRMTransport, &insecure, &srv.CredentialRef,
-		&srv.SSHHost, &srv.SSHPort, &srv.SSHUser, &srv.SSHKeyRef, &srv.NSSMPath, &srv.CaddyPath, &srv.PublicIP); err != nil {
+		&srv.SSHHost, &srv.SSHPort, &srv.SSHUser, &srv.SSHKeyRef, &srv.NSSMPath, &srv.CaddyPath, &srv.PublicIP,
+		&local); err != nil {
 		return config.Server{}, fmt.Errorf("scan server: %w", err)
 	}
 	srv.WinRMInsecure = insecure != 0
+	srv.Local = local != 0
 	return srv, nil
 }
 

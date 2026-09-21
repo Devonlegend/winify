@@ -15,3 +15,7 @@ CLAUDE.md
 
 # Public-domain tool binaries uploaded to targets (nssm.exe, caddy.exe)
 /tools/
+
+# Installer build output
+/packaging/payload/
+/packaging/dist/

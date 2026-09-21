@@ -78,6 +78,7 @@ func (s *Server) handleServerSave(w http.ResponseWriter, r *http.Request) {
 		NSSMPath:       strings.TrimSpace(r.FormValue("nssm_path")),
 		CaddyPath:      strings.TrimSpace(r.FormValue("caddy_path")),
 		PublicIP:       strings.TrimSpace(r.FormValue("public_ip")),
+		Local:          r.FormValue("local") != "",
 		SSHHost:        strings.TrimSpace(r.FormValue("ssh_host")),
 		SSHUser:        strings.TrimSpace(r.FormValue("ssh_user")),
 		SSHKeyRef:      strings.TrimSpace(r.FormValue("ssh_key_ref")),
@@ -151,6 +152,10 @@ func validateServer(srv config.Server) error {
 			return errors.New("ssh_key_ref is required for a docker server")
 		}
 	case config.ServerTypeIIS, config.ServerTypeWindowsService:
+		// A local target runs PowerShell in-process: no WinRM fields needed.
+		if srv.Local {
+			return nil
+		}
 		if srv.WinRMEndpoint == "" {
 			return fmt.Errorf("winrm_endpoint is required for a %s server", srv.Type)
 		}

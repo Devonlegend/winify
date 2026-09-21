@@ -229,7 +229,10 @@ func Default() Config {
 			ServiceName: "winify",
 			EnableWinRM: true,
 			Caddy: CaddyBootstrapConfig{
-				Admin: "127.0.0.1:2019",
+				Enabled: true,
+				URL:     "https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_windows_amd64.zip",
+				SHA256:  "5CB9AB71E5756CE72840B8234177A2F40C8B4AB47A806B8E841E2B784E9DF62B",
+				Admin:   "127.0.0.1:2019",
 			},
 		},
 		Monitoring: MonitoringConfig{

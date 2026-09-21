@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Devonlegend/winify/internal/deployment"
 )
@@ -57,7 +58,7 @@ func (s caddyStep) Check(ctx context.Context, r deployment.Runner) (bool, error)
 }
 
 func (s caddyStep) Apply(ctx context.Context, r deployment.Runner) error {
-	data, err := s.fetch()
+	data, err := s.fetch(ctx)
 	if err != nil {
 		return err
 	}
@@ -86,7 +87,7 @@ func (s caddyStep) Apply(ctx context.Context, r deployment.Runner) error {
 
 // fetch returns the caddy.exe bytes from the local source or a downloaded
 // release zip.
-func (s caddyStep) fetch() ([]byte, error) {
+func (s caddyStep) fetch(ctx context.Context) ([]byte, error) {
 	if src := strings.TrimSpace(s.source); src != "" {
 		data, err := os.ReadFile(src)
 		if err != nil {
@@ -95,16 +96,47 @@ func (s caddyStep) fetch() ([]byte, error) {
 		return data, nil
 	}
 	if u := strings.TrimSpace(s.url); u != "" {
-		return downloadCaddy(u)
+		if s.logf != nil {
+			s.logf("downloading caddy from %s (this can take a minute)", u)
+		}
+		return downloadCaddy(ctx, u)
 	}
 	return nil, fmt.Errorf("caddy is enabled but bootstrap.caddy.source or bootstrap.caddy.url is not set")
 }
 
-// downloadCaddy fetches a URL and returns caddy.exe, extracting it when the
-// payload is a zip archive.
-func downloadCaddy(url string) ([]byte, error) {
+// downloadCaddy fetches a URL with a few retries (release CDNs reset long
+// connections) and returns caddy.exe, extracting it when the payload is a zip.
+func downloadCaddy(ctx context.Context, url string) ([]byte, error) {
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		data, err := downloadOnce(ctx, url)
+		if err == nil {
+			return data, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(attempt) * 2 * time.Second):
+		}
+	}
+	return nil, lastErr
+}
+
+// downloadOnce performs a single bounded download.
+func downloadOnce(ctx context.Context, url string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
 	// #nosec G107 -- the URL is operator-configured, not user input.
-	resp, err := http.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("download caddy: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("download caddy: %w", err)
 	}

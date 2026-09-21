@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Devonlegend/winify/internal/deployment"
@@ -61,6 +62,7 @@ func (s dirsStep) Apply(ctx context.Context, r deployment.Runner) error {
 // control-center host when a source is configured.
 type nssmStep struct {
 	path   string
+	root   string // install root, to resolve a relative source when cwd differs
 	source string
 	sha256 string
 	logf   func(format string, args ...any)
@@ -69,8 +71,24 @@ type nssmStep struct {
 func (s nssmStep) Name() string     { return "nssm" }
 func (s nssmStep) Privileged() bool { return true }
 
+// resolve returns the source path: as given when it exists (cwd-relative, e.g.
+// a dev checkout), otherwise relative to the install root. Services start with
+// the working directory set to System32, so a relative config path would not
+// resolve without this.
+func (s nssmStep) resolve() string {
+	src := strings.TrimSpace(s.source)
+	if src == "" || filepath.IsAbs(src) {
+		return src
+	}
+	if _, err := os.Stat(src); err == nil {
+		return src
+	}
+	return filepath.Join(s.root, src)
+}
+
 func (s nssmStep) Check(ctx context.Context, r deployment.Runner) (bool, error) {
-	if strings.TrimSpace(s.source) == "" {
+	source := s.resolve()
+	if source == "" {
 		out, err := r.Run(ctx, fmt.Sprintf("if (Test-Path -LiteralPath %s) { 'done' } else { 'pending' }", psQuote(s.path)))
 		if err != nil {
 			return false, err
@@ -78,9 +96,9 @@ func (s nssmStep) Check(ctx context.Context, r deployment.Runner) (bool, error) 
 		return strings.Contains(out, "done"), nil
 	}
 	// Hash-aware: re-upload when the source binary differs from the target's.
-	data, err := os.ReadFile(s.source)
+	data, err := os.ReadFile(source)
 	if err != nil {
-		return false, fmt.Errorf("read nssm source %s: %w", s.source, err)
+		return false, fmt.Errorf("read nssm source %s: %w", source, err)
 	}
 	sum := sha256.Sum256(data)
 	want := hex.EncodeToString(sum[:])
@@ -96,7 +114,7 @@ func (s nssmStep) Apply(ctx context.Context, r deployment.Runner) error {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	_, err := deployment.EnsureNSSM(ctx, r, s.path, s.source, s.sha256, logf)
+	_, err := deployment.EnsureNSSM(ctx, r, s.path, s.resolve(), s.sha256, logf)
 	return err
 }
 

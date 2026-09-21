@@ -44,6 +44,9 @@ type Server struct {
 	// PublicIP is the server's public address, used to generate a
 	// <name>.<ip>.sslip.io domain when the operator has no DNS yet. Optional.
 	PublicIP string `yaml:"public_ip" json:"public_ip,omitempty"`
+	// Local marks the host winify itself runs on. Local targets are managed by
+	// running PowerShell in-process (no WinRM, no credential).
+	Local bool `yaml:"local" json:"local,omitempty"`
 	// Services lists service names whose status monitoring should report:
 	// systemd unit names on Linux, Windows service names on IIS targets.
 	Services []string `yaml:"services" json:"services,omitempty"`

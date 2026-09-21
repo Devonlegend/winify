@@ -45,6 +45,7 @@
     </label>
     <label>Host (proxy upstream, optional)<input name="host" value="{{if .Edit}}{{.Edit.Host}}{{end}}"></label>
     <label>Public IP (for sslip.io domains, optional)<input name="public_ip" value="{{if .Edit}}{{.Edit.PublicIP}}{{end}}" placeholder="203.0.113.10"></label>
+    <label class="check"><input type="checkbox" name="local" {{if .Edit}}{{if .Edit.Local}}checked{{end}}{{end}}> Local target (run on this host, no WinRM)</label>
 
     <fieldset data-server-group="docker">
       <legend>Docker / SSH</legend>

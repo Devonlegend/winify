@@ -141,7 +141,7 @@ func New(opts Options) *Bootstrap {
 			opts.Paths.Root, opts.Paths.Tools, opts.Paths.Work,
 			opts.Paths.Apps, opts.Paths.Backups, opts.Paths.Logs, opts.Paths.Data,
 		}},
-		nssmStep{path: opts.Paths.NSSM, source: opts.NSSMSource, sha256: opts.NSSMSHA256, logf: opts.Logf},
+		nssmStep{path: opts.Paths.NSSM, root: opts.Paths.Root, source: opts.NSSMSource, sha256: opts.NSSMSHA256, logf: opts.Logf},
 	}
 	if opts.EnableWinRM {
 		steps = append(steps, winrmStep{})

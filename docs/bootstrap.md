@@ -78,7 +78,7 @@ still override every path.
 | 3 | `winrm` | `Enable-PSRemoting -Force`; set network profile Private if needed; firewall rule | service running + listener on 5985 |
 | 4 | `self-service` | Install **winify itself as a native Windows service** (`x/sys/windows/svc` + `sc.exe create`), auto-start, recovery | `sc query winify` |
 | 5 | `caddy` | Ensure `tools\caddy.exe` (pinned hash); write base Caddyfile; install Caddy service (NSSM); open 80/443 | service + config present |
-| 6 | `local-target` | Prompt once for account/password → store encrypted credential → **create the local `winsvc` server** | server `local` exists |
+| 6 | `local-target` | **Create the local `winsvc` server** (no credential) | server `local` exists |
 
 Step 4 uses native service support (`golang.org/x/sys/windows/svc`, already an
 indirect dependency), so winify does not depend on NSSM to run itself — NSSM is
@@ -86,21 +86,26 @@ only used for user workloads and for Caddy.
 
 ### Step 6 detail — the auto-created local server
 
-- Prompt once for account + password (WinRM auth cannot be inferred).
-- Store the password via the encrypted credential store as `vault:local-winrm`.
-- Create the server record:
+The local target uses a **local executor**: for the host winify runs on, the
+deploy and monitoring paths run PowerShell in-process (`deployment.LocalRunner`)
+instead of over WinRM. WinRM always needs a credential, so this removes the
+prompt (and the 401s) entirely; when winify runs as a service it is LocalSystem,
+already elevated.
+
+Create the server record with `local: true`:
 
 | Field | Value |
 | --- | --- |
-| `id` | `local` (or the hostname) |
-| `name` | `This machine` |
+| `id` | `local` |
+| `name` | the hostname |
 | `type` | `winsvc` |
-| `winrm_endpoint` | `http://127.0.0.1:5985/wsman` |
-| `winrm_user` | from the prompt |
-| `winrm_transport` | `ntlm` |
-| `credential_ref` | `vault:local-winrm` |
+| `local` | `true` |
+| `host` | `127.0.0.1` (proxy upstream) |
 | `nssm_path` | `%ProgramData%\winify\tools\nssm.exe` |
-| `public_ip` | detected automatically (for sslip.io domains) |
+| `public_ip` | optional (for sslip.io domains) |
+
+Remote servers keep the WinRM credential path. WinRM is still enabled on the
+host (for remote access), but the local target does not depend on it.
 
 Result: right after install, the box is already a deployable target.
 

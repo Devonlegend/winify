@@ -18,6 +18,6 @@ func Run(name string, fn func(ctx context.Context) error) error {
 }
 
 // RelaunchElevated is unavailable off Windows.
-func RelaunchElevated(exePath, configPath string) error {
+func RelaunchElevated(exePath string, args []string) error {
 	return fmt.Errorf("elevation is only supported on Windows")
 }
