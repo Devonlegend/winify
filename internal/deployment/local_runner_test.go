@@ -23,6 +23,22 @@ func TestLocalRunnerRunsScript(t *testing.T) {
 	}
 }
 
+// TestLocalRunnerMultiLineScript guards the bug where a multi-line script block
+// fed to `powershell -Command -` silently produced no output.
+func TestLocalRunnerMultiLineScript(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("local execution is Windows-only")
+	}
+	script := "$ErrorActionPreference='Stop'\nif ($true) {\n  'MULTILINE_OK'\n} else {\n  'BAD'\n}\n"
+	out, err := NewLocalRunner().Run(context.Background(), script)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out, "MULTILINE_OK") {
+		t.Fatalf("output = %q, want MULTILINE_OK", out)
+	}
+}
+
 // TestLocalRunnerLargeScript guards against passing the script as a command-line
 // argument: Windows rejects command lines above ~32K characters, and the binary
 // upload chunks are 100 KB.

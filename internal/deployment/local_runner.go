@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -23,19 +25,32 @@ func NewLocalRunner() *LocalRunner { return &LocalRunner{} }
 
 // Run executes a PowerShell script and returns combined output.
 //
-// The script is fed on stdin ("-Command -") rather than as an argument: a
-// Windows command line is capped at ~32K characters, which the binary-upload
-// chunks (100 KB) exceed.
+// The script is written to a temporary .ps1 file and run with -File. It is not
+// passed on the command line (Windows caps a command line at ~32K characters,
+// and the binary-upload chunks are 100 KB) and not fed on stdin: with
+// `powershell -Command -`, a multi-line script block silently produces no
+// output, which broke every multi-line pipeline script.
 func (LocalRunner) Run(ctx context.Context, script string) (string, error) {
 	if runtime.GOOS != "windows" {
 		return "", fmt.Errorf("local execution is only supported on Windows")
 	}
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", "-")
-	cmd.Stdin = strings.NewReader(script)
+	dir, err := os.MkdirTemp("", "winify-script-")
+	if err != nil {
+		return "", fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(dir)
+
+	file := filepath.Join(dir, "run.ps1")
+	// The UTF-8 BOM makes Windows PowerShell 5.1 read the file as UTF-8.
+	if err := os.WriteFile(file, append([]byte{0xEF, 0xBB, 0xBF}, script...), 0o600); err != nil {
+		return "", fmt.Errorf("write script: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 
 	out := strings.TrimSpace(stdout.String())
 	if se := strings.TrimSpace(stderr.String()); se != "" {
