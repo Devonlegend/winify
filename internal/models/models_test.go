@@ -6,6 +6,8 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+
+	"github.com/Devonlegend/winify/internal/config"
 )
 
 func openTestDB(t *testing.T) *sql.DB {
@@ -64,6 +66,29 @@ func TestMigrateOpenAllowsRoundTrip(t *testing.T) {
 	}
 	if v == "" {
 		t.Fatal("read empty value from app_meta")
+	}
+}
+
+func TestProjectRuntimeRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	store := NewStore(db)
+	want := config.Project{
+		ID: "app", Name: "App", ServerID: "local",
+		RepoURL: "https://example.com/app.git", Branch: "main",
+		PortsExposes: 8000, Runtime: "python",
+	}
+	if err := store.UpsertProject(context.Background(), want); err != nil {
+		t.Fatalf("UpsertProject: %v", err)
+	}
+	got, err := store.GetProject(context.Background(), "app")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+	if got.Runtime != "python" {
+		t.Fatalf("runtime = %q, want python", got.Runtime)
 	}
 }
 

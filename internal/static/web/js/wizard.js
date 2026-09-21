@@ -57,6 +57,10 @@
     var winsvcGroup = form.querySelector('[data-group=winsvc]');
     if (winsvcGroup) winsvcGroup.hidden = fam !== 'winsvc';
 
+    // Detection reads Windows paths on the target, so it is Windows-only.
+    var detectBox = document.getElementById('wz-detect-box');
+    if (detectBox) detectBox.hidden = fam === 'docker';
+
     form.querySelectorAll('[data-src]').forEach(function (el) {
       var kind = el.getAttribute('data-src');
       if (kind === 'docker') {
@@ -156,6 +160,98 @@
     var el = form.querySelector('[name=' + n + ']');
     if (el) el.addEventListener('input', function () { el.dataset.touched = '1'; });
   });
+
+  // ---- Repository detection ----
+
+  var detectBtn = document.getElementById('wz-detect');
+  var detectStatus = document.getElementById('wz-detect-status');
+  var runtimeSelect = document.getElementById('wz-runtime');
+
+  function setStatus(message, isError) {
+    if (!detectStatus) return;
+    detectStatus.textContent = message;
+    detectStatus.classList.toggle('error', !!isError);
+  }
+
+  function setField(name, v) {
+    var el = form.querySelector('[name=' + name + ']');
+    if (el && v) {
+      el.value = v;
+      el.dataset.touched = '1';
+    }
+  }
+
+  function absoluteExe(exe, workDir) {
+    if (!exe) return '';
+    if (/^[A-Za-z]:/.test(exe) || exe.indexOf('\\\\') === 0) return exe;
+    return workDir ? workDir.replace(/[\\/]+$/, '') + '\\' + exe : exe;
+  }
+
+  function applyPlan(plan) {
+    var id = value('id') || value('name') || 'app';
+    var slug = id.replace(/[^A-Za-z0-9]+/g, '') || 'app';
+
+    var workEl = form.querySelector('[name=service_work_dir]');
+    var workDir = workEl && workEl.value ? workEl.value : 'C:\\ProgramData\\winify\\apps\\' + id;
+
+    var nameEl = form.querySelector('[name=service_name]');
+    if (nameEl && !nameEl.value) nameEl.value = slug;
+    if (workEl && !workEl.value) workEl.value = workDir;
+
+    setField('service_build_command', plan.build_command);
+    setField('service_exe', absoluteExe(plan.exe, workDir));
+    setField('service_args', plan.args);
+    setField('service_source_subdir', plan.source_subdir);
+    if (plan.port) setField('ports_exposes', String(plan.port));
+    if (plan.health_path) setField('health_path', plan.health_path);
+    if (plan.caddy_mode) setField('caddy_mode', plan.caddy_mode);
+    if (runtimeSelect && plan.language) runtimeSelect.value = plan.language;
+
+    var parts = [];
+    if (plan.framework) parts.push(plan.framework);
+    if (plan.evidence && plan.evidence.length) {
+      parts.push('from ' + plan.evidence.map(function (e) { return e.path; }).join(', '));
+    }
+    if (plan.confidence) parts.push(plan.confidence + ' confidence');
+    setStatus('Detected ' + plan.language + ' \u2014 ' + parts.join(' \u00b7 '), false);
+    buildReview();
+  }
+
+  if (detectBtn) {
+    detectBtn.addEventListener('click', function () {
+      var repo = value('repo_url');
+      var server = value('server_id');
+      if (!repo) { setStatus('Enter a repository URL first.', true); return; }
+      if (!server) { setStatus('Choose a target server first.', true); return; }
+
+      var body = new URLSearchParams();
+      body.set('repo_url', repo);
+      body.set('branch', value('branch'));
+      body.set('server_id', server);
+      if (runtimeSelect && runtimeSelect.value) body.set('language', runtimeSelect.value);
+
+      detectBtn.disabled = true;
+      setStatus('Cloning and inspecting the repository on the target\u2026', false);
+      fetch('/projects/detect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString()
+      }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+      }).then(function (res) {
+        if (!res.ok) { setStatus(res.data.error || 'Detection failed.', true); return; }
+        if (!res.data.detected) {
+          setStatus('No known language detected \u2014 set the fields manually.', true);
+          return;
+        }
+        applyPlan(res.data.plan);
+      }).catch(function (err) {
+        setStatus('Detection failed: ' + err, true);
+      }).finally(function () {
+        detectBtn.disabled = false;
+      });
+    });
+  }
 
   form.addEventListener('input', buildReview);
   render();

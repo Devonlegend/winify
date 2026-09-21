@@ -214,6 +214,7 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 		Deployer:        deployer,
 		Assistant:       assistantSvc,
 		CredentialAdmin: credStore,
+		RunnerFactory:   deployment.NewRunnerFactory(sshDial, auditRecorder),
 		Bootstrap:       boot,
 		BootstrapRun: func(runCtx context.Context) error {
 			if boot == nil {

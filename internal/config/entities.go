@@ -97,6 +97,10 @@ type Project struct {
 	ServiceSourceSubdir string `yaml:"service_source_subdir" json:"service_source_subdir,omitempty"`
 	ServiceLogDir       string `yaml:"service_log_dir" json:"service_log_dir,omitempty"`
 	ServiceAccount      string `yaml:"service_account" json:"service_account,omitempty"`
+	// Runtime is the toolchain the build (and, for interpreted languages, the
+	// service) needs: python | node | go | dotnet. Empty means none is
+	// provisioned. winify installs a missing runtime with winget/choco.
+	Runtime string `yaml:"runtime" json:"runtime,omitempty"`
 	// CaddyMode selects per-target Caddy behaviour: none | proxy | static.
 	CaddyMode string `yaml:"caddy_mode" json:"caddy_mode,omitempty"`
 	Branch    string `yaml:"branch" json:"branch,omitempty"`

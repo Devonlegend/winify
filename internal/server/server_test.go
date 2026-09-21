@@ -266,6 +266,11 @@ func TestProjectFormAndWizardRender(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Ports exposes") {
 		t.Fatalf("wizard = %d, want 200 with ports_exposes field", rec.Code)
 	}
+	for _, marker := range []string{"wz-detect", "wz-runtime", "Detect build"} {
+		if !strings.Contains(rec.Body.String(), marker) {
+			t.Errorf("wizard missing detect control %q", marker)
+		}
+	}
 
 	rec = getWithCookie(t, s, "/projects/p1?tab=settings", cookie)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "8080:3000") {

@@ -461,6 +461,7 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 		ServiceSourceSubdir:      strings.TrimSpace(r.FormValue("service_source_subdir")),
 		ServiceLogDir:            strings.TrimSpace(r.FormValue("service_log_dir")),
 		ServiceAccount:           strings.TrimSpace(r.FormValue("service_account")),
+		Runtime:                  normalizeRuntime(r.FormValue("runtime")),
 		CaddyMode:                strings.TrimSpace(r.FormValue("caddy_mode")),
 		Branch:                   strings.TrimSpace(r.FormValue("branch")),
 		Domain:                   strings.TrimSpace(r.FormValue("domain")),
@@ -520,6 +521,17 @@ func (s *Server) handleProjectDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/projects?notice=Project+deleted", http.StatusSeeOther)
+}
+
+// normalizeRuntime maps the wizard's language choice onto the toolchain winify
+// provisions. "static" and "auto" mean no toolchain, so they store empty.
+func normalizeRuntime(raw string) string {
+	switch strings.TrimSpace(raw) {
+	case "python", "node", "go", "dotnet":
+		return strings.TrimSpace(raw)
+	default:
+		return ""
+	}
 }
 
 func validateProject(p config.Project, srv config.Server) error {

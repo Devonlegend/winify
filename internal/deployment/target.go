@@ -35,44 +35,64 @@ type TargetFactory func(ctx context.Context, job deployJob, secrets SecretResolv
 // fake; production wires it to DialSSH.
 type SSHDialer func(ctx context.Context, srv config.Server, privateKeyPEM string) (Runner, error)
 
-// NewTargetFactory returns the production factory that selects the pipeline by
-// the target server's Type. This is the single branch point between Docker and
-// IIS; everything downstream of a Target is target-specific by design. The
-// audit recorder wraps the connection so every remote command is logged.
-func NewTargetFactory(cfg config.Config, sshDial SSHDialer, audit AuditRecorder) TargetFactory {
-	return func(ctx context.Context, job deployJob, secrets SecretResolver) (Target, error) {
-		switch job.server.Type {
+// RunnerFactory opens a command Runner to a server, choosing the transport by
+// target type: in-process PowerShell for a local Windows target, WinRM for a
+// remote Windows target, SSH for Docker/Linux. It is the single place that
+// turns a server plus its credential into a live connection, and is shared by
+// deploys, monitoring and repository detection.
+type RunnerFactory func(ctx context.Context, srv config.Server, secrets SecretResolver) (Runner, error)
+
+// NewRunnerFactory returns the production RunnerFactory. The audit recorder
+// wraps every connection so remote commands are logged.
+func NewRunnerFactory(sshDial SSHDialer, audit AuditRecorder) RunnerFactory {
+	return func(ctx context.Context, srv config.Server, secrets SecretResolver) (Runner, error) {
+		switch srv.Type {
 		case config.ServerTypeIIS, config.ServerTypeWindowsService:
 			// A local target runs PowerShell in-process: no WinRM, no credential.
-			if job.server.Local {
-				runner := WithAuditRecorder(NewLocalRunner(), audit)
-				if job.server.Type == config.ServerTypeWindowsService {
-					return NewWindowsServiceTarget(cfg, runner), nil
-				}
-				return NewIISTarget(cfg, runner), nil
+			if srv.Local {
+				return WithAuditRecorder(NewLocalRunner(), audit), nil
 			}
-			password, err := ResolveRef(ctx, secrets, job.server.CredentialRef)
+			password, err := ResolveRef(ctx, secrets, srv.CredentialRef)
 			if err != nil {
 				return nil, fmt.Errorf("resolve winrm credential: %w", err)
 			}
-			runner, err := DialWinRM(job.server, password)
+			runner, err := DialWinRM(srv, password)
 			if err != nil {
-				return nil, fmt.Errorf("connect to %s: %w", job.server.WinRMEndpoint, err)
+				return nil, fmt.Errorf("connect to %s: %w", srv.WinRMEndpoint, err)
 			}
-			if job.server.Type == config.ServerTypeWindowsService {
-				return NewWindowsServiceTarget(cfg, WithAuditRecorder(runner, audit)), nil
-			}
-			return NewIISTarget(cfg, WithAuditRecorder(runner, audit)), nil
+			return WithAuditRecorder(runner, audit), nil
 		default:
-			key, err := ResolveRef(ctx, secrets, job.server.SSHKeyRef)
+			key, err := ResolveRef(ctx, secrets, srv.SSHKeyRef)
 			if err != nil {
 				return nil, fmt.Errorf("resolve ssh key: %w", err)
 			}
-			runner, err := sshDial(ctx, job.server, key)
+			runner, err := sshDial(ctx, srv, key)
 			if err != nil {
-				return nil, fmt.Errorf("connect to %s: %w", job.server.SSHHost, err)
+				return nil, fmt.Errorf("connect to %s: %w", srv.SSHHost, err)
 			}
-			return NewDockerTarget(cfg, WithAuditRecorder(runner, audit)), nil
+			return WithAuditRecorder(runner, audit), nil
+		}
+	}
+}
+
+// NewTargetFactory returns the production factory that selects the pipeline by
+// the target server's Type. This is the single branch point between Docker,
+// IIS and native Windows services; everything downstream of a Target is
+// target-specific by design.
+func NewTargetFactory(cfg config.Config, sshDial SSHDialer, audit AuditRecorder) TargetFactory {
+	newRunner := NewRunnerFactory(sshDial, audit)
+	return func(ctx context.Context, job deployJob, secrets SecretResolver) (Target, error) {
+		runner, err := newRunner(ctx, job.server, secrets)
+		if err != nil {
+			return nil, err
+		}
+		switch job.server.Type {
+		case config.ServerTypeIIS:
+			return NewIISTarget(cfg, runner), nil
+		case config.ServerTypeWindowsService:
+			return NewWindowsServiceTarget(cfg, runner), nil
+		default:
+			return NewDockerTarget(cfg, runner), nil
 		}
 	}
 }

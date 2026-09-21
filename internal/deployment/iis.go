@@ -49,6 +49,11 @@ func (t *iisTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) 
 		return "", fmt.Errorf("clone/checkout: %w", err)
 	}
 
+	// Make sure the build's toolchain is present, installing it if missing.
+	if err := ensureRuntime(ctx, t.runner, p.Runtime, logf); err != nil {
+		return "", err
+	}
+
 	// 2. Optional build (for example: dotnet publish into the source subdir).
 	if p.IISBuildCommand != "" {
 		buildCtx := ctx
@@ -173,6 +178,8 @@ func syncRepoScript(repoDir, repoURL, commit string) string {
 func buildScript(repoDir, buildCommand string, env map[string]string) string {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'\n")
+	// Pick up a runtime installed earlier in this deploy (see refreshPathScript).
+	b.WriteString(refreshPathScript)
 	fmt.Fprintf(&b, "Set-Location %s\n", psQuote(repoDir))
 	for _, k := range sortedKeys(env) {
 		fmt.Fprintf(&b, "$env:%s = %s\n", k, psQuote(env[k]))

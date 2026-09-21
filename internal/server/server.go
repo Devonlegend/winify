@@ -57,6 +57,9 @@ type Deps struct {
 	Deployer        Deployer
 	Assistant       Assistant
 	CredentialAdmin CredentialAdmin
+	// RunnerFactory opens a connection to a target for repository detection.
+	// Nil disables the detect endpoint.
+	RunnerFactory deployment.RunnerFactory
 	// Bootstrap backs the Setup page. Nil disables it.
 	Bootstrap *bootstrap.Bootstrap
 	// BootstrapRun applies bootstrap steps now. Only safe when already elevated.
@@ -77,6 +80,7 @@ type Server struct {
 	deployer          Deployer
 	assistant         Assistant
 	credentials       CredentialAdmin
+	newRunner         deployment.RunnerFactory
 	bootstrap         *bootstrap.Bootstrap
 	bootstrapRun      func(ctx context.Context) error
 	bootstrapElevate  func() error
@@ -145,6 +149,7 @@ func New(deps Deps) (*Server, error) {
 		deployer:          deps.Deployer,
 		assistant:         deps.Assistant,
 		credentials:       deps.CredentialAdmin,
+		newRunner:         deps.RunnerFactory,
 		bootstrap:         deps.Bootstrap,
 		bootstrapRun:      deps.BootstrapRun,
 		bootstrapElevate:  deps.BootstrapElevate,
@@ -194,6 +199,7 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/servers/delete", s.handleServerDelete)
 		r.Get("/projects", s.handleProjectsPage)
 		r.Get("/projects/new", s.handleProjectNew)
+		r.Post("/projects/detect", s.handleProjectDetect)
 		r.Get("/projects/{projectID}", s.handleResourcePage)
 		r.Post("/projects", s.handleProjectSave)
 		r.Post("/projects/delete", s.handleProjectDelete)

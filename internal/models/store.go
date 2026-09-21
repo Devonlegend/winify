@@ -285,7 +285,7 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO projects (`+projectColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			server_id = excluded.server_id,
@@ -326,6 +326,7 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 			project_group = excluded.project_group,
 			environment = excluded.environment,
 			disable_health_check = excluded.disable_health_check,
+			runtime = excluded.runtime,
 			updated_at = CURRENT_TIMESTAMP`,
 		p.ID, p.Name, p.ServerID, p.Strategy, p.Source, p.RepoURL, p.DockerfilePath, p.ComposePath,
 		p.Image, p.PortsExposes, p.IISSite, p.IISPhysicalPath, p.IISAppPool, p.IISService,
@@ -335,7 +336,7 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 		string(mappingsJSON), string(buildEnvJSON),
 		p.Branch, p.Domain, p.Port, p.HealthPath,
 		p.HealthIntervalSeconds, p.HealthTimeoutSeconds, p.HealthRetries, p.HealthStartPeriodSeconds,
-		p.WebhookSecretRef, string(envJSON), p.ProjectGroup, p.Environment, boolToInt(p.DisableHealthCheck))
+		p.WebhookSecretRef, string(envJSON), p.ProjectGroup, p.Environment, boolToInt(p.DisableHealthCheck), p.Runtime)
 	if err != nil {
 		return fmt.Errorf("upsert project %q: %w", p.ID, err)
 	}
@@ -349,7 +350,7 @@ const projectColumns = `id, name, server_id, strategy, source, repo_url, dockerf
 	service_log_dir, service_account, caddy_mode,
 	ports_mappings, build_env_json,
 	branch, domain, port, health_path, health_interval_seconds, health_timeout_seconds, health_retries, health_start_period_seconds,
-	webhook_secret_ref, env_json, project_group, environment, disable_health_check`
+	webhook_secret_ref, env_json, project_group, environment, disable_health_check, runtime`
 
 // ListProjects returns all configured projects.
 func (s *Store) ListProjects(ctx context.Context) ([]config.Project, error) {
@@ -402,7 +403,7 @@ func scanProject(scan func(dest ...any) error) (config.Project, error) {
 		&p.Domain, &p.Port, &p.HealthPath,
 		&p.HealthIntervalSeconds, &p.HealthTimeoutSeconds, &p.HealthRetries, &p.HealthStartPeriodSeconds,
 		&p.WebhookSecretRef, &envJSON,
-		&p.ProjectGroup, &p.Environment, &disabled); err != nil {
+		&p.ProjectGroup, &p.Environment, &disabled, &p.Runtime); err != nil {
 		return config.Project{}, err
 	}
 	p.DisableHealthCheck = disabled != 0

@@ -338,6 +338,7 @@ func TestAdminCreateWindowsServiceProject(t *testing.T) {
 		"service_exe":      {`C:\apps\worker\worker.exe`},
 		"service_work_dir": {`C:\apps\worker`},
 		"caddy_mode":       {"static"},
+		"runtime":          {"python"},
 	}, cookie)
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("project save status = %d, want 303 (body: %s)", rec.Code, rec.Body.String())
@@ -351,6 +352,9 @@ func TestAdminCreateWindowsServiceProject(t *testing.T) {
 	}
 	if p.ServiceName != "MyWorker" || p.ServiceExe == "" || p.CaddyMode != "static" {
 		t.Fatalf("project = %+v", p)
+	}
+	if p.Runtime != "python" {
+		t.Fatalf("runtime = %q, want python", p.Runtime)
 	}
 }
 

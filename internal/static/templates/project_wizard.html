@@ -82,6 +82,22 @@
           </select>
         </label>
       </div>
+      <div class="detect-box" id="wz-detect-box">
+        <div class="admin-form">
+          <label>Language
+            <select name="runtime" id="wz-runtime">
+              <option value="">Auto-detect</option>
+              <option value="python">Python</option>
+              <option value="node">Node</option>
+              <option value="go">Go</option>
+              <option value="dotnet">.NET</option>
+              <option value="static">Static HTML</option>
+            </select>
+          </label>
+        </div>
+        <button type="button" class="btn" id="wz-detect">Detect build &amp; run</button>
+        <p class="muted" id="wz-detect-status">Clones the repository on the target and prefills the build and run fields.</p>
+      </div>
     </section>
 
     <section class="wizard-step" data-step="5">

@@ -73,6 +73,13 @@ func (t *windowsServiceTarget) Deploy(ctx context.Context, job deployJob, logf l
 		return "", fmt.Errorf("clone/checkout: %w", err)
 	}
 
+	// Make sure the build's toolchain is present, installing it if missing, so
+	// the build fails fast and self-heals rather than erroring on a missing
+	// interpreter.
+	if err := ensureRuntime(ctx, t.runner, p.Runtime, logf); err != nil {
+		return "", err
+	}
+
 	// 2. Optional build (for example: go build, dotnet publish, npm run build).
 	if p.ServiceBuildCommand != "" {
 		buildCtx := ctx

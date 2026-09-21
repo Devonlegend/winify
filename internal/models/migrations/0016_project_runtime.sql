@@ -1,0 +1,1 @@
+ALTER TABLE projects ADD COLUMN runtime TEXT NOT NULL DEFAULT '';
