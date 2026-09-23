@@ -381,6 +381,66 @@ func TestAdminWindowsServiceProjectValidation(t *testing.T) {
 	}
 }
 
+func TestAdminIISProjectDefaultsSiteAndPool(t *testing.T) {
+	s, store := newTestServerWithStore(t)
+	cookie := login(t, s)
+	ctx := context.Background()
+	if err := store.UpsertServer(ctx, config.Server{
+		ID: "s-iis", Name: "IIS", Type: config.ServerTypeIIS,
+		WinRMEndpoint: "https://10.0.0.7:5986/wsman", WinRMUser: "deploy", CredentialRef: "vault:iis",
+	}); err != nil {
+		t.Fatalf("UpsertServer: %v", err)
+	}
+
+	rec := postForm(t, s, "/projects", url.Values{
+		"id":                {"p-iis"},
+		"name":              {"Portal"},
+		"server_id":         {"s-iis"},
+		"repo_url":          {"https://github.com/x/portal"},
+		"port":              {"80"},
+		"iis_physical_path": {`C:\inetpub\wwwroot\portal`},
+	}, cookie)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("project save = %d, want 303 (body: %s)", rec.Code, rec.Body.String())
+	}
+	p, err := store.GetProject(ctx, "p-iis")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+	if p.IISSite != "p-iis" || p.IISAppPool != "p-iis" {
+		t.Fatalf("site/pool = %q/%q, want defaults from the id", p.IISSite, p.IISAppPool)
+	}
+}
+
+func TestAdminStaticSiteNeedsNoService(t *testing.T) {
+	s, store := newTestServerWithStore(t)
+	cookie := login(t, s)
+	ctx := context.Background()
+	if err := store.UpsertServer(ctx, config.Server{
+		ID: "s-ws", Name: "WS", Type: config.ServerTypeWindowsService,
+		WinRMEndpoint: "https://10.0.0.6:5986/wsman", WinRMUser: "deploy", CredentialRef: "vault:ws",
+	}); err != nil {
+		t.Fatalf("UpsertServer: %v", err)
+	}
+
+	// A static site runs no process, so no service_name or service_exe.
+	rec := postForm(t, s, "/projects", url.Values{
+		"id":               {"p-static"},
+		"name":             {"Static"},
+		"server_id":        {"s-ws"},
+		"repo_url":         {"https://github.com/x/site"},
+		"port":             {"8080"},
+		"service_work_dir": {`C:\apps\static`},
+		"caddy_mode":       {"static"},
+	}, cookie)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("static save = %d, want 303 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if _, err := store.GetProject(ctx, "p-static"); err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+}
+
 func TestAdminPagesRequireAuth(t *testing.T) {
 	s, _ := newTestServerWithStore(t)
 	for _, path := range []string{"/servers", "/projects", "/credentials"} {

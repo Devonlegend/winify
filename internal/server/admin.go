@@ -496,6 +496,16 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 	if srv.Type == config.ServerTypeIIS || srv.Type == config.ServerTypeWindowsService {
 		p.Source = ""
 	}
+	if srv.Type == config.ServerTypeIIS {
+		// Zero-touch IIS: winify creates the site and pool, so an unnamed one
+		// defaults to the project id.
+		if p.IISSite == "" {
+			p.IISSite = p.ID
+		}
+		if p.IISAppPool == "" {
+			p.IISAppPool = p.ID
+		}
+	}
 
 	if err := validateProject(p, srv); err != nil {
 		s.renderProjectForm(w, r, http.StatusBadRequest, &p, err.Error())
@@ -561,10 +571,13 @@ func validateProject(p config.Project, srv config.Server) error {
 		if p.RepoURL == "" {
 			return errors.New("repo_url is required for a Windows service project")
 		}
-		if p.ServiceName == "" {
+		// A static site runs no process: it is served by the per-target Caddy,
+		// so it needs no service name or executable.
+		staticOnly := p.ServiceExe == "" && p.CaddyMode == config.CaddyModeStatic
+		if !staticOnly && p.ServiceName == "" {
 			return errors.New("service_name is required for a Windows service project")
 		}
-		if p.ServiceExe == "" {
+		if !staticOnly && p.ServiceExe == "" {
 			return errors.New("service_exe is required for a Windows service project")
 		}
 		if p.ServiceWorkDir == "" {
