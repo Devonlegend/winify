@@ -559,7 +559,11 @@ func serverSteps(store *models.Store, srv config.Server) (func(context.Context) 
 	}
 	apply := func(ctx context.Context) error {
 		if srv.Local && srv.PublicIP == "" {
-			srv.PublicIP = bootstrap.DetectPublicIP(ctx)
+			if result := bootstrap.DetectPublicIP(ctx); result.OK {
+				srv.PublicIP = result.IP
+			} else {
+				log.Printf("bootstrap: no usable public IP (%s); set it manually to enable sslip.io domains", result.Reason)
+			}
 		}
 		return store.UpsertServer(ctx, srv)
 	}
