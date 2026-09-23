@@ -40,6 +40,14 @@ $tools  = Join-Path $root "tools"
 New-Item -ItemType Directory -Force -Path $binDir, $tools, (Join-Path $root "data") | Out-Null
 $exe = Join-Path $binDir "winify.exe"
 
+# --- stop any existing service first so the binary is not locked ---
+if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
+    Write-Host "Stopping existing $ServiceName service..."
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+    & sc.exe delete $ServiceName | Out-Null
+    Start-Sleep -Seconds 1
+}
+
 # --- resolve winify.exe ---
 if (-not $Source) {
     $local = Join-Path $PSScriptRoot "winify.exe"
@@ -80,6 +88,10 @@ database:
 files:
   servers: '$root\servers.yaml'
   projects: '$root\projects.yaml'
+proxy:
+  enabled: true
+  admin_url: "http://127.0.0.1:2019"
+  server_name: "srv0"
 deploy:
   nssm_source: '$nssm'
 "@
@@ -89,11 +101,6 @@ deploy:
 
 # --- install and start the service ---
 $bin = '"' + $exe + '" serve -config "' + $Config + '"'
-if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
-    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-    & sc.exe delete $ServiceName | Out-Null
-    Start-Sleep -Seconds 1
-}
 New-Service -Name $ServiceName -BinaryPathName $bin -StartupType Automatic -DisplayName "winify (DevOps Control Center)" | Out-Null
 & sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null
 Start-Service -Name $ServiceName
