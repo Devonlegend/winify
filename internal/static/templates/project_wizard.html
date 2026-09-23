@@ -78,7 +78,7 @@
       <div class="admin-form">
         <label>Server
           <select name="server_id" id="wz-server" required>
-            {{range .Servers}}<option value="{{.ID}}" data-type="{{.Type}}">{{.ID}} ({{.Type}})</option>{{end}}
+            {{range .Servers}}<option value="{{.ID}}" data-type="{{.Type}}" data-ip="{{.PublicIP}}">{{.ID}} ({{.Type}})</option>{{end}}
           </select>
         </label>
       </div>
@@ -105,7 +105,9 @@
       <div class="admin-form">
         <label>Name<input name="name" id="wz-name" required placeholder="Storefront API"></label>
         <label>ID<input name="id" id="wz-id" required placeholder="storefront-api"></label>
-        <label>Domain<input name="domain" placeholder="app.example.com"></label>
+        <label>Domain<input name="domain" id="project-domain" placeholder="app.example.com"></label>
+        <button type="button" class="btn btn-ghost btn-sm" id="generate-domain">Generate sslip.io domain</button>
+        <p class="muted">Your own domain (add a DNS A record pointing at the server) or a free sslip.io name.</p>
         <label>Ports exposes (container port)<input name="ports_exposes" value="8080" required></label>
         <label>Health path<input name="health_path" value="/healthz"></label>
         <label>Project group<input name="project_group" value="Default"></label>
@@ -113,7 +115,8 @@
       </div>
       <div class="admin-form" data-group="iis" hidden>
         <label>IIS physical path<input name="iis_physical_path" placeholder="C:\inetpub\wwwroot\app"></label>
-        <label>App pool<input name="iis_app_pool"></label>
+        <label>Site name<input name="iis_site" placeholder="(defaults to the project id)"></label>
+        <label>App pool<input name="iis_app_pool" placeholder="(defaults to the project id)"></label>
         <label>Service (optional)<input name="iis_service"></label>
         <label>Build command (optional)<input name="iis_build_command" placeholder="dotnet publish -c Release -o publish"></label>
         <label>Source subdir<input name="iis_source_subdir" placeholder="publish"></label>

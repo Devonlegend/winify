@@ -187,24 +187,62 @@
     return workDir ? workDir.replace(/[\\/]+$/, '') + '\\' + exe : exe;
   }
 
+  function setFieldIfEmpty(name, v) {
+    var el = form.querySelector('[name=' + name + ']');
+    if (el && v && !el.value) {
+      el.value = v;
+      el.dataset.touched = '1';
+    }
+  }
+
+  // selectFamily switches the wizard's target type and re-filters the server
+  // list to match.
+  function selectFamily(fam) {
+    var radio = form.querySelector('input[name=wizard_family][value=' + fam + ']');
+    if (radio && !radio.checked) {
+      radio.checked = true;
+      applyConditionals();
+    }
+  }
+
+  // serverAvailable reports whether any server matches the current family.
+  function serverAvailable() {
+    var sel = form.querySelector('select[name=server_id]');
+    if (!sel) return false;
+    for (var i = 0; i < sel.options.length; i++) {
+      if (!sel.options[i].disabled) return true;
+    }
+    return false;
+  }
+
   function applyPlan(plan) {
     var id = value('id') || value('name') || 'app';
     var slug = id.replace(/[^A-Za-z0-9]+/g, '') || 'app';
 
-    var workEl = form.querySelector('[name=service_work_dir]');
-    var workDir = workEl && workEl.value ? workEl.value : 'C:\\ProgramData\\winify\\apps\\' + id;
+    // The detector picks the mechanism: run it as a service, or publish it to IIS.
+    if (plan.target) selectFamily(plan.target);
 
-    var nameEl = form.querySelector('[name=service_name]');
-    if (nameEl && !nameEl.value) nameEl.value = slug;
-    if (workEl && !workEl.value) workEl.value = workDir;
+    if (plan.target === 'iis') {
+      setFieldIfEmpty('iis_physical_path', 'C:\\inetpub\\wwwroot\\' + id);
+      setFieldIfEmpty('iis_site', id);
+      setFieldIfEmpty('iis_app_pool', id);
+      setField('iis_build_command', plan.build_command);
+      setField('iis_source_subdir', plan.source_subdir);
+    } else {
+      var workEl = form.querySelector('[name=service_work_dir]');
+      var workDir = workEl && workEl.value ? workEl.value : 'C:\\ProgramData\\winify\\apps\\' + id;
+      var nameEl = form.querySelector('[name=service_name]');
+      if (nameEl && !nameEl.value) nameEl.value = slug;
+      if (workEl && !workEl.value) workEl.value = workDir;
+      setField('service_build_command', plan.build_command);
+      setField('service_exe', absoluteExe(plan.exe, workDir));
+      setField('service_args', plan.args);
+      setField('service_source_subdir', plan.source_subdir);
+      if (plan.caddy_mode) setField('caddy_mode', plan.caddy_mode);
+    }
 
-    setField('service_build_command', plan.build_command);
-    setField('service_exe', absoluteExe(plan.exe, workDir));
-    setField('service_args', plan.args);
-    setField('service_source_subdir', plan.source_subdir);
     if (plan.port) setField('ports_exposes', String(plan.port));
     if (plan.health_path) setField('health_path', plan.health_path);
-    if (plan.caddy_mode) setField('caddy_mode', plan.caddy_mode);
     if (runtimeSelect && plan.language) runtimeSelect.value = plan.language;
 
     var parts = [];
@@ -213,7 +251,14 @@
       parts.push('from ' + plan.evidence.map(function (e) { return e.path; }).join(', '));
     }
     if (plan.confidence) parts.push(plan.confidence + ' confidence');
-    setStatus('Detected ' + plan.language + ' \u2014 ' + parts.join(' \u00b7 '), false);
+
+    var where = plan.target === 'iis' ? 'IIS' : 'Windows service';
+    var msg = 'Detected ' + plan.language + ' \u2192 ' + where + ' \u2014 ' + parts.join(' \u00b7 ');
+    if (!serverAvailable()) {
+      setStatus(msg + '. No ' + where + ' server is configured \u2014 add one under Servers.', true);
+    } else {
+      setStatus(msg, false);
+    }
     buildReview();
   }
 
