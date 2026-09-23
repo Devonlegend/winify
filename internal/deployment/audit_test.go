@@ -2,6 +2,7 @@ package deployment
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -45,6 +46,13 @@ func TestAuditedRunnerRedactsSensitiveCommand(t *testing.T) {
 	}
 	if gotCmd != "write docker-compose.yml (contents redacted)" {
 		t.Fatalf("recorded %q, want the redacted label", gotCmd)
+	}
+}
+
+func TestRedactAuditText(t *testing.T) {
+	got := RedactAuditText("git clone https://user:secret@example.com/repo.git")
+	if strings.Contains(got, "secret") || !strings.Contains(got, "[redacted]") {
+		t.Fatalf("redacted text = %q", got)
 	}
 }
 

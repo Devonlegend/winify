@@ -102,6 +102,10 @@ type AuthConfig struct {
 	// AdminPasswordHash is a bcrypt hash. The plaintext never lives in config;
 	// set CC_ADMIN_PASSWORD instead to have the server hash it at startup.
 	AdminPasswordHash string `yaml:"admin_password_hash"`
+	// SetupToken protects the public first-run registration page when the
+	// listener is exposed beyond loopback. An empty value makes the server
+	// generate a one-time token and print it to its startup log.
+	SetupToken string `yaml:"setup_token" json:"-"`
 	// CookieSecure sets the Secure flag on the session cookie. Keep true in
 	// production; browsers still accept Secure cookies on http://localhost.
 	CookieSecure bool `yaml:"cookie_secure"`
@@ -203,7 +207,7 @@ type DeployConfig struct {
 // in YAML and not overridden by the environment.
 func Default() Config {
 	return Config{
-		Server:   ServerConfig{Addr: ":8080"},
+		Server:   ServerConfig{Addr: "127.0.0.1:8080"},
 		Database: DatabaseConfig{Path: "data/control-center.db"},
 		Auth: AuthConfig{
 			AdminUser:       "admin",
@@ -295,6 +299,9 @@ func (cfg *Config) applyEnv() error {
 	}
 	if v := os.Getenv("CC_ADMIN_USER"); v != "" {
 		cfg.Auth.AdminUser = v
+	}
+	if v := os.Getenv("CC_SETUP_TOKEN"); v != "" {
+		cfg.Auth.SetupToken = v
 	}
 	if v := os.Getenv("CC_MASTER_KEY"); v != "" {
 		cfg.Credentials.MasterKey = v

@@ -3,7 +3,9 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -164,6 +166,220 @@ func ParsePortMapping(s string) (host, container int, err error) {
 		return 0, 0, fmt.Errorf("invalid port mapping %q", s)
 	}
 	return host, container, nil
+}
+
+var (
+	resourceIDPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+	envKeyPattern      = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	domainLabelPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
+)
+
+// ValidateResourceID keeps IDs safe for URLs, log labels, and target paths.
+// IDs are used to construct deployment directories, so accepting path
+// separators or dot segments here would allow a project write outside its
+// configured work root.
+func ValidateResourceID(kind, id string) error {
+	if !resourceIDPattern.MatchString(id) {
+		return fmt.Errorf("%s must contain only letters, numbers, '.', '_' or '-', and must start with a letter or number", kind)
+	}
+	return nil
+}
+
+// ValidateDomain accepts DNS hostnames used by the Caddy route registrar. It
+// intentionally rejects URLs, paths, ports, whitespace, and userinfo so a
+// configured domain cannot alter the admin API request or create an invalid
+// route matcher.
+func ValidateDomain(domain string) error {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return nil
+	}
+	if len(domain) > 253 || strings.ContainsAny(domain, "/:@ \t\r\n") {
+		return fmt.Errorf("domain must be a hostname without scheme, path, port, or whitespace")
+	}
+	domain = strings.TrimSuffix(domain, ".")
+	labels := strings.Split(domain, ".")
+	if len(labels) < 2 {
+		return fmt.Errorf("domain must contain at least two labels")
+	}
+	for _, label := range labels {
+		if !domainLabelPattern.MatchString(label) {
+			return fmt.Errorf("domain contains an invalid label %q", label)
+		}
+	}
+	return nil
+}
+
+func validateEnvMap(field string, env map[string]string) error {
+	for key := range env {
+		if !envKeyPattern.MatchString(key) {
+			return fmt.Errorf("%s contains invalid environment key %q", field, key)
+		}
+	}
+	return nil
+}
+
+func validateRepoURL(repoURL string) error {
+	if repoURL == "" {
+		return nil
+	}
+	u, err := url.Parse(repoURL)
+	if err == nil && u.User != nil {
+		return fmt.Errorf("repo_url must not contain embedded credentials")
+	}
+	return nil
+}
+
+// ValidateServer validates a server before it is persisted or dialed. Keeping
+// this in config makes the UI, API, YAML seed, and deployment factory agree on
+// the same safety rules.
+func ValidateServer(srv Server) error {
+	if err := ValidateResourceID("id", srv.ID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(srv.Name) == "" {
+		return errors.New("name is required")
+	}
+	if srv.SSHPort < 0 || srv.SSHPort > 65535 {
+		return errors.New("ssh_port must be between 1 and 65535")
+	}
+	if srv.WinRMTransport != "" && srv.WinRMTransport != "ntlm" && srv.WinRMTransport != "basic" {
+		return errors.New("winrm_transport must be ntlm or basic")
+	}
+	if srv.WinRMEndpoint != "" {
+		u, err := url.Parse(srv.WinRMEndpoint)
+		if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return errors.New("winrm_endpoint must be an http or https URL")
+		}
+		if srv.WinRMTransport == "basic" && u.Scheme != "https" {
+			return errors.New("winrm_transport=basic requires an https winrm_endpoint")
+		}
+	}
+	switch srv.Type {
+	case ServerTypeDocker:
+		if srv.SSHHost == "" {
+			return errors.New("ssh_host is required for a docker server")
+		}
+		if srv.SSHUser == "" {
+			return errors.New("ssh_user is required for a docker server")
+		}
+		if srv.SSHKeyRef == "" {
+			return errors.New("ssh_key_ref is required for a docker server")
+		}
+	case ServerTypeIIS, ServerTypeWindowsService:
+		if srv.Local {
+			return nil
+		}
+		if srv.WinRMEndpoint == "" {
+			return fmt.Errorf("winrm_endpoint is required for a %s server", srv.Type)
+		}
+		if srv.WinRMUser == "" {
+			return fmt.Errorf("winrm_user is required for a %s server", srv.Type)
+		}
+		if srv.CredentialRef == "" {
+			return fmt.Errorf("credential_ref is required for a %s server", srv.Type)
+		}
+	default:
+		return fmt.Errorf("type must be %q, %q or %q", ServerTypeDocker, ServerTypeIIS, ServerTypeWindowsService)
+	}
+	return nil
+}
+
+// ValidateProject validates a project against its selected target before it
+// is persisted. It intentionally lives beside the entity definitions so YAML
+// imports and API writes cannot bypass the UI's checks.
+func ValidateProject(p Project, srv Server) error {
+	if err := ValidateResourceID("id", p.ID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(p.Name) == "" {
+		return errors.New("name is required")
+	}
+	if strings.TrimSpace(p.ServerID) == "" {
+		return errors.New("server is required")
+	}
+	if err := ValidateDomain(p.Domain); err != nil {
+		return err
+	}
+	if err := validateRepoURL(p.RepoURL); err != nil {
+		return err
+	}
+	if err := validateEnvMap("env", p.Env); err != nil {
+		return err
+	}
+	if err := validateEnvMap("build_env", p.BuildEnv); err != nil {
+		return err
+	}
+	for _, mapping := range p.PortsMappings {
+		if _, _, err := ParsePortMapping(mapping); err != nil {
+			return err
+		}
+	}
+	if p.PortsExposes < 0 || (p.PortsExposes > 0 && p.PortsExposes > 65535) {
+		return errors.New("ports_exposes must be between 1 and 65535")
+	}
+	port := p.EffectiveHostPort()
+	if port < 0 || port > 65535 {
+		return errors.New("ports_exposes must be between 1 and 65535")
+	}
+	if port == 0 && (!p.DisableHealthCheck || p.Domain != "") {
+		return errors.New("ports_exposes must be between 1 and 65535 unless health check is disabled and no domain is configured")
+	}
+
+	switch srv.Type {
+	case ServerTypeIIS:
+		if p.RepoURL == "" {
+			return errors.New("repo_url is required")
+		}
+		if p.IISPhysicalPath == "" {
+			return errors.New("iis_physical_path is required for an IIS project")
+		}
+		if p.IISAppPool == "" {
+			return errors.New("iis_app_pool is required for an IIS project")
+		}
+	case ServerTypeWindowsService:
+		if p.RepoURL == "" {
+			return errors.New("repo_url is required for a Windows service project")
+		}
+		staticOnly := p.ServiceExe == "" && p.CaddyMode == CaddyModeStatic
+		if !staticOnly && p.ServiceName == "" {
+			return errors.New("service_name is required for a Windows service project")
+		}
+		if !staticOnly && p.ServiceExe == "" {
+			return errors.New("service_exe is required for a Windows service project")
+		}
+		if p.ServiceWorkDir == "" {
+			return errors.New("service_work_dir is required for a Windows service project")
+		}
+		switch p.CaddyMode {
+		case "", CaddyModeNone, CaddyModeStatic:
+		case CaddyModeProxy:
+			return fmt.Errorf("caddy_mode=%q is not supported yet", CaddyModeProxy)
+		default:
+			return fmt.Errorf("caddy_mode must be %q or %q", CaddyModeNone, CaddyModeStatic)
+		}
+	default:
+		switch p.Source {
+		case ProjectSourceImage:
+			if strings.TrimSpace(p.Image) == "" {
+				return errors.New("image is required for the image deploy source")
+			}
+		case ProjectSourceCompose:
+			if p.RepoURL == "" {
+				return errors.New("repo_url is required for the compose deploy source")
+			}
+		case "", ProjectSourceDockerfile:
+			if p.RepoURL == "" {
+				return errors.New("repo_url is required for the dockerfile deploy source")
+			}
+		default:
+			return errors.New("source must be dockerfile, compose or image")
+		}
+	}
+	if p.Runtime != "" && p.Runtime != "python" && p.Runtime != "node" && p.Runtime != "go" && p.Runtime != "dotnet" {
+		return fmt.Errorf("runtime must be python, node, go, or dotnet")
+	}
+	return nil
 }
 
 type serversFile struct {

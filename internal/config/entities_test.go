@@ -114,6 +114,27 @@ func TestEffectiveHostPort(t *testing.T) {
 	}
 }
 
+func TestValidateResourceInputs(t *testing.T) {
+	if err := ValidateResourceID("id", "../escape"); err == nil {
+		t.Fatal("path traversal ID was accepted")
+	}
+	if err := ValidateDomain("https://example.com"); err == nil {
+		t.Fatal("URL was accepted as a domain")
+	}
+	if err := ValidateProject(Project{
+		ID: "p1", Name: "App", ServerID: "s1", Source: ProjectSourceImage,
+		Image: "nginx", DisableHealthCheck: true,
+		Env: map[string]string{"BAD-KEY": "value"},
+	}, Server{ID: "s1", Type: ServerTypeDocker}); err == nil {
+		t.Fatal("invalid environment key was accepted")
+	}
+	if err := ValidateServer(Server{ID: "s1", Name: "IIS", Type: ServerTypeIIS,
+		WinRMEndpoint: "http://host:5985/wsman", WinRMTransport: "basic",
+		WinRMUser: "u", CredentialRef: "vault:x"}); err == nil {
+		t.Fatal("Basic WinRM over HTTP was accepted")
+	}
+}
+
 func TestLoadEntitiesMissingFilesAreEmpty(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "nope.yaml")
 	servers, err := LoadServers(missing)

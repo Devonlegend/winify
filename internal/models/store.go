@@ -176,6 +176,12 @@ const serverColumns = `id, name, type, host, winrm_endpoint, winrm_user, winrm_t
 
 // UpsertServer syncs one entry from servers.yaml into the database.
 func (s *Store) UpsertServer(ctx context.Context, srv config.Server) error {
+	if srv.SSHPort == 0 {
+		srv.SSHPort = 22
+	}
+	if srv.WinRMTransport == "" {
+		srv.WinRMTransport = "ntlm"
+	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO servers (`+serverColumns+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -265,6 +271,15 @@ func boolToInt(b bool) int {
 
 // UpsertProject syncs one entry from projects.yaml into the database.
 func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
+	if p.Branch == "" {
+		p.Branch = "main"
+	}
+	if p.HealthPath == "" {
+		p.HealthPath = "/"
+	}
+	if p.Port == 0 {
+		p.Port = p.EffectiveHostPort()
+	}
 	if p.ProjectGroup == "" {
 		p.ProjectGroup = "Default"
 	}

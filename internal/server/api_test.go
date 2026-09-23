@@ -112,6 +112,46 @@ func TestAPIV1UnknownProject(t *testing.T) {
 	}
 }
 
+func TestAPIProjectRedactsEnvironmentValues(t *testing.T) {
+	s, store := newTestServerWithStore(t)
+	ctx := context.Background()
+	if err := store.UpsertProject(ctx, config.Project{
+		ID: "p-secret", Name: "Secret App", ServerID: "s1", Source: "image",
+		Image: "nginx", DisableHealthCheck: true,
+		Env:      map[string]string{"PASSWORD": "do-not-return"},
+		BuildEnv: map[string]string{"TOKEN": "also-secret"},
+	}); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	token := seedToken(t, s, "read")
+	rec := apiRequest(t, s, http.MethodGet, "/api/v1/projects/p-secret", token, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "do-not-return") || strings.Contains(rec.Body.String(), "also-secret") {
+		t.Fatalf("environment secret leaked: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "[redacted]") {
+		t.Fatalf("redaction marker missing: %s", rec.Body.String())
+	}
+}
+
+func TestAPIDeployRejectsMalformedBody(t *testing.T) {
+	s, store, _ := newTestServerFull(t)
+	ctx := context.Background()
+	if err := store.UpsertServer(ctx, config.Server{ID: "s1", Name: "Server", Type: "docker", SSHHost: "h", SSHUser: "u", SSHKeyRef: "vault:k"}); err != nil {
+		t.Fatalf("seed server: %v", err)
+	}
+	if err := store.UpsertProject(ctx, config.Project{ID: "p1", Name: "App", ServerID: "s1", Source: "image", Image: "nginx", DisableHealthCheck: true}); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	token := seedToken(t, s, "write")
+	rec := apiRequest(t, s, http.MethodPost, "/api/v1/projects/p1/deploy", token, `{"commit":`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
 func TestTokensPageRequiresAuth(t *testing.T) {
 	s, _ := newTestServerWithStore(t)
 	rec := doRequest(t, s, http.MethodGet, "/tokens")

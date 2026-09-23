@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -76,9 +77,41 @@ func apiError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// decodeJSON reads a size-limited JSON body.
+// decodeJSON reads exactly one size-limited JSON value and rejects unknown
+// fields. API callers should not be able to smuggle a second value or silently
+// misspell a deployment setting.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
-	return json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAPIBody)).Decode(v)
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAPIBody))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple JSON values")
+		}
+		return err
+	}
+	return nil
+}
+
+func redactProject(p config.Project) config.Project {
+	if len(p.Env) > 0 {
+		redacted := make(map[string]string, len(p.Env))
+		for key := range p.Env {
+			redacted[key] = "[redacted]"
+		}
+		p.Env = redacted
+	}
+	if len(p.BuildEnv) > 0 {
+		redacted := make(map[string]string, len(p.BuildEnv))
+		for key := range p.BuildEnv {
+			redacted[key] = "[redacted]"
+		}
+		p.BuildEnv = redacted
+	}
+	return p
 }
 
 // ---- servers ----
@@ -161,6 +194,9 @@ func (s *Server) apiListProjects(w http.ResponseWriter, r *http.Request) {
 	if projects == nil {
 		projects = []config.Project{}
 	}
+	for i := range projects {
+		projects[i] = redactProject(projects[i])
+	}
 	writeJSON(w, http.StatusOK, projects)
 }
 
@@ -174,7 +210,7 @@ func (s *Server) apiGetProject(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusInternalServerError, "error")
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	writeJSON(w, http.StatusOK, redactProject(p))
 }
 
 func (s *Server) apiSaveProject(w http.ResponseWriter, r *http.Request) {
@@ -209,7 +245,7 @@ func (s *Server) apiSaveProject(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusInternalServerError, "failed to save project")
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	writeJSON(w, http.StatusOK, redactProject(p))
 }
 
 func (s *Server) apiDeleteProject(w http.ResponseWriter, r *http.Request) {
@@ -255,8 +291,13 @@ func (s *Server) apiDeploy(w http.ResponseWriter, r *http.Request) {
 		Commit string `json:"commit"`
 		Ref    string `json:"ref"`
 	}
-	// The body is optional.
-	_ = decodeJSON(w, r, &req)
+	// The body is optional, but a supplied body must be valid JSON.
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := decodeJSON(w, r, &req); err != nil && !errors.Is(err, io.EOF) {
+			apiError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+	}
 	ref := req.Ref
 	if ref == "" {
 		branch := project.Branch
@@ -343,8 +384,12 @@ func (s *Server) handleTokenCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	name := strings.TrimSpace(r.FormValue("name"))
 	scope := strings.TrimSpace(r.FormValue("scope"))
-	if scope != "read" && scope != "write" {
+	if scope == "" {
 		scope = "write"
+	}
+	if scope != "read" && scope != "write" {
+		s.renderTokens(w, r, http.StatusBadRequest, nil, "Scope must be read or write.", "")
+		return
 	}
 	if name == "" {
 		s.renderTokens(w, r, http.StatusBadRequest, nil, "Name is required.", "")

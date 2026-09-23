@@ -134,41 +134,7 @@ func (s *Server) handleServerDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func validateServer(srv config.Server) error {
-	if srv.ID == "" {
-		return errors.New("id is required")
-	}
-	if srv.Name == "" {
-		return errors.New("name is required")
-	}
-	switch srv.Type {
-	case config.ServerTypeDocker:
-		if srv.SSHHost == "" {
-			return errors.New("ssh_host is required for a docker server")
-		}
-		if srv.SSHUser == "" {
-			return errors.New("ssh_user is required for a docker server")
-		}
-		if srv.SSHKeyRef == "" {
-			return errors.New("ssh_key_ref is required for a docker server")
-		}
-	case config.ServerTypeIIS, config.ServerTypeWindowsService:
-		// A local target runs PowerShell in-process: no WinRM fields needed.
-		if srv.Local {
-			return nil
-		}
-		if srv.WinRMEndpoint == "" {
-			return fmt.Errorf("winrm_endpoint is required for a %s server", srv.Type)
-		}
-		if srv.WinRMUser == "" {
-			return fmt.Errorf("winrm_user is required for a %s server", srv.Type)
-		}
-		if srv.CredentialRef == "" {
-			return fmt.Errorf("credential_ref is required for a %s server", srv.Type)
-		}
-	default:
-		return fmt.Errorf("type must be %q, %q or %q", config.ServerTypeDocker, config.ServerTypeIIS, config.ServerTypeWindowsService)
-	}
-	return nil
+	return config.ValidateServer(srv)
 }
 
 // ---- Projects (project group -> environment -> resources) ----
@@ -477,6 +443,16 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 		Environment:              strings.TrimSpace(r.FormValue("environment")),
 		DisableHealthCheck:       r.FormValue("disable_health_check") != "",
 	}
+	// The compact settings form does not include every advanced field. Preserve
+	// omitted values on updates instead of silently erasing them.
+	if existing, err := s.store.GetProject(r.Context(), p.ID); err == nil {
+		if _, present := r.Form["iis_site"]; !present {
+			p.IISSite = existing.IISSite
+		}
+		if _, present := r.Form["runtime"]; !present {
+			p.Runtime = existing.Runtime
+		}
+	}
 	if p.Branch == "" {
 		p.Branch = "main"
 	}
@@ -545,69 +521,7 @@ func normalizeRuntime(raw string) string {
 }
 
 func validateProject(p config.Project, srv config.Server) error {
-	switch {
-	case p.ID == "":
-		return errors.New("id is required")
-	case p.Name == "":
-		return errors.New("name is required")
-	case p.ServerID == "":
-		return errors.New("server is required")
-	case p.EffectiveHostPort() < 1 || p.EffectiveHostPort() > 65535:
-		return errors.New("ports_exposes must be between 1 and 65535")
-	}
-	if srv.Type == config.ServerTypeIIS {
-		if p.RepoURL == "" {
-			return errors.New("repo_url is required")
-		}
-		if p.IISPhysicalPath == "" {
-			return errors.New("iis_physical_path is required for an IIS project")
-		}
-		if p.IISAppPool == "" {
-			return errors.New("iis_app_pool is required for an IIS project")
-		}
-		return nil
-	}
-	if srv.Type == config.ServerTypeWindowsService {
-		if p.RepoURL == "" {
-			return errors.New("repo_url is required for a Windows service project")
-		}
-		// A static site runs no process: it is served by the per-target Caddy,
-		// so it needs no service name or executable.
-		staticOnly := p.ServiceExe == "" && p.CaddyMode == config.CaddyModeStatic
-		if !staticOnly && p.ServiceName == "" {
-			return errors.New("service_name is required for a Windows service project")
-		}
-		if !staticOnly && p.ServiceExe == "" {
-			return errors.New("service_exe is required for a Windows service project")
-		}
-		if p.ServiceWorkDir == "" {
-			return errors.New("service_work_dir is required for a Windows service project")
-		}
-		switch p.CaddyMode {
-		case "", config.CaddyModeNone, config.CaddyModeProxy, config.CaddyModeStatic:
-		default:
-			return fmt.Errorf("caddy_mode must be %q, %q or %q", config.CaddyModeNone, config.CaddyModeProxy, config.CaddyModeStatic)
-		}
-		return nil
-	}
-	// Docker sources.
-	switch p.Source {
-	case config.ProjectSourceImage:
-		if strings.TrimSpace(p.Image) == "" {
-			return errors.New("image is required for the image deploy source")
-		}
-	case config.ProjectSourceCompose:
-		if p.RepoURL == "" {
-			return errors.New("repo_url is required for the compose deploy source")
-		}
-	case "", config.ProjectSourceDockerfile:
-		if p.RepoURL == "" {
-			return errors.New("repo_url is required for the dockerfile deploy source")
-		}
-	default:
-		return errors.New("source must be dockerfile, compose or image")
-	}
-	return nil
+	return config.ValidateProject(p, srv)
 }
 
 // handleManualDeploy starts a deploy without a webhook (first deploy / retry).

@@ -11,8 +11,8 @@ func TestLoadDefaultsWhenFileMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Server.Addr != ":8080" {
-		t.Errorf("Addr = %q, want %q", cfg.Server.Addr, ":8080")
+	if cfg.Server.Addr != "127.0.0.1:8080" {
+		t.Errorf("Addr = %q, want %q", cfg.Server.Addr, "127.0.0.1:8080")
 	}
 	if cfg.Database.Path != "data/control-center.db" {
 		t.Errorf("DB path = %q, want %q", cfg.Database.Path, "data/control-center.db")

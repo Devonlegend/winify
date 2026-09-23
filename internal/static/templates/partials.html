@@ -50,6 +50,7 @@
   <fieldset>
     <legend>IIS</legend>
     <label>Physical path<input name="iis_physical_path" value="{{if .Form}}{{.Form.IISPhysicalPath}}{{end}}" placeholder="C:\inetpub\wwwroot\app"></label>
+    <label>Site name<input name="iis_site" value="{{if .Form}}{{.Form.IISSite}}{{end}}" placeholder="(defaults to the project id)"></label>
     <label>App pool<input name="iis_app_pool" value="{{if .Form}}{{.Form.IISAppPool}}{{end}}"></label>
     <label>Service (optional)<input name="iis_service" value="{{if .Form}}{{.Form.IISService}}{{end}}"></label>
     <label>Build command (optional)<input name="iis_build_command" value="{{if .Form}}{{.Form.IISBuildCommand}}{{end}}" placeholder="dotnet publish -c Release -o publish"></label>
@@ -70,10 +71,19 @@
       <select name="caddy_mode">
         <option value="none" {{if .Form}}{{if eq .Form.CaddyMode "none"}}selected{{end}}{{end}}>none (central proxy only)</option>
         <option value="static" {{if .Form}}{{if eq .Form.CaddyMode "static"}}selected{{end}}{{end}}>static (serve files)</option>
-        <option value="proxy" {{if .Form}}{{if eq .Form.CaddyMode "proxy"}}selected{{end}}{{end}}>proxy</option>
       </select>
     </label>
   </fieldset>
+
+  <label>Runtime/toolchain
+    <select name="runtime">
+      <option value="" {{if .Form}}{{if eq .Form.Runtime ""}}selected{{end}}{{end}}>none / existing</option>
+      <option value="python" {{if .Form}}{{if eq .Form.Runtime "python"}}selected{{end}}{{end}}>Python</option>
+      <option value="node" {{if .Form}}{{if eq .Form.Runtime "node"}}selected{{end}}{{end}}>Node.js</option>
+      <option value="go" {{if .Form}}{{if eq .Form.Runtime "go"}}selected{{end}}{{end}}>Go</option>
+      <option value="dotnet" {{if .Form}}{{if eq .Form.Runtime "dotnet"}}selected{{end}}{{end}}>.NET</option>
+    </select>
+  </label>
 
   <label>Environment (KEY=VALUE per line, runtime)
     <textarea name="env" rows="4" placeholder="ASPNETCORE_ENVIRONMENT=Production">{{.EditEnv}}</textarea>

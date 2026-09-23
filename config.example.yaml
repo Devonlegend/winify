@@ -1,8 +1,9 @@
 # Copy to config.yaml and adjust. Every field here is optional:
 # if the file is absent, the built-in defaults are used.
 server:
-  # host:port to listen on. ":8080" binds every interface.
-  addr: ":8080"
+  # host:port to listen on. Keep loopback until you intentionally expose the UI.
+  # Use 0.0.0.0:8080 only behind a trusted reverse proxy or firewall.
+  addr: "127.0.0.1:8080"
 
 database:
   # SQLite database file, created on first run if missing.

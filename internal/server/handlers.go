@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log"
@@ -89,8 +90,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 // registerData backs the first-run setup page. User is always empty (the layout
 // checks it to decide whether to render the authenticated shell).
 type registerData struct {
-	User  string
-	Error string
+	User          string
+	Error         string
+	SetupRequired bool
 }
 
 // handleRegisterForm shows the first-run setup page, or redirects to login once
@@ -106,7 +108,7 @@ func (s *Server) handleRegisterForm(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	s.render(w, http.StatusOK, "register", registerData{})
+	s.render(w, http.StatusOK, "register", registerData{SetupRequired: s.setupToken != ""})
 }
 
 // handleRegister creates the first admin account and signs it in. It is closed
@@ -119,6 +121,16 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	} else if hasUsers {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
+	}
+	if s.setupToken != "" {
+		if err := r.ParseForm(); err != nil {
+			s.render(w, http.StatusBadRequest, "register", registerData{Error: "Malformed form submission.", SetupRequired: true})
+			return
+		}
+		if !validSetupToken(s.setupToken, r.FormValue("setup_token")) {
+			s.render(w, http.StatusForbidden, "register", registerData{Error: "A valid setup token is required.", SetupRequired: true})
+			return
+		}
 	}
 	if err := r.ParseForm(); err != nil {
 		s.render(w, http.StatusBadRequest, "register", registerData{Error: "Malformed form submission."})
@@ -155,6 +167,11 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+func validSetupToken(expected, supplied string) bool {
+	return len(expected) > 0 && len(expected) == len(supplied) &&
+		subtle.ConstantTimeCompare([]byte(expected), []byte(supplied)) == 1
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {

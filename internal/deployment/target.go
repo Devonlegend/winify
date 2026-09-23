@@ -112,7 +112,7 @@ func execCmd(ctx context.Context, runner Runner, cmd, logCmd string, logf logger
 	logf("$ %s", logCmd)
 	out, err := runner.Run(ctx, cmd)
 	if trimmed := strings.TrimSpace(out); trimmed != "" {
-		logf("%s", trimmed)
+		logf("%s", RedactAuditText(trimmed))
 	}
 	return out, err
 }

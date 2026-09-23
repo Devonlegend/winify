@@ -56,6 +56,27 @@ func TestRegisterCreatesAdminAndSignsIn(t *testing.T) {
 	}
 }
 
+func TestRegisterRequiresSetupToken(t *testing.T) {
+	s, _ := newTestServerNoUsers(t)
+	s.setupToken = "setup_test_token"
+
+	form := url.Values{
+		"username": {"admin"},
+		"password": {"hunter2hunter2"},
+		"confirm":  {"hunter2hunter2"},
+	}
+	rec := postForm(t, s, "/register", form, nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("register without token = %d, want 403", rec.Code)
+	}
+
+	form.Set("setup_token", s.setupToken)
+	rec = postForm(t, s, "/register", form, nil)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("register with token = %d, want 303 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
 func TestRegisterValidation(t *testing.T) {
 	s, _ := newTestServerNoUsers(t)
 

@@ -69,6 +69,10 @@ type Deps struct {
 	// BootstrapElevated reports whether the process can apply steps directly.
 	// Nil falls back to a live elevation check.
 	BootstrapElevated func(ctx context.Context) (bool, error)
+	// SetupToken protects first-run registration when the listener is exposed
+	// beyond loopback. An empty token is allowed for tests and embedded uses;
+	// the production entrypoint always supplies one on a fresh database.
+	SetupToken string
 }
 
 // Server holds the dependencies shared by every handler.
@@ -85,6 +89,7 @@ type Server struct {
 	bootstrapRun      func(ctx context.Context) error
 	bootstrapElevate  func() error
 	bootstrapElevated func(ctx context.Context) (bool, error)
+	setupToken        string
 	pages             map[string]*template.Template
 	assets            fs.FS
 }
@@ -154,6 +159,7 @@ func New(deps Deps) (*Server, error) {
 		bootstrapRun:      deps.BootstrapRun,
 		bootstrapElevate:  deps.BootstrapElevate,
 		bootstrapElevated: deps.BootstrapElevated,
+		setupToken:        deps.SetupToken,
 		pages:             pages,
 		assets:            sub,
 	}, nil
@@ -250,6 +256,7 @@ func (s *Server) render(w http.ResponseWriter, status int, page string, data any
 // writeJSON encodes v as a JSON response.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		log.Printf("write json: %v", err)

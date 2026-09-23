@@ -173,14 +173,14 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 			ExecutedAt:   time.Now(),
 		}
 		if runErr != nil {
-			rc.Error = runErr.Error()
+			rc.Error = deployment.RedactAuditText(runErr.Error())
 		}
-		shown := command
+		shown := deployment.RedactAuditText(command)
 		if len(shown) > 200 {
 			shown = shown[:200] + "..."
 		}
-		log.Printf("audit: server=%s type=%s action=%s deploy=%d command=%q error=%v",
-			meta.ServerID, meta.ServerType, meta.Action, meta.DeploymentID, shown, runErr)
+		log.Printf("audit: server=%s type=%s action=%s deploy=%d command=%q error=%s",
+			meta.ServerID, meta.ServerType, meta.Action, meta.DeploymentID, shown, rc.Error)
 		// Persist even if the command's context was cancelled.
 		if err := store.InsertRemoteCommand(context.WithoutCancel(ctx), rc); err != nil {
 			log.Printf("audit: persist: %v", err)
@@ -205,6 +205,20 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 	var assistantSvc *assistant.Service
 	if cfg.Assistant.Enabled {
 		assistantSvc = buildAssistant(ctx, cfg, store)
+	}
+
+	// First-run registration is protected by a one-time token. The default
+	// listener is loopback-only, but the token also protects installations that
+	// explicitly bind to a public interface.
+	setupToken := cfg.Auth.SetupToken
+	if setupToken == "" {
+		if n, err := store.CountUsers(ctx); err == nil && n == 0 {
+			setupToken, err = auth.NewSetupToken()
+			if err != nil {
+				log.Fatalf("setup token: %v", err)
+			}
+			log.Printf("first-run setup token (required to register the admin): %s", setupToken)
+		}
 	}
 
 	// Bootstrap backs the Setup page and provisions the host on first run.
@@ -241,6 +255,7 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 		BootstrapElevated: func(ctx context.Context) (bool, error) {
 			return bootstrap.IsElevated(ctx, deployment.NewLocalRunner())
 		},
+		SetupToken: setupToken,
 	})
 	if err != nil {
 		log.Fatalf("server: %v", err)
@@ -313,6 +328,9 @@ func seedInventory(ctx context.Context, store *models.Store, cfg config.Config) 
 			log.Fatalf("servers config: %v", err)
 		}
 		for _, srv := range servers {
+			if err := config.ValidateServer(srv); err != nil {
+				log.Fatalf("invalid server %q in %s: %v", srv.ID, cfg.Files.Servers, err)
+			}
 			if err := store.UpsertServer(ctx, srv); err != nil {
 				log.Fatalf("seed server: %v", err)
 			}
@@ -329,15 +347,24 @@ func seedInventory(ctx context.Context, store *models.Store, cfg config.Config) 
 		if err != nil {
 			log.Fatalf("projects config: %v", err)
 		}
+		servers, err := store.ListServers(ctx)
+		if err != nil {
+			log.Fatalf("list servers for project validation: %v", err)
+		}
+		byID := make(map[string]config.Server, len(servers))
+		for _, srv := range servers {
+			byID[srv.ID] = srv
+		}
 		for _, p := range projects {
+			srv, ok := byID[p.ServerID]
+			if !ok {
+				log.Fatalf("project %s references unknown server %s", p.ID, p.ServerID)
+			}
+			if err := config.ValidateProject(p, srv); err != nil {
+				log.Fatalf("invalid project %q in %s: %v", p.ID, cfg.Files.Projects, err)
+			}
 			if err := store.UpsertProject(ctx, p); err != nil {
 				log.Fatalf("seed project: %v", err)
-			}
-			// A repo URL with embedded credentials would end up in the clone
-			// command and therefore in deploy logs and the audit log. Warn
-			// without echoing the URL. Use target-side deploy keys instead.
-			if u, err := url.Parse(p.RepoURL); err == nil && u.User != nil {
-				log.Printf("WARNING: project %s repo_url embeds credentials; use target-side deploy keys instead", p.ID)
 			}
 		}
 		log.Printf("seeded %d projects from %s", len(projects), cfg.Files.Projects)

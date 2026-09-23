@@ -82,7 +82,7 @@ if (-not (Test-Path $Config)) {
     $db = Join-Path $root "data\control-center.db"
     $yaml = @"
 server:
-  addr: ":$Port"
+  addr: "127.0.0.1:$Port"
 database:
   path: '$db'
 files:

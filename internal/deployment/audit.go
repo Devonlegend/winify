@@ -1,6 +1,9 @@
 package deployment
 
-import "context"
+import (
+	"context"
+	"regexp"
+)
 
 // AuditMeta describes who caused a remote command: which server, what kind of
 // action, and which deployment it belongs to.
@@ -52,6 +55,16 @@ func WithAuditRecorder(inner Runner, rec AuditRecorder) Runner {
 	return &auditedRunner{inner: inner, rec: rec}
 }
 
+var auditUserInfoPattern = regexp.MustCompile(`(?i)(https?://)[^/\s@]+@`)
+
+// RedactAuditText removes credentials embedded in HTTP(S) repository URLs
+// before they are persisted or written to the application log. The normal
+// path also rejects these URLs at validation time; this is defense in depth
+// for imported inventory, detection, and older database rows.
+func RedactAuditText(s string) string {
+	return auditUserInfoPattern.ReplaceAllString(s, `${1}[redacted]@`)
+}
+
 type auditedRunner struct {
 	inner Runner
 	rec   AuditRecorder
@@ -64,7 +77,7 @@ func (a *auditedRunner) Run(ctx context.Context, command string) (string, error)
 	if label, ok := auditRedaction(ctx); ok {
 		recorded = label
 	}
-	a.rec(ctx, meta, recorded, err)
+	a.rec(ctx, meta, RedactAuditText(recorded), err)
 	return out, err
 }
 

@@ -1,7 +1,7 @@
 # Self-contained config for local end-to-end testing with Docker.
 # Uses its own database under dev/data so it never touches your real data.
 server:
-  addr: ":8090"
+  addr: "127.0.0.1:8090"
 
 database:
   path: "dev/data/control-center.db"
