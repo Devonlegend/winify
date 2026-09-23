@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -255,5 +257,34 @@ func (d *Deployer) registerProxy(ctx context.Context, job deployJob, logf logger
 		return fmt.Errorf("register %s: %w", job.project.Domain, err)
 	}
 	logf("registered https://%s -> %s", job.project.Domain, upstream)
+	warnIfDomainNotPointedHere(ctx, job.server, job.project.Domain, logf)
 	return nil
+}
+
+// lookupHost resolves a hostname. It is a variable so a test can stub DNS.
+var lookupHost = net.DefaultResolver.LookupHost
+
+// warnIfDomainNotPointedHere resolves the domain and warns when it does not
+// point at this server. A wrong record does not fail registration — Caddy adds
+// the route and retries the certificate later — but it is the usual reason a
+// domain "does not work", so it is surfaced loudly in the deploy log.
+func warnIfDomainNotPointedHere(ctx context.Context, srv config.Server, domain string, logf loggerFunc) {
+	if srv.PublicIP == "" {
+		return
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ips, err := lookupHost(lookupCtx, domain)
+	if err != nil {
+		logf("WARNING: %s does not resolve yet; add a DNS A record pointing to %s for TLS to be issued", domain, srv.PublicIP)
+		return
+	}
+	for _, ip := range ips {
+		if ip == srv.PublicIP {
+			logf("%s resolves to %s", domain, srv.PublicIP)
+			return
+		}
+	}
+	logf("WARNING: %s resolves to %s, but this server's public IP is %s; add an A record pointing at the server for TLS to be issued",
+		domain, strings.Join(ips, ", "), srv.PublicIP)
 }

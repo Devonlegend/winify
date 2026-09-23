@@ -3,13 +3,47 @@ package deployment
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Devonlegend/winify/internal/config"
 	"github.com/Devonlegend/winify/internal/models"
 )
+
+func TestWarnIfDomainNotPointedHere(t *testing.T) {
+	old := lookupHost
+	defer func() { lookupHost = old }()
+
+	var lines []string
+	logf := func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
+	srv := config.Server{ID: "local", PublicIP: "5.6.7.8"}
+
+	// Points elsewhere: warn.
+	lookupHost = func(context.Context, string) ([]string, error) { return []string{"1.2.3.4"}, nil }
+	warnIfDomainNotPointedHere(context.Background(), srv, "app.example.com", logf)
+	if len(lines) != 1 || !strings.Contains(lines[0], "WARNING") || !strings.Contains(lines[0], "5.6.7.8") {
+		t.Fatalf("mismatch: got %v, want a warning naming the server IP", lines)
+	}
+
+	// Points here: informational line, no warning.
+	lines = nil
+	lookupHost = func(context.Context, string) ([]string, error) { return []string{"5.6.7.8"}, nil }
+	warnIfDomainNotPointedHere(context.Background(), srv, "app.example.com", logf)
+	if len(lines) != 1 || strings.Contains(lines[0], "WARNING") {
+		t.Fatalf("match: got %v, want no warning", lines)
+	}
+
+	// Does not resolve: warn.
+	lines = nil
+	lookupHost = func(context.Context, string) ([]string, error) { return nil, errors.New("no such host") }
+	warnIfDomainNotPointedHere(context.Background(), srv, "app.example.com", logf)
+	if len(lines) != 1 || !strings.Contains(lines[0], "WARNING") {
+		t.Fatalf("unresolved: got %v, want a warning", lines)
+	}
+}
 
 // fakeTarget records what the Deployer asked it to do.
 type fakeTarget struct {
