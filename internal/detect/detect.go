@@ -40,6 +40,16 @@ const (
 	ConfidenceLow    = "low"
 )
 
+// Target values name the deployment mechanism a plan should use. They match the
+// server types in internal/config, so the wizard can select the right one.
+const (
+	// TargetWindowsService runs the app as a Windows service via NSSM (or, for
+	// a static site, serves it with the per-target Caddy).
+	TargetWindowsService = "winsvc"
+	// TargetIIS publishes files to an IIS site.
+	TargetIIS = "iis"
+)
+
 // Evidence records one file that contributed to a detection, so the UI can
 // explain why a plan was proposed ("detected Python from requirements.txt").
 type Evidence struct {
@@ -57,6 +67,9 @@ type Evidence struct {
 type Plan struct {
 	Language  Language `json:"language"`
 	Framework string   `json:"framework,omitempty"`
+	// Target is the deployment mechanism to use: TargetWindowsService or
+	// TargetIIS.
+	Target string `json:"target"`
 	// BuildRuntime and RunRuntime name the toolchains needed to build and to
 	// run the workload. RunRuntime is empty for compiled output (Go) and static
 	// sites; BuildRuntime is empty for a static site.

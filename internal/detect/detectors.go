@@ -17,6 +17,7 @@ func detectGo(tree FileTree) *Plan {
 	}
 	plan := &Plan{
 		Language:     LanguageGo,
+		Target:       TargetWindowsService,
 		BuildRuntime: RuntimeGo,
 		BuildCommand: "go build -o app.exe .",
 		Exe:          "app.exe",
@@ -109,6 +110,7 @@ func detectDotNet(tree FileTree) *Plan {
 	plan := &Plan{
 		Language:     LanguageDotNet,
 		Framework:    ".NET",
+		Target:       TargetWindowsService,
 		BuildRuntime: RuntimeDotNet,
 		RunRuntime:   RuntimeDotNet,
 		BuildCommand: "dotnet publish -c Release -o out",
@@ -134,6 +136,15 @@ func detectDotNet(tree FileTree) *Plan {
 	}
 	if name != "" {
 		plan.Args = `out\` + name + ".dll"
+	}
+	if has(tree, "web.config") {
+		// An IIS-hosted app (ASP.NET Framework, or ASP.NET Core in-process):
+		// publish files for IIS instead of running an exe as a service.
+		plan.Target = TargetIIS
+		plan.Exe = ""
+		plan.Args = ""
+		plan.RunRuntime = ""
+		plan.Evidence = append(plan.Evidence, Evidence{Path: "web.config", Reason: "IIS-hosted application"})
 	}
 	return plan
 }
@@ -166,6 +177,7 @@ func detectPython(tree FileTree) *Plan {
 
 	plan := &Plan{
 		Language:     LanguagePython,
+		Target:       TargetWindowsService,
 		BuildRuntime: RuntimePython,
 		RunRuntime:   RuntimePython,
 		Exe:          `.venv\Scripts\python.exe`,
@@ -266,6 +278,7 @@ func detectNode(tree FileTree) *Plan {
 
 	plan := &Plan{
 		Language:     LanguageNode,
+		Target:       TargetWindowsService,
 		BuildRuntime: RuntimeNode,
 		RunRuntime:   RuntimeNode,
 		Exe:          "node.exe",
@@ -343,6 +356,7 @@ func detectStatic(tree FileTree) *Plan {
 	return &Plan{
 		Language:   LanguageStatic,
 		Framework:  "static site",
+		Target:     TargetWindowsService,
 		CaddyMode:  "static",
 		Port:       8080,
 		HealthPath: "/",

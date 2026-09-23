@@ -161,6 +161,41 @@ func TestDetect(t *testing.T) {
 	}
 }
 
+func TestDetectTargetRouting(t *testing.T) {
+	cases := []struct {
+		name  string
+		files memTree
+		want  string
+	}{
+		{"python is a service", memTree{"requirements.txt": "flask\n", "app.py": "x"}, TargetWindowsService},
+		{"go is a service", memTree{"go.mod": "module x\n", "main.go": "package main\n"}, TargetWindowsService},
+		{"static is a service (caddy)", memTree{"index.html": "<html>"}, TargetWindowsService},
+		{"dotnet is a service", memTree{"App.csproj": "<Project/>"}, TargetWindowsService},
+		{"dotnet with web.config is IIS", memTree{"App.csproj": "<Project/>", "web.config": "<configuration/>"}, TargetIIS},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			plan := Detect(c.files)
+			if plan == nil {
+				t.Fatal("Detect = nil")
+			}
+			if plan.Target != c.want {
+				t.Fatalf("target = %q, want %q", plan.Target, c.want)
+			}
+		})
+	}
+}
+
+func TestDetectStaticHasNoExe(t *testing.T) {
+	plan := Detect(memTree{"index.html": "<html>"})
+	if plan == nil {
+		t.Fatal("Detect = nil")
+	}
+	if plan.Exe != "" || plan.CaddyMode != "static" {
+		t.Fatalf("plan = %+v, want static with no exe", plan)
+	}
+}
+
 func TestDetectViteIsStatic(t *testing.T) {
 	plan := Detect(memTree{"package.json": `{"devDependencies":{"vite":"5"}}`})
 	if plan == nil {
