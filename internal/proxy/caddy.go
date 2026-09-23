@@ -33,6 +33,22 @@ func NewCaddy(adminURL, serverName string) *Caddy {
 	}
 }
 
+// Reachable reports whether the Caddy admin API answers. It lets the control
+// center warn at startup when proxy registration is enabled but Caddy is not
+// running, instead of failing every deploy later with a registration error.
+func (c *Caddy) Reachable(ctx context.Context) error {
+	resp, err := c.request(ctx, http.MethodGet, "/config/", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("caddy admin %s: status %d", c.adminURL, resp.StatusCode)
+	}
+	return nil
+}
+
 func routeID(host string) string {
 	replacer := strings.NewReplacer(".", "-", ":", "-", "*", "wildcard")
 	return "cc-route-" + replacer.Replace(host)

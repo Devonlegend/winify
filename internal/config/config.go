@@ -125,8 +125,9 @@ type FilesConfig struct {
 // ProxyConfig configures registration with the reverse proxy (Caddy) that
 // fronts every deployment with automatic HTTPS.
 type ProxyConfig struct {
-	// Enabled turns on proxy registration. When false, deploys run but no
-	// public URL is registered (useful for local development without Caddy).
+	// Enabled turns on proxy registration. Defaults to true because bootstrap
+	// installs Caddy; set false when there is no reverse proxy (deploys then
+	// run but register no public URL).
 	Enabled bool `yaml:"enabled"`
 	// AdminURL is the Caddy admin API endpoint.
 	AdminURL string `yaml:"admin_url"`
@@ -211,7 +212,10 @@ func Default() Config {
 		},
 		Files: FilesConfig{Servers: "servers.yaml", Projects: "projects.yaml"},
 		Proxy: ProxyConfig{
-			Enabled:    false,
+			// On by default: bootstrap provisions Caddy, so deploys should
+			// register their domain and get automatic HTTPS. Set false only
+			// when there is no reverse proxy (deploys then skip registration).
+			Enabled:    true,
 			AdminURL:   "http://127.0.0.1:2019",
 			ServerName: "srv0",
 		},

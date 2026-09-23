@@ -28,6 +28,17 @@ func TestTargetFactoryLocalServerNeedsNoCredential(t *testing.T) {
 	}
 }
 
+func TestTargetHostLocalUsesLoopback(t *testing.T) {
+	// A local target has no host fields, so the reverse proxy upstream must fall
+	// back to loopback (winify and the app share the host).
+	if got := targetHost(config.Server{ID: "local", Local: true}); got != "127.0.0.1" {
+		t.Fatalf("targetHost(local) = %q, want 127.0.0.1", got)
+	}
+	if got := targetHost(config.Server{ID: "s", Host: "10.0.0.9", Local: true}); got != "10.0.0.9" {
+		t.Fatalf("targetHost explicit host = %q, want 10.0.0.9", got)
+	}
+}
+
 func TestRunnerFactoryLocalWindowsUsesLocalRunner(t *testing.T) {
 	sshDial := func(context.Context, config.Server, string) (Runner, error) {
 		return nil, errors.New("ssh must not be dialed for a local target")

@@ -19,6 +19,12 @@ func TestLoadDefaultsWhenFileMissing(t *testing.T) {
 	}
 }
 
+func TestProxyEnabledByDefault(t *testing.T) {
+	if !Default().Proxy.Enabled {
+		t.Fatal("Default().Proxy.Enabled = false, want true (bootstrap installs Caddy)")
+	}
+}
+
 func TestLoadMergesPartialYAMLOverDefaults(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(p, []byte("server:\n  addr: \":9090\"\n"), 0o600); err != nil {

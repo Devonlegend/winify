@@ -143,7 +143,15 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 
 	var registrar proxy.Registrar = proxy.Noop{}
 	if cfg.Proxy.Enabled {
-		registrar = proxy.NewCaddy(cfg.Proxy.AdminURL, cfg.Proxy.ServerName)
+		caddy := proxy.NewCaddy(cfg.Proxy.AdminURL, cfg.Proxy.ServerName)
+		registrar = caddy
+		// Warn now rather than failing every deploy later: with the proxy on, a
+		// deploy that has a domain fails if the route cannot be registered.
+		if err := caddy.Reachable(ctx); err != nil {
+			log.Printf("WARNING: proxy registration is enabled but Caddy is not reachable at %s: %v",
+				cfg.Proxy.AdminURL, err)
+			log.Printf("WARNING: deploys with a domain will fail until Caddy is running (or set proxy.enabled: false)")
+		}
 	}
 	if cfg.Deploy.KnownHostsFile == "" {
 		log.Printf("WARNING: deploy.known_hosts_file is empty; SSH host keys will NOT be verified")

@@ -28,8 +28,9 @@ files:
 
 proxy:
   # Register successful deploys with Caddy for automatic HTTPS.
-  # Requires a running Caddy with its admin API reachable.
-  enabled: false
+  # Defaults to true (bootstrap installs Caddy). Set false only when there is
+  # no reverse proxy; deploys then run but register no public URL.
+  enabled: true
   admin_url: "http://127.0.0.1:2019"
   server_name: "srv0"
 

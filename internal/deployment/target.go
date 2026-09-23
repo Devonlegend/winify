@@ -118,11 +118,15 @@ func execCmd(ctx context.Context, runner Runner, cmd, logCmd string, logf logger
 }
 
 // targetHost resolves the address the reverse proxy forwards to. It prefers an
-// explicit host, then ssh_host, then the host part of the WinRM endpoint.
-// This is one of the few places that genuinely needs target-type awareness.
+// explicit host, then the loopback for a local target (winify and the app share
+// the host), then ssh_host, then the host part of the WinRM endpoint. This is
+// one of the few places that genuinely needs target-type awareness.
 func targetHost(srv config.Server) string {
 	if srv.Host != "" {
 		return srv.Host
+	}
+	if srv.Local {
+		return "127.0.0.1"
 	}
 	if srv.SSHHost != "" {
 		return srv.SSHHost
