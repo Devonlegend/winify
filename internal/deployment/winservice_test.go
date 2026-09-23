@@ -169,6 +169,64 @@ func TestWindowsServiceUploadsNSSM(t *testing.T) {
 	}
 }
 
+func TestInstallServiceScriptGuardsNativeFailures(t *testing.T) {
+	script := installServiceScript(winsvcProject(), `C:\tools\nssm.exe`)
+	// Without a $LASTEXITCODE guard a failed "nssm install" is silently ignored
+	// under PowerShell 5.1 and only surfaces later as a confusing start error.
+	if !strings.Contains(script, "$LASTEXITCODE") {
+		t.Fatalf("install script does not check native exit codes:\n%s", script)
+	}
+}
+
+func TestEnsureNSSMFallsBackToTargetCopy(t *testing.T) {
+	// The configured source is missing, but the target already has nssm.exe.
+	runner := &fakeRunner{outputs: func(cmd string) string {
+		if strings.Contains(cmd, "Get-FileHash") {
+			return "abc123\n"
+		}
+		return ""
+	}}
+	got, err := EnsureNSSM(context.Background(), runner, `C:\tools\nssm.exe`, `missing\nssm.exe`, "", noopLogf)
+	if err != nil {
+		t.Fatalf("EnsureNSSM: %v", err)
+	}
+	if got != `C:\tools\nssm.exe` {
+		t.Fatalf("path = %q", got)
+	}
+}
+
+func TestWindowsServiceStaticSiteSkipsServiceInstall(t *testing.T) {
+	runner := &fakeRunner{outputs: func(cmd string) string {
+		if strings.Contains(cmd, "$stamp = Get-Date") {
+			return backupPath + "\n"
+		}
+		return ""
+	}}
+	// A static site has no executable: Caddy serves the files instead.
+	project := config.Project{
+		ID: "site-1", Name: "Site", ServerID: "server-003",
+		Strategy:       config.ServerTypeWindowsService,
+		RepoURL:        "https://example.com/site.git",
+		Branch:         "main",
+		Domain:         "site.example.com",
+		Port:           8080,
+		ServiceWorkDir: `C:\control-center\apps\site-1`,
+		CaddyMode:      config.CaddyModeStatic,
+	}
+	tgt := winsvcTargetWith(runner)
+
+	if _, err := tgt.Deploy(context.Background(), deployJob{project: project, commit: "abc1234"}, noopLogf); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	cmds := runner.joined()
+	if strings.Contains(cmds, "AppThrottle 1500") || strings.Contains(cmds, "AppEnvironmentExtra") {
+		t.Errorf("static site installed an application service:\n%s", cmds)
+	}
+	if !strings.Contains(cmds, "Caddyfile") {
+		t.Errorf("static site did not write a Caddyfile:\n%s", cmds)
+	}
+}
+
 func TestValidateServiceScriptChecksBuiltExe(t *testing.T) {
 	script := validateServiceScript(
 		`C:\control-center\proj-003`, "publish",

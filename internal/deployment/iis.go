@@ -66,17 +66,22 @@ func (t *iisTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) 
 		}
 	}
 
-	// 3. Validate BEFORE touching anything live.
+	// 3. Ensure the IIS site and application pool exist (create if missing).
+	if _, err := execCmd(ctx, t.runner, ensureIISScript(p), "ensure IIS site/app pool", logf); err != nil {
+		return "", fmt.Errorf("ensure IIS site: %w", err)
+	}
+
+	// 4. Validate BEFORE touching anything live.
 	if _, err := execCmd(ctx, t.runner, validateScript(repoDir, source, p.IISAppPool, p.IISService), "validate configuration", logf); err != nil {
 		return "", fmt.Errorf("validation failed: %w", err)
 	}
 
-	// 4. Stop the service and app pool.
+	// 5. Stop the service and app pool.
 	if _, err := execCmd(ctx, t.runner, stopScript(p.IISAppPool, p.IISService), "stop service/app pool", logf); err != nil {
 		return "", fmt.Errorf("stop: %w", err)
 	}
 
-	// 5. Backup the current live files (timestamped).
+	// 6. Backup the current live files (timestamped).
 	backupOut, err := execCmd(ctx, t.runner, backupScript(p.IISPhysicalPath, t.cfg.Deploy.IISBackupDir, p.ID), "backup live files", logf)
 	if err != nil {
 		return "", fmt.Errorf("backup: %w", err)
@@ -84,18 +89,18 @@ func (t *iisTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) 
 	backup := lastLine(backupOut)
 	logf("backup created: %s", backup)
 
-	// 6. Deploy the new build files.
+	// 7. Deploy the new build files.
 	srcDir := winPath(repoDir, source)
 	if _, err := execCmd(ctx, t.runner, copyScript(srcDir, p.IISPhysicalPath, "deploy"), "deploy files", logf); err != nil {
 		return "", fmt.Errorf("deploy files: %w", err)
 	}
 
-	// 7. Start the service and recycle the app pool.
+	// 8. Start the service and recycle the app pool.
 	if _, err := execCmd(ctx, t.runner, startScript(p.IISAppPool, p.IISService), "start service/recycle app pool", logf); err != nil {
 		return "", fmt.Errorf("start: %w", err)
 	}
 
-	// 8. Smoke test.
+	// 9. Smoke test.
 	if err := t.smokeTest(ctx, p, logf); err != nil {
 		return "", err
 	}
@@ -155,21 +160,37 @@ func (t *iisTarget) smokeTest(ctx context.Context, p config.Project, logf logger
 
 // ---- PowerShell script builders ----
 
+// exitGuard turns a non-zero exit of the preceding native command into a
+// terminating error. Windows PowerShell ignores native exit codes even with
+// $ErrorActionPreference='Stop', so a failed git/nssm/pip call would otherwise
+// be silently ignored and the pipeline would continue with stale state.
+func exitGuard(label string) string {
+	return fmt.Sprintf("; if ($LASTEXITCODE -ne 0) { throw %s + $LASTEXITCODE }\n", psQuote(label+": exit "))
+}
+
+// gitSafe returns the -c safe.directory option for dir. winify usually runs as
+// LocalSystem while a clone may have been made by an interactive user; git
+// refuses to operate on a repository owned by another account ("dubious
+// ownership") unless the directory is explicitly trusted.
+func gitSafe(dir string) string {
+	return "-c safe.directory=" + psQuote(dir)
+}
+
 func syncRepoScript(repoDir, repoURL, commit string) string {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'\n")
 	fmt.Fprintf(&b, "New-Item -ItemType Directory -Force -Path %s | Out-Null\n", psQuote(repoDir))
 	fmt.Fprintf(&b, "if (Test-Path (Join-Path %s '.git')) {\n", psQuote(repoDir))
-	fmt.Fprintf(&b, "  git -C %s fetch --all --prune\n", psQuote(repoDir))
+	fmt.Fprintf(&b, "  git %s -C %s fetch --all --prune%s", gitSafe(repoDir), psQuote(repoDir), exitGuard("git fetch"))
 	if commit != "" {
-		fmt.Fprintf(&b, "  git -C %s checkout --force %s\n", psQuote(repoDir), psQuote(commit))
+		fmt.Fprintf(&b, "  git %s -C %s checkout --force %s%s", gitSafe(repoDir), psQuote(repoDir), psQuote(commit), exitGuard("git checkout"))
 	} else {
-		fmt.Fprintf(&b, "  git -C %s pull --ff-only\n", psQuote(repoDir))
+		fmt.Fprintf(&b, "  git %s -C %s pull --ff-only%s", gitSafe(repoDir), psQuote(repoDir), exitGuard("git pull"))
 	}
 	b.WriteString("} else {\n")
-	fmt.Fprintf(&b, "  git clone %s %s\n", psQuote(repoURL), psQuote(repoDir))
+	fmt.Fprintf(&b, "  git clone %s %s%s", psQuote(repoURL), psQuote(repoDir), exitGuard("git clone"))
 	if commit != "" {
-		fmt.Fprintf(&b, "  git -C %s checkout --force %s\n", psQuote(repoDir), psQuote(commit))
+		fmt.Fprintf(&b, "  git %s -C %s checkout --force %s%s", gitSafe(repoDir), psQuote(repoDir), psQuote(commit), exitGuard("git checkout"))
 	}
 	b.WriteString("}\n")
 	return b.String()
@@ -184,7 +205,38 @@ func buildScript(repoDir, buildCommand string, env map[string]string) string {
 	for _, k := range sortedKeys(env) {
 		fmt.Fprintf(&b, "$env:%s = %s\n", k, psQuote(env[k]))
 	}
-	fmt.Fprintf(&b, "%s\n", buildCommand)
+	fmt.Fprintf(&b, "%s%s", buildCommand, exitGuard("build command"))
+	return b.String()
+}
+
+// ensureIISScript creates the application pool and site when they are missing,
+// and points an existing site at the project's physical path and pool. This is
+// what makes an IIS deploy zero-touch: nothing has to be pre-created in IIS.
+// SECURITY: it modifies IIS configuration (sites, app pools) as the WinRM or
+// local account, which is an administrator on the target.
+func ensureIISScript(p config.Project) string {
+	site := p.IISSite
+	if site == "" {
+		site = p.ID
+	}
+	port := p.EffectiveHostPort()
+	if port <= 0 {
+		port = 80
+	}
+	var b strings.Builder
+	b.WriteString("$ErrorActionPreference='Stop'\n")
+	b.WriteString("Import-Module WebAdministration\n")
+	fmt.Fprintf(&b, "$pool = %s\n", psQuote(p.IISAppPool))
+	fmt.Fprintf(&b, "$site = %s\n", psQuote(site))
+	fmt.Fprintf(&b, "$path = %s\n", psQuote(p.IISPhysicalPath))
+	b.WriteString("New-Item -ItemType Directory -Force -Path $path | Out-Null\n")
+	b.WriteString("if (-not (Test-Path \"IIS:\\AppPools\\$pool\")) { New-WebAppPool -Name $pool | Out-Null }\n")
+	b.WriteString("if (-not (Get-Website -Name $site -ErrorAction SilentlyContinue)) {\n")
+	fmt.Fprintf(&b, "  New-Website -Name $site -PhysicalPath $path -Port %d -ApplicationPool $pool | Out-Null\n", port)
+	b.WriteString("} else {\n")
+	b.WriteString("  Set-ItemProperty \"IIS:\\Sites\\$site\" -Name physicalPath -Value $path\n")
+	b.WriteString("  Set-ItemProperty \"IIS:\\Sites\\$site\" -Name applicationPool -Value $pool\n")
+	b.WriteString("}\n")
 	return b.String()
 }
 

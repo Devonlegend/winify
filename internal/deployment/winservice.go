@@ -51,10 +51,13 @@ func (t *windowsServiceTarget) Close() error { return t.runner.Close() }
 // backup path as the deployment artifact.
 func (t *windowsServiceTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) (string, error) {
 	p := job.project
-	if p.ServiceName == "" {
+	// A static site has no process to run: it is served by the per-target Caddy
+	// instead of being installed as a service.
+	staticOnly := p.ServiceExe == "" && p.CaddyMode == config.CaddyModeStatic
+	if !staticOnly && p.ServiceName == "" {
 		return "", fmt.Errorf("project %s has no service_name", p.ID)
 	}
-	if p.ServiceExe == "" {
+	if !staticOnly && p.ServiceExe == "" {
 		return "", fmt.Errorf("project %s has no service_exe", p.ID)
 	}
 	if p.ServiceWorkDir == "" {
@@ -103,9 +106,11 @@ func (t *windowsServiceTarget) Deploy(ctx context.Context, job deployJob, logf l
 		return "", fmt.Errorf("validation failed: %w", err)
 	}
 
-	// 5. Stop the service (no-op on first deploy).
-	if _, err := execCmd(ctx, t.runner, stopServiceScript(p.ServiceName, nssmPath), "stop service", logf); err != nil {
-		return "", fmt.Errorf("stop: %w", err)
+	// 5. Stop the service (no-op on first deploy, and skipped for static sites).
+	if !staticOnly {
+		if _, err := execCmd(ctx, t.runner, stopServiceScript(p.ServiceName, nssmPath), "stop service", logf); err != nil {
+			return "", fmt.Errorf("stop: %w", err)
+		}
 	}
 
 	// 6. Backup the current install directory (timestamped).
@@ -122,21 +127,25 @@ func (t *windowsServiceTarget) Deploy(ctx context.Context, job deployJob, logf l
 		return "", fmt.Errorf("deploy files: %w", err)
 	}
 
-	// 8. Install or update the service definition.
-	if _, err := execCmd(ctx, t.runner, installServiceScript(p, nssmPath), "install/update service "+p.ServiceName, logf); err != nil {
-		return "", fmt.Errorf("install service: %w", err)
-	}
-	if envScript := serviceEnvScript(p, nssmPath); envScript != "" {
-		// Env values may hold secrets; record a label instead of the payload.
-		envCtx := withAuditRedaction(ctx, "set service environment (values redacted)")
-		if _, err := execCmd(envCtx, t.runner, envScript, "set service environment", logf); err != nil {
-			return "", fmt.Errorf("set service environment: %w", err)
+	// 8. Install or update the service definition (not for a static site).
+	if !staticOnly {
+		if _, err := execCmd(ctx, t.runner, installServiceScript(p, nssmPath), "install/update service "+p.ServiceName, logf); err != nil {
+			return "", fmt.Errorf("install service: %w", err)
+		}
+		if envScript := serviceEnvScript(p, nssmPath); envScript != "" {
+			// Env values may hold secrets; record a label instead of the payload.
+			envCtx := withAuditRedaction(ctx, "set service environment (values redacted)")
+			if _, err := execCmd(envCtx, t.runner, envScript, "set service environment", logf); err != nil {
+				return "", fmt.Errorf("set service environment: %w", err)
+			}
 		}
 	}
 
 	// 9. Start and wait for Running.
-	if _, err := execCmd(ctx, t.runner, startServiceScript(p.ServiceName, nssmPath), "start service "+p.ServiceName, logf); err != nil {
-		return "", fmt.Errorf("start service: %w", err)
+	if !staticOnly {
+		if _, err := execCmd(ctx, t.runner, startServiceScript(p.ServiceName, nssmPath), "start service "+p.ServiceName, logf); err != nil {
+			return "", fmt.Errorf("start service: %w", err)
+		}
 	}
 
 	// 10. Per-target Caddy (static file serving). Central Caddy still owns TLS.
@@ -155,7 +164,8 @@ func (t *windowsServiceTarget) Deploy(ctx context.Context, job deployJob, logf l
 // It discovers the backup on the target, so it does not depend on deploy history.
 func (t *windowsServiceTarget) Rollback(ctx context.Context, job deployJob, logf loggerFunc) (string, error) {
 	p := job.project
-	if p.ServiceName == "" || p.ServiceWorkDir == "" {
+	staticOnly := p.ServiceExe == "" && p.CaddyMode == config.CaddyModeStatic
+	if p.ServiceWorkDir == "" || (!staticOnly && p.ServiceName == "") {
 		return "", fmt.Errorf("project %s is not configured as a Windows service", p.ID)
 	}
 	nssmPath := nssmPathFor(job.server)
@@ -170,14 +180,18 @@ func (t *windowsServiceTarget) Rollback(ctx context.Context, job deployJob, logf
 	}
 	logf("rollback: restoring %s", backup)
 
-	if _, err := execCmd(ctx, t.runner, stopServiceScript(p.ServiceName, nssmPath), "stop service", logf); err != nil {
-		return "", fmt.Errorf("stop: %w", err)
+	if !staticOnly {
+		if _, err := execCmd(ctx, t.runner, stopServiceScript(p.ServiceName, nssmPath), "stop service", logf); err != nil {
+			return "", fmt.Errorf("stop: %w", err)
+		}
 	}
 	if _, err := execCmd(ctx, t.runner, copyScript(backup, p.ServiceWorkDir, "restore backup"), "restore backup", logf); err != nil {
 		return "", fmt.Errorf("restore backup: %w", err)
 	}
-	if _, err := execCmd(ctx, t.runner, startServiceScript(p.ServiceName, nssmPath), "start service "+p.ServiceName, logf); err != nil {
-		return "", fmt.Errorf("start service: %w", err)
+	if !staticOnly {
+		if _, err := execCmd(ctx, t.runner, startServiceScript(p.ServiceName, nssmPath), "start service "+p.ServiceName, logf); err != nil {
+			return "", fmt.Errorf("start service: %w", err)
+		}
 	}
 	if err := t.smokeTest(ctx, p, logf); err != nil {
 		return "", err
@@ -231,6 +245,16 @@ func EnsureNSSM(ctx context.Context, runner Runner, nssmPath, source, pinSHA256 
 	}
 	data, err := os.ReadFile(source)
 	if err != nil {
+		// The configured source is unavailable (for example a relative path
+		// that does not resolve when winify runs as a service). That is fine
+		// when the target already has nssm.exe; otherwise it is a real
+		// misconfiguration and the caller's validation will fail.
+		if got, herr := RemoteFileSHA256(ctx, runner, nssmPath); herr == nil && got != "" {
+			if logf != nil {
+				logf("nssm source %s is unavailable; using the copy already on the target", source)
+			}
+			return nssmPath, nil
+		}
 		return "", fmt.Errorf("read nssm source %s: %w", source, err)
 	}
 	if pin := strings.TrimSpace(pinSHA256); pin != "" && !strings.EqualFold(pin, sha256hex(data)) {
@@ -415,7 +439,7 @@ func stopServiceScript(name, nssmPath string) string {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'\n")
 	fmt.Fprintf(&b, "if (Get-Service -Name %s -ErrorAction SilentlyContinue) {\n", psQuote(name))
-	fmt.Fprintf(&b, "  & %s stop %s | Out-Null\n", psQuote(nssmPath), psQuote(name))
+	fmt.Fprintf(&b, "  & %s stop %s | Out-Null%s", psQuote(nssmPath), psQuote(name), exitGuard("nssm stop"))
 	b.WriteString("  $deadline = (Get-Date).AddSeconds(30)\n")
 	fmt.Fprintf(&b, "  while ((Get-Service -Name %s).Status -ne 'Stopped' -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }\n", psQuote(name))
 	b.WriteString("}\n")
@@ -425,7 +449,7 @@ func stopServiceScript(name, nssmPath string) string {
 func startServiceScript(name, nssmPath string) string {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'\n")
-	fmt.Fprintf(&b, "& %s start %s | Out-Null\n", psQuote(nssmPath), psQuote(name))
+	fmt.Fprintf(&b, "& %s start %s | Out-Null%s", psQuote(nssmPath), psQuote(name), exitGuard("nssm start"))
 	b.WriteString("$deadline = (Get-Date).AddSeconds(30)\n")
 	fmt.Fprintf(&b, "$s = (Get-Service -Name %s).Status\n", psQuote(name))
 	fmt.Fprintf(&b, "while ($s -ne 'Running' -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500; $s = (Get-Service -Name %s).Status }\n", psQuote(name))
@@ -440,26 +464,26 @@ func installServiceScript(p config.Project, nssmPath string) string {
 	b.WriteString("$ErrorActionPreference='Stop'\n")
 	fmt.Fprintf(&b, "$nssm = %s\n", psQuote(nssmPath))
 	fmt.Fprintf(&b, "if (Get-Service -Name %s -ErrorAction SilentlyContinue) {\n", psQuote(p.ServiceName))
-	fmt.Fprintf(&b, "  & $nssm set %s Application %s\n", psQuote(p.ServiceName), psQuote(p.ServiceExe))
+	fmt.Fprintf(&b, "  & $nssm set %s Application %s%s", psQuote(p.ServiceName), psQuote(p.ServiceExe), exitGuard("nssm set Application"))
 	b.WriteString("} else {\n")
-	fmt.Fprintf(&b, "  & $nssm install %s %s\n", psQuote(p.ServiceName), psQuote(p.ServiceExe))
+	fmt.Fprintf(&b, "  & $nssm install %s %s%s", psQuote(p.ServiceName), psQuote(p.ServiceExe), exitGuard("nssm install"))
 	b.WriteString("}\n")
-	fmt.Fprintf(&b, "& $nssm set %s AppDirectory %s\n", psQuote(p.ServiceName), psQuote(p.ServiceWorkDir))
+	fmt.Fprintf(&b, "& $nssm set %s AppDirectory %s%s", psQuote(p.ServiceName), psQuote(p.ServiceWorkDir), exitGuard("nssm set AppDirectory"))
 	if p.ServiceArgs != "" {
-		fmt.Fprintf(&b, "& $nssm set %s AppParameters %s\n", psQuote(p.ServiceName), psQuote(p.ServiceArgs))
+		fmt.Fprintf(&b, "& $nssm set %s AppParameters %s%s", psQuote(p.ServiceName), psQuote(p.ServiceArgs), exitGuard("nssm set AppParameters"))
 	}
 	if p.ServiceLogDir != "" {
 		fmt.Fprintf(&b, "New-Item -ItemType Directory -Force -Path %s | Out-Null\n", psQuote(p.ServiceLogDir))
-		fmt.Fprintf(&b, "& $nssm set %s AppStdout %s\n", psQuote(p.ServiceName), psQuote(winPath(p.ServiceLogDir, sanitize(p.ID)+".out.log")))
-		fmt.Fprintf(&b, "& $nssm set %s AppStderr %s\n", psQuote(p.ServiceName), psQuote(winPath(p.ServiceLogDir, sanitize(p.ID)+".err.log")))
-		fmt.Fprintf(&b, "& $nssm set %s AppRotateFiles 1\n", psQuote(p.ServiceName))
+		fmt.Fprintf(&b, "& $nssm set %s AppStdout %s%s", psQuote(p.ServiceName), psQuote(winPath(p.ServiceLogDir, sanitize(p.ID)+".out.log")), exitGuard("nssm set AppStdout"))
+		fmt.Fprintf(&b, "& $nssm set %s AppStderr %s%s", psQuote(p.ServiceName), psQuote(winPath(p.ServiceLogDir, sanitize(p.ID)+".err.log")), exitGuard("nssm set AppStderr"))
+		fmt.Fprintf(&b, "& $nssm set %s AppRotateFiles 1%s", psQuote(p.ServiceName), exitGuard("nssm set AppRotateFiles"))
 	}
 	if p.ServiceAccount != "" {
-		fmt.Fprintf(&b, "& $nssm set %s ObjectName %s\n", psQuote(p.ServiceName), psQuote(p.ServiceAccount))
+		fmt.Fprintf(&b, "& $nssm set %s ObjectName %s%s", psQuote(p.ServiceName), psQuote(p.ServiceAccount), exitGuard("nssm set ObjectName"))
 	}
-	fmt.Fprintf(&b, "& $nssm set %s AppExit Default Restart\n", psQuote(p.ServiceName))
-	fmt.Fprintf(&b, "& $nssm set %s AppThrottle 1500\n", psQuote(p.ServiceName))
-	fmt.Fprintf(&b, "& $nssm set %s Start SERVICE_AUTO_START\n", psQuote(p.ServiceName))
+	fmt.Fprintf(&b, "& $nssm set %s AppExit Default Restart%s", psQuote(p.ServiceName), exitGuard("nssm set AppExit"))
+	fmt.Fprintf(&b, "& $nssm set %s AppThrottle 1500%s", psQuote(p.ServiceName), exitGuard("nssm set AppThrottle"))
+	fmt.Fprintf(&b, "& $nssm set %s Start SERVICE_AUTO_START%s", psQuote(p.ServiceName), exitGuard("nssm set Start"))
 	return b.String()
 }
 
@@ -479,7 +503,7 @@ func serviceEnvScript(p config.Project, nssmPath string) string {
 		b.WriteString(psQuote(k + "=" + p.Env[k]))
 	}
 	b.WriteString(")\n")
-	fmt.Fprintf(&b, "& $nssm set %s AppEnvironmentExtra @pairs\n", psQuote(p.ServiceName))
+	fmt.Fprintf(&b, "& $nssm set %s AppEnvironmentExtra @pairs%s", psQuote(p.ServiceName), exitGuard("nssm set AppEnvironmentExtra"))
 	return b.String()
 }
 
@@ -502,11 +526,11 @@ func ensureCaddyServiceScript(p config.Project, caddyPath, nssmPath, dir, config
 	b.WriteString("$ErrorActionPreference='Stop'\n")
 	fmt.Fprintf(&b, "$nssm = %s\n", psQuote(nssmPath))
 	fmt.Fprintf(&b, "if (-not (Get-Service -Name %s -ErrorAction SilentlyContinue)) {\n", psQuote(name))
-	fmt.Fprintf(&b, "  & $nssm install %s %s\n", psQuote(name), psQuote(caddyPath))
-	fmt.Fprintf(&b, "  & $nssm set %s AppParameters %s\n", psQuote(name), psQuote(args))
-	fmt.Fprintf(&b, "  & $nssm set %s AppDirectory %s\n", psQuote(name), psQuote(dir))
-	fmt.Fprintf(&b, "  & $nssm set %s AppExit Default Restart\n", psQuote(name))
-	fmt.Fprintf(&b, "  & $nssm set %s Start SERVICE_AUTO_START\n", psQuote(name))
+	fmt.Fprintf(&b, "  & $nssm install %s %s%s", psQuote(name), psQuote(caddyPath), exitGuard("nssm install caddy"))
+	fmt.Fprintf(&b, "  & $nssm set %s AppParameters %s%s", psQuote(name), psQuote(args), exitGuard("nssm set caddy AppParameters"))
+	fmt.Fprintf(&b, "  & $nssm set %s AppDirectory %s%s", psQuote(name), psQuote(dir), exitGuard("nssm set caddy AppDirectory"))
+	fmt.Fprintf(&b, "  & $nssm set %s AppExit Default Restart%s", psQuote(name), exitGuard("nssm set caddy AppExit"))
+	fmt.Fprintf(&b, "  & $nssm set %s Start SERVICE_AUTO_START%s", psQuote(name), exitGuard("nssm set caddy Start"))
 	b.WriteString("}\n")
 	return b.String()
 }
@@ -516,9 +540,9 @@ func reloadCaddyScript(p config.Project, caddyPath, nssmPath, configFile string)
 	name := caddyServiceName(p)
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'\n")
-	fmt.Fprintf(&b, "if ((Get-Service -Name %s).Status -ne 'Running') { & %s start %s | Out-Null; Start-Sleep -Seconds 1 }\n",
-		psQuote(name), psQuote(nssmPath), psQuote(name))
-	fmt.Fprintf(&b, "& %s reload --config %s --adapter caddyfile\n", psQuote(caddyPath), psQuote(configFile))
+	fmt.Fprintf(&b, "if ((Get-Service -Name %s).Status -ne 'Running') { & %s start %s | Out-Null%s", psQuote(name), psQuote(nssmPath), psQuote(name), exitGuard("nssm start caddy"))
+	b.WriteString("; Start-Sleep -Seconds 1 }\n")
+	fmt.Fprintf(&b, "& %s reload --config %s --adapter caddyfile%s", psQuote(caddyPath), psQuote(configFile), exitGuard("caddy reload"))
 	return b.String()
 }
 

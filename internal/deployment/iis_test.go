@@ -56,6 +56,45 @@ func TestIISDeployPipelineOrder(t *testing.T) {
 	}
 }
 
+func TestIISPipelineCreatesSiteAndPool(t *testing.T) {
+	runner := &fakeRunner{outputs: func(cmd string) string {
+		if strings.Contains(cmd, "$stamp = Get-Date") {
+			return backupPath + "\n"
+		}
+		return ""
+	}}
+	tgt := iisTargetWith(runner)
+
+	if _, err := tgt.Deploy(context.Background(), deployJob{project: iisProject(), commit: "abc1234"}, noopLogf); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	cmds := runner.joined()
+	for _, want := range []string{"New-WebAppPool", "New-Website"} {
+		if !strings.Contains(cmds, want) {
+			t.Errorf("ensure step missing %q:\n%s", want, cmds)
+		}
+	}
+	// The site/pool must be ensured before validation and any live change.
+	ensure := runner.indexOf("New-WebAppPool")
+	validate := runner.indexOf("web.config")
+	if ensure < 0 || validate < 0 || ensure > validate {
+		t.Errorf("ensure (%d) must run before validate (%d)", ensure, validate)
+	}
+}
+
+func TestSyncRepoScriptTrustsDirectoryAndGuardsFailures(t *testing.T) {
+	script := syncRepoScript(`C:\control-center\app`, "https://example.com/app.git", "main")
+	for _, want := range []string{
+		`-c safe.directory='C:\control-center\app'`,
+		"throw 'git fetch: exit ",
+		"throw 'git checkout: exit ",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("sync script missing %q:\n%s", want, script)
+		}
+	}
+}
+
 func TestIISValidateFailureBlocksLiveChanges(t *testing.T) {
 	runner := &fakeRunner{failOn: "web.config"}
 	tgt := iisTargetWith(runner)
