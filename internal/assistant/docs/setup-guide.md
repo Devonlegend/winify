@@ -47,6 +47,10 @@ the dashboard. The database is the source of truth; `servers.yaml` and
 install). After that you add and edit everything in the UI, and a **Deploy**
 button on the Projects tab starts a deploy without waiting for a push.
 
+For Windows servers, the default target is the **native Windows service** type
+(NSSM + Caddy); IIS is available as an advanced option for apps that genuinely
+need it.
+
 ## Credentials
 
 Secrets are never stored in plaintext. Add an encrypted credential either from

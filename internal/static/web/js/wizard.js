@@ -16,7 +16,7 @@
 
   function family() {
     var r = form.querySelector('input[name=wizard_family]:checked');
-    return r ? r.value : 'docker';
+    return r ? r.value : 'winsvc';
   }
 
   function source() {
@@ -85,7 +85,7 @@
     if (!review) return;
     var fam = family();
     var src = source();
-    var familyLabel = fam === 'iis' ? 'Windows IIS' : fam === 'winsvc' ? 'Windows service (NSSM)' : 'Docker';
+    var familyLabel = fam === 'iis' ? 'IIS (advanced/legacy)' : fam === 'winsvc' ? 'Windows native service' : 'Docker';
     var rows = [
       ['Type', familyLabel],
       ['Source', fam === 'docker' ? src : 'Git repository'],

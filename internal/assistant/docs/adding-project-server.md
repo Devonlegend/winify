@@ -8,14 +8,22 @@ in the UI.
 
 ## Adding a server
 
-Open the **Servers** tab and fill in the form.
+Open the **Servers** tab. The fastest path is **Onboard a Windows server**: give
+the WinRM endpoint, user and password, and the platform provisions directories,
+NSSM and Caddy on the target and creates the server record for you.
 
-For a Docker target choose `type: docker` and set `ssh_host`, `ssh_port`,
-`ssh_user` and the SSH key credential ref (for example
-`vault:server-002-ssh`). For an IIS target choose `type: iis` and set
-`winrm_endpoint`, `winrm_user`, `winrm_transport` (`ntlm` or `basic`),
-`winrm_insecure`, and the WinRM credential ref. The `type` selects the deploy
-pipeline.
+For a manual entry, choose the type and fill in the form:
+
+- **winsvc — Windows native service (recommended)**. The default for Windows
+  servers: your app runs as a Windows service via NSSM and Caddy provides HTTPS
+  and static files. Set `winrm_endpoint`, `winrm_user`, `winrm_insecure` and the
+  WinRM credential ref; NSSM/Caddy paths default to `C:\ProgramData\winify\tools`.
+- **docker — Linux/Docker over SSH**. Set `ssh_host`, `ssh_port`, `ssh_user` and
+  the SSH key credential ref (for example `vault:server-002-ssh`).
+- **iis — IIS (advanced/legacy)**. Only for apps that need ASP.NET Framework,
+  Windows authentication, classic ASP, or an existing IIS site.
+
+The `type` selects the deploy pipeline.
 
 Optionally set `services` (systemd units or Windows service names to report in
 Monitoring) and `disk_path` (the volume to report).
@@ -54,7 +62,17 @@ The dockerfile source builds the image, then runs it with Docker Compose on
 with a generated compose file. In all cases the deploy is only successful if
 the health check passes.
 
-## Adding an IIS project
+## Adding a Windows native-service project
+
+Pick the winsvc server and fill in `service_name`, `service_exe` and
+`service_work_dir` (plus optional build command, source subdir, log directory
+and Caddy mode). The pipeline syncs the repo, builds if configured, validates
+before touching the live install, backs up the current directory, copies files,
+installs/updates the NSSM service, starts it and smoke-tests the port. A static
+site (`caddy_mode: static`) needs no service name or executable — the per-target
+Caddy serves the files.
+
+## Adding an IIS project (advanced/legacy)
 
 Same form, but pick the IIS server and fill in `iis_physical_path` and
 `iis_app_pool` (plus optional `iis_service`, `iis_build_command` and

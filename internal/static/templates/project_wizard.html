@@ -26,19 +26,19 @@
       <h2>What are you deploying?</h2>
       <div class="choice-grid">
         <label class="choice">
-          <input type="radio" name="wizard_family" value="docker" checked>
+          <input type="radio" name="wizard_family" value="winsvc" checked>
+          <span class="choice-title">Windows native service <span class="badge badge-winsvc">recommended</span></span>
+          <span class="choice-desc">Run a built executable as a Windows service (NSSM) with Caddy for HTTPS and static files. The default for Windows servers.</span>
+        </label>
+        <label class="choice">
+          <input type="radio" name="wizard_family" value="docker">
           <span class="choice-title">Docker application</span>
-          <span class="choice-desc">Build from a Dockerfile, run the repo's Compose file, or run a prebuilt image.</span>
+          <span class="choice-desc">Build from a Dockerfile, run the repo's Compose file, or run a prebuilt image on a Linux/Docker target.</span>
         </label>
         <label class="choice">
           <input type="radio" name="wizard_family" value="iis">
-          <span class="choice-title">Windows IIS application</span>
-          <span class="choice-desc">Publish files to an IIS site over WinRM with backup and rollback.</span>
-        </label>
-        <label class="choice">
-          <input type="radio" name="wizard_family" value="winsvc">
-          <span class="choice-title">Windows native service</span>
-          <span class="choice-desc">Run a built executable as a Windows service via NSSM, optionally fronted by Caddy.</span>
+          <span class="choice-title">IIS application <span class="badge">advanced/legacy</span></span>
+          <span class="choice-desc">Publish files to an IIS site. Use only when the app needs ASP.NET Framework, Windows auth, or an existing IIS site.</span>
         </label>
       </div>
     </section>
@@ -123,12 +123,12 @@
       </div>
       <div class="admin-form" data-group="winsvc" hidden>
         <label>Service name<input name="service_name" placeholder="MyApp"></label>
-        <label>Executable path (on target)<input name="service_exe" placeholder="C:\control-center\apps\myapp\myapp.exe"></label>
+        <label>Executable path (on target)<input name="service_exe" placeholder="C:\ProgramData\winify\apps\myapp\myapp.exe"></label>
         <label>Arguments (optional)<input name="service_args" placeholder="--port 8080"></label>
-        <label>Install directory<input name="service_work_dir" placeholder="C:\control-center\apps\myapp"></label>
+        <label>Install directory<input name="service_work_dir" placeholder="C:\ProgramData\winify\apps\myapp"></label>
         <label>Build command (optional)<input name="service_build_command" placeholder="go build -o myapp.exe ./cmd/myapp"></label>
         <label>Source subdir<input name="service_source_subdir" placeholder="."></label>
-        <label>Log directory (optional)<input name="service_log_dir" placeholder="C:\control-center\logs\myapp"></label>
+        <label>Log directory (optional)<input name="service_log_dir" placeholder="C:\ProgramData\winify\logs\myapp"></label>
         <label>Caddy mode
           <select name="caddy_mode">
             <option value="none">none (central proxy only)</option>
