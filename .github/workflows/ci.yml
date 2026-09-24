@@ -28,3 +28,83 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - name: Run vulnerability scan
         run: "$(go env GOPATH)/bin/govulncheck ./..."
+
+  windows:
+    # Runs the whole suite on a real Windows runner: LocalRunner/PowerShell
+    # integration tests, path handling and the service wrapper only execute
+    # there. Also smoke-boots the built binary and parses packaging scripts.
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: true
+      - run: go mod download
+
+      - name: Test on Windows
+        run: go test ./...
+
+      - name: Parse packaging PowerShell scripts
+        shell: pwsh
+        run: |
+          foreach ($f in 'packaging/install.ps1', 'packaging/build-installer.ps1') {
+            $tokens = $null; $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Host "$f: $($_.Message) (line $($_.Extent.StartLineNumber))" }
+              exit 1
+            }
+            Write-Host "$f parses cleanly"
+          }
+
+      - name: Windows smoke test (build, boot, health, login)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path smoke | Out-Null
+          go build -o smoke/control-center.exe ./cmd/control-center
+          @'
+          server:
+            addr: "127.0.0.1:18099"
+          database:
+            path: "smoke.db"
+          proxy:
+            enabled: false
+          bootstrap:
+            enabled: false
+          monitoring:
+            enabled: false
+          assistant:
+            enabled: false
+          '@ | Set-Content -Path smoke/config.yaml -Encoding UTF8
+          $env:CC_ADMIN_PASSWORD = "ci-smoke-password-123"
+
+          $exe = (Resolve-Path smoke/control-center.exe).Path
+          $cfg = (Resolve-Path smoke/config.yaml).Path
+          $logDir = (Resolve-Path smoke).Path
+          Remove-Item -ErrorAction SilentlyContinue "$logDir/out.log", "$logDir/err.log"
+          $p = Start-Process -FilePath $exe -ArgumentList @('serve', '-config', $cfg) `
+            -PassThru -NoNewWindow -RedirectStandardOutput "$logDir/out.log" -RedirectStandardError "$logDir/err.log"
+          try {
+            $healthy = $false
+            foreach ($i in 1..60) {
+              try {
+                $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:18099/healthz' -TimeoutSec 2
+                if ($r.StatusCode -eq 200) { $healthy = $true; break }
+              } catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $healthy) { throw 'server did not become healthy' }
+
+            $login = Invoke-WebRequest -UseBasicParsing -Method Post -Uri 'http://127.0.0.1:18099/login' `
+              -Body @{ username = 'admin'; password = 'ci-smoke-password-123' } `
+              -MaximumRedirection 0 -SkipHttpErrorCheck
+            if ($login.StatusCode -ne 303 -and $login.StatusCode -ne 200) {
+              throw "login returned $($login.StatusCode)"
+            }
+            Write-Host "smoke test passed: healthz OK, login OK"
+          } finally {
+            if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+            if (Test-Path "$logDir/out.log") { Get-Content "$logDir/out.log" | Select-Object -Last 40 }
+            if (Test-Path "$logDir/err.log") { Get-Content "$logDir/err.log" | Select-Object -Last 40 }
+          }

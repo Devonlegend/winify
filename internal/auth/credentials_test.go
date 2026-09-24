@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -140,6 +141,11 @@ func TestLoadMasterKeyTightensExistingPermissions(t *testing.T) {
 	}
 	if _, err := LoadMasterKey("", path); err != nil {
 		t.Fatalf("LoadMasterKey: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		// Windows ACLs don't map to POSIX mode bits; loading successfully is the
+		// assertion there.
+		return
 	}
 	info, err := os.Stat(path)
 	if err != nil {
