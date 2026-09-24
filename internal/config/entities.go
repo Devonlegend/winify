@@ -114,6 +114,8 @@ type Project struct {
 	Port             int    `yaml:"port" json:"port,omitempty"`
 	HealthPath       string `yaml:"health_path" json:"health_path,omitempty"`
 	WebhookSecretRef string `yaml:"webhook_secret_ref" json:"webhook_secret_ref,omitempty"`
+	// GitHubRepo is "owner/repo" for GitHub App-driven webhook auto-registration.
+	GitHubRepo string `yaml:"github_repo" json:"github_repo,omitempty"`
 	// Env is passed to the running workload. BuildEnv is passed only to the
 	// image build (Docker build args / build-command environment).
 	Env      map[string]string `yaml:"env" json:"env,omitempty"`
@@ -447,6 +449,9 @@ func ValidateProject(p Project, srv Server) error {
 	}
 	if err := ValidateDomain(p.Domain); err != nil {
 		return err
+	}
+	if p.GitHubRepo != "" && !regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`).MatchString(p.GitHubRepo) {
+		return errors.New("github_repo must be owner/repo")
 	}
 	if err := ValidateRepoURL(p.RepoURL); err != nil {
 		return err

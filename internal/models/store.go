@@ -377,7 +377,7 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO projects (`+projectColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			server_id = excluded.server_id,
@@ -419,6 +419,7 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 			environment = excluded.environment,
 			disable_health_check = excluded.disable_health_check,
 			runtime = excluded.runtime,
+			github_repo = excluded.github_repo,
 			updated_at = CURRENT_TIMESTAMP`,
 		p.ID, p.Name, p.ServerID, p.Strategy, p.Source, p.RepoURL, p.DockerfilePath, p.ComposePath,
 		p.Image, p.PortsExposes, p.IISSite, p.IISPhysicalPath, p.IISAppPool, p.IISService,
@@ -428,7 +429,7 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 		string(mappingsJSON), buildEnvStored,
 		p.Branch, p.Domain, p.Port, p.HealthPath,
 		p.HealthIntervalSeconds, p.HealthTimeoutSeconds, p.HealthRetries, p.HealthStartPeriodSeconds,
-		p.WebhookSecretRef, envStored, p.ProjectGroup, p.Environment, boolToInt(p.DisableHealthCheck), p.Runtime)
+		p.WebhookSecretRef, envStored, p.ProjectGroup, p.Environment, boolToInt(p.DisableHealthCheck), p.Runtime, p.GitHubRepo)
 	if err != nil {
 		return fmt.Errorf("upsert project %q: %w", p.ID, err)
 	}
@@ -442,7 +443,7 @@ const projectColumns = `id, name, server_id, strategy, source, repo_url, dockerf
 	service_log_dir, service_account, caddy_mode,
 	ports_mappings, build_env_json,
 	branch, domain, port, health_path, health_interval_seconds, health_timeout_seconds, health_retries, health_start_period_seconds,
-	webhook_secret_ref, env_json, project_group, environment, disable_health_check, runtime`
+	webhook_secret_ref, env_json, project_group, environment, disable_health_check, runtime, github_repo`
 
 // ListProjects returns all configured projects.
 func (s *Store) ListProjects(ctx context.Context) ([]config.Project, error) {
@@ -495,7 +496,7 @@ func (s *Store) scanProject(scan func(dest ...any) error) (config.Project, error
 		&p.Domain, &p.Port, &p.HealthPath,
 		&p.HealthIntervalSeconds, &p.HealthTimeoutSeconds, &p.HealthRetries, &p.HealthStartPeriodSeconds,
 		&p.WebhookSecretRef, &envJSON,
-		&p.ProjectGroup, &p.Environment, &disabled, &p.Runtime); err != nil {
+		&p.ProjectGroup, &p.Environment, &disabled, &p.Runtime, &p.GitHubRepo); err != nil {
 		return config.Project{}, err
 	}
 	p.DisableHealthCheck = disabled != 0

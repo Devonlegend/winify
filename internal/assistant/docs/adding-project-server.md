@@ -99,6 +99,25 @@ pushes to other branches are ignored. You can also start a deploy directly from
 the **Projects** tab with the **Deploy** button — useful for the first deploy or
 a retry.
 
+### Automatic GitHub webhook registration
+
+Instead of registering the webhook manually, configure the GitHub App in
+`config.yaml`:
+
+    github:
+      app_id: "123456"
+      installation_id: 98765432
+      private_key_ref: "vault:github-app-key"
+
+The App needs **Administration: read/write** on the repositories it manages and
+must be installed on them. Store the App's private key with
+`control-center cred add github-app-key < app-key.pem`, and set
+`server.public_url` to the externally reachable control-center URL. Then open a
+project, enter `owner/repo` under **Connect webhook**, and winify generates the
+secret, stores it encrypted and creates (or updates) the push hook. The manual
+flow (`webhook_secret_ref` + registering the URL yourself) still works for
+GitLab or unmanaged repos.
+
 ## Verifying a deployment
 
 Watch the **Deployment** tab: each attempt shows its status, commit, artifact

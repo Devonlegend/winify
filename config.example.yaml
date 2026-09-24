@@ -4,6 +4,9 @@ server:
   # host:port to listen on. Keep loopback until you intentionally expose the UI.
   # Use 0.0.0.0:8080 only behind a trusted reverse proxy or firewall.
   addr: "127.0.0.1:8080"
+  # Externally reachable base URL for webhook callbacks (e.g. https://cc.example.com).
+  # Empty derives it from the incoming request host.
+  public_url: ""
 
 database:
   # SQLite database file, created on first run if missing.
@@ -92,6 +95,16 @@ bootstrap:
     # Optional pinned SHA-256 of the caddy.exe binary.
     sha256: ""
     admin: "127.0.0.1:2019"
+
+# GitHub App used to auto-register project push webhooks from the UI.
+# The App needs Administration (read/write) on the repositories it manages and
+# must be installed on them. The private key lives in the credential store:
+#   .\control-center cred add github-app-key < app-key.pem
+github:
+  app_id: ""
+  installation_id: 0
+  private_key_ref: "vault:github-app-key"
+  # api_url: "https://ghe.example.com/api/v3"  # GitHub Enterprise only
 
 monitoring:
   # Poll each registered server over its existing SSH/WinRM connection.

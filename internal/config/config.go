@@ -56,6 +56,27 @@ type Config struct {
 	Bootstrap   BootstrapConfig   `yaml:"bootstrap"`
 	Monitoring  MonitoringConfig  `yaml:"monitoring"`
 	Assistant   AssistantConfig   `yaml:"assistant"`
+	GitHub      GitHubConfig      `yaml:"github"`
+}
+
+// GitHubConfig configures the GitHub App used for automatic webhook
+// registration. The App needs Administration (read/write) on repositories it
+// manages, and must be installed on those repositories.
+type GitHubConfig struct {
+	// AppID is the GitHub App's numeric ID.
+	AppID string `yaml:"app_id"`
+	// InstallationID is the App installation on the account/org.
+	InstallationID int64 `yaml:"installation_id"`
+	// PrivateKeyRef names the encrypted credential holding the App's PEM
+	// private key (for example vault:github-app-key).
+	PrivateKeyRef string `yaml:"private_key_ref"`
+	// APIURL defaults to https://api.github.com; set it for GitHub Enterprise.
+	APIURL string `yaml:"api_url"`
+}
+
+// GitHubEnabled reports whether automatic webhook registration is configured.
+func (g GitHubConfig) Enabled() bool {
+	return g.AppID != "" && g.InstallationID != 0 && g.PrivateKeyRef != ""
 }
 
 // BootstrapConfig controls zero-touch provisioning of the host winify runs on.
@@ -92,6 +113,9 @@ type CaddyBootstrapConfig struct {
 type ServerConfig struct {
 	// Addr is the listen address in host:port form, e.g. ":8080".
 	Addr string `yaml:"addr"`
+	// PublicURL is the externally reachable base URL (e.g. https://cc.example.com),
+	// used for provider webhook callbacks. Empty derives it from the request host.
+	PublicURL string `yaml:"public_url"`
 }
 
 // DatabaseConfig locates the SQLite file.
@@ -331,6 +355,12 @@ func (cfg Config) Validate() error {
 	} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
 		return errors.New("server.addr port must be between 1 and 65535")
 	}
+	if cfg.Server.PublicURL != "" {
+		u, err := url.Parse(cfg.Server.PublicURL)
+		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+			return errors.New("server.public_url must be an http or https URL")
+		}
+	}
 	if cfg.Auth.SessionTTLHours < 1 {
 		return errors.New("auth.session_ttl_hours must be positive")
 	}
@@ -378,6 +408,17 @@ func (cfg Config) Validate() error {
 		u, err := url.Parse(cfg.Bootstrap.Caddy.URL)
 		if err != nil || u.Scheme != "https" || u.Host == "" {
 			return errors.New("bootstrap.caddy.url must be an HTTPS URL")
+		}
+	}
+	if cfg.GitHub.AppID != "" || cfg.GitHub.InstallationID != 0 || cfg.GitHub.PrivateKeyRef != "" {
+		if !cfg.GitHub.Enabled() {
+			return errors.New("github requires app_id, installation_id and private_key_ref together")
+		}
+	}
+	if cfg.GitHub.APIURL != "" {
+		u, err := url.Parse(cfg.GitHub.APIURL)
+		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+			return errors.New("github.api_url must be an http or https URL")
 		}
 	}
 	return nil
@@ -450,6 +491,9 @@ func resolveConfigPaths(cfg *Config, base string) {
 func (cfg *Config) applyEnv() error {
 	if v := os.Getenv("CC_ADDR"); v != "" {
 		cfg.Server.Addr = v
+	}
+	if v := os.Getenv("CC_PUBLIC_URL"); v != "" {
+		cfg.Server.PublicURL = strings.TrimRight(v, "/")
 	}
 	if v := os.Getenv("CC_DB_PATH"); v != "" {
 		cfg.Database.Path = v
@@ -631,6 +675,22 @@ func (cfg *Config) applyEnv() error {
 			return fmt.Errorf("CC_ASSISTANT_TOP_K: %w", err)
 		}
 		cfg.Assistant.TopK = n
+	}
+	if v := os.Getenv("CC_GITHUB_APP_ID"); v != "" {
+		cfg.GitHub.AppID = v
+	}
+	if v := os.Getenv("CC_GITHUB_INSTALLATION_ID"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return fmt.Errorf("CC_GITHUB_INSTALLATION_ID: %w", err)
+		}
+		cfg.GitHub.InstallationID = n
+	}
+	if v := os.Getenv("CC_GITHUB_PRIVATE_KEY_REF"); v != "" {
+		cfg.GitHub.PrivateKeyRef = v
+	}
+	if v := os.Getenv("CC_GITHUB_API_URL"); v != "" {
+		cfg.GitHub.APIURL = v
 	}
 	return nil
 }

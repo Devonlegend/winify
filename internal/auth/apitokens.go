@@ -18,6 +18,16 @@ func NewAPIToken() (plaintext, hash string, err error) {
 	return plaintext, HashToken(plaintext), nil
 }
 
+// NewWebhookSecret creates a random shared secret for a provider webhook.
+// It is stored encrypted in the credential store and used for HMAC checks.
+func NewWebhookSecret() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate webhook secret: %w", err)
+	}
+	return "whsec_" + base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
 // NewSetupToken creates the one-time token required by the first-run
 // registration page. It is intentionally separate from API tokens so setup
 // credentials can be rotated independently and are never stored in the API

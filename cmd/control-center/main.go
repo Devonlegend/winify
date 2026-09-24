@@ -36,6 +36,7 @@ import (
 	"github.com/Devonlegend/winify/internal/bootstrap"
 	"github.com/Devonlegend/winify/internal/config"
 	"github.com/Devonlegend/winify/internal/deployment"
+	"github.com/Devonlegend/winify/internal/githubapp"
 	"github.com/Devonlegend/winify/internal/models"
 	"github.com/Devonlegend/winify/internal/monitoring"
 	"github.com/Devonlegend/winify/internal/proxy"
@@ -275,8 +276,9 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 		BootstrapElevated: func(ctx context.Context) (bool, error) {
 			return bootstrap.IsElevated(ctx, deployment.NewLocalRunner())
 		},
-		SetupToken:     setupToken,
-		OnboardWindows: onboardWindowsServer(cfg, store, credStore, auditRecorder),
+		SetupToken:           setupToken,
+		OnboardWindows:       onboardWindowsServer(cfg, store, credStore, auditRecorder),
+		ConnectGitHubWebhook: connectGitHubWebhook(cfg, store, credStore),
 	})
 	if err != nil {
 		log.Fatalf("server: %v", err)
@@ -852,6 +854,52 @@ func looksLikeWindowsPath(p string) bool {
 		return true
 	}
 	return len(p) >= 2 && ((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z')) && p[1] == ':'
+}
+
+// connectGitHubWebhook returns the UI flow that links a project to a GitHub
+// repository: a fresh webhook secret is stored encrypted, the App's installation
+// token registers (or updates) the repository push hook, and the project records
+// the secret ref and repo.
+func connectGitHubWebhook(cfg config.Config, store *models.Store, credStore *auth.CredentialStore) server.ConnectGitHubFunc {
+	return func(ctx context.Context, project config.Project, ownerRepo, baseURL string) error {
+		if !cfg.GitHub.Enabled() {
+			return errors.New("github integration is not configured (set github.app_id, github.installation_id, github.private_key_ref)")
+		}
+		pemKey, err := deployment.ResolveRef(ctx, credStore, cfg.GitHub.PrivateKeyRef)
+		if err != nil {
+			return fmt.Errorf("resolve github app key: %w", err)
+		}
+		secret, err := auth.NewWebhookSecret()
+		if err != nil {
+			return err
+		}
+		refName := project.ID + "-webhook"
+		if err := credStore.Put(ctx, refName, secret); err != nil {
+			return fmt.Errorf("store webhook secret: %w", err)
+		}
+
+		client := githubapp.NewClient(cfg.GitHub.APIURL)
+		token, err := client.InstallationToken(ctx, cfg.GitHub.AppID, pemKey, cfg.GitHub.InstallationID)
+		if err != nil {
+			return fmt.Errorf("github installation token: %w", err)
+		}
+		hookURL := strings.TrimRight(baseURL, "/") + "/webhooks/github/" + project.ID
+		hook, err := client.EnsurePushHook(ctx, token, ownerRepo, hookURL, secret)
+		if err != nil {
+			return fmt.Errorf("register hook on %s: %w", ownerRepo, err)
+		}
+		// A test delivery proves reachability but must not fail the operation.
+		if err := client.PingHook(ctx, token, ownerRepo, hook.ID); err != nil {
+			log.Printf("github: ping hook for %s: %v", ownerRepo, err)
+		}
+
+		project.WebhookSecretRef = "vault:" + refName
+		project.GitHubRepo = ownerRepo
+		if err := store.UpsertProject(ctx, project); err != nil {
+			return fmt.Errorf("save project: %w", err)
+		}
+		return nil
+	}
 }
 
 // remoteServerID derives a server id from a WinRM endpoint host.

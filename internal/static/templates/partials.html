@@ -19,6 +19,7 @@
   <label>Health path<input name="health_path" value="{{if .Form}}{{.Form.HealthPath}}{{end}}" placeholder="/healthz"></label>
   <label class="check"><input type="checkbox" name="disable_health_check" {{if .Form}}{{if .Form.DisableHealthCheck}}checked{{end}}{{end}}> Skip the post-deploy health check</label>
   <label>Webhook secret ref<input name="webhook_secret_ref" value="{{if .Form}}{{.Form.WebhookSecretRef}}{{end}}" placeholder="vault:app-webhook"></label>
+  <label>GitHub repository (owner/repo, for App auto-registration)<input name="github_repo" value="{{if .Form}}{{.Form.GitHubRepo}}{{end}}" placeholder="acme/app"></label>
 
   <fieldset>
     <legend>Docker deploy source</legend>

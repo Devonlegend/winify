@@ -284,17 +284,18 @@ func (s *Server) renderProjectForm(w http.ResponseWriter, r *http.Request, statu
 
 type resourcePageData struct {
 	pageData
-	Project      config.Project
-	ServerType   string
-	Tab          string
-	Deployments  []models.Deployment
-	CanRollback  bool
-	Servers      []config.Server
-	Form         *config.Project
-	EditEnv      string
-	EditBuildEnv string
-	Error        string
-	Notice       string
+	Project          config.Project
+	ServerType       string
+	Tab              string
+	Deployments      []models.Deployment
+	CanRollback      bool
+	Servers          []config.Server
+	Form             *config.Project
+	EditEnv          string
+	EditBuildEnv     string
+	GitHubConfigured bool
+	Error            string
+	Notice           string
 }
 
 func (s *Server) handleResourcePage(w http.ResponseWriter, r *http.Request) {
@@ -329,18 +330,19 @@ func (s *Server) handleResourcePage(w http.ResponseWriter, r *http.Request) {
 	servers, _ := s.store.ListServers(ctx)
 
 	data := resourcePageData{
-		pageData:     s.page(r),
-		Project:      project,
-		ServerType:   serverType,
-		Tab:          tab,
-		Deployments:  deploys,
-		CanRollback:  canRollback,
-		Servers:      servers,
-		Form:         &project,
-		EditEnv:      formatEnv(project.Env),
-		EditBuildEnv: formatEnv(project.BuildEnv),
-		Error:        r.URL.Query().Get("error"),
-		Notice:       r.URL.Query().Get("notice"),
+		pageData:         s.page(r),
+		Project:          project,
+		ServerType:       serverType,
+		Tab:              tab,
+		Deployments:      deploys,
+		CanRollback:      canRollback,
+		Servers:          servers,
+		Form:             &project,
+		EditEnv:          formatEnv(project.Env),
+		EditBuildEnv:     formatEnv(project.BuildEnv),
+		GitHubConfigured: s.cfg.GitHub.Enabled() && s.connectGitHub != nil,
+		Error:            r.URL.Query().Get("error"),
+		Notice:           r.URL.Query().Get("notice"),
 	}
 	data.Active = "projects"
 	data.ActiveResource = id
@@ -437,6 +439,7 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 		Domain:                   strings.TrimSpace(r.FormValue("domain")),
 		HealthPath:               strings.TrimSpace(r.FormValue("health_path")),
 		WebhookSecretRef:         strings.TrimSpace(r.FormValue("webhook_secret_ref")),
+		GitHubRepo:               strings.TrimSpace(r.FormValue("github_repo")),
 		Env:                      parseEnv(r.FormValue("env")),
 		BuildEnv:                 parseEnv(r.FormValue("build_env")),
 		HealthIntervalSeconds:    healthInterval,

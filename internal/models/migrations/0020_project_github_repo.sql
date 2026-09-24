@@ -1,0 +1,1 @@
+ALTER TABLE projects ADD COLUMN github_repo TEXT NOT NULL DEFAULT '';

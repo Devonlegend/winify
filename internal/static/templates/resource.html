@@ -40,7 +40,20 @@
       <div><dt>Branch</dt><dd>{{.Project.Branch}}</dd></div>
       <div><dt>Port</dt><dd>{{.Project.Port}}</dd></div>
     </dl>
-    <p class="muted hook-hint">Webhook: <span class="mono">POST /webhooks/github/{{.Project.ID}}</span></p>
+    <section class="webhook-box">
+      <p class="muted hook-hint">Webhook: <span class="mono">POST /webhooks/github/{{.Project.ID}}</span>
+        {{if .Project.GitHubRepo}} &middot; connected to <span class="mono">{{.Project.GitHubRepo}}</span>{{end}}
+        {{if .Project.WebhookSecretRef}} &middot; secret <span class="mono">{{.Project.WebhookSecretRef}}</span>{{end}}</p>
+      {{if .GitHubConfigured}}
+      <form method="post" action="/projects/{{.Project.ID}}/webhook/github" class="hook-form">
+        <label>GitHub repository <input name="repo" placeholder="owner/repo" value="{{.Project.GitHubRepo}}" required></label>
+        <button type="submit" class="btn btn-sm">{{if .Project.GitHubRepo}}Reconnect webhook{{else}}Connect webhook{{end}}</button>
+      </form>
+      <p class="muted">Auto-registration uses the configured GitHub App; the push webhook secret is generated and stored encrypted.</p>
+      {{else}}
+      <p class="muted">To auto-register webhooks, configure the GitHub App in <span class="mono">config.yaml</span> (github.app_id, github.installation_id, github.private_key_ref).</p>
+      {{end}}
+    </section>
   </div>
   {{end}}
 

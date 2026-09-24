@@ -83,6 +83,9 @@ type Deps struct {
 	// OnboardWindows provisions and registers a remote Windows server over
 	// WinRM. Nil disables the onboarding action (a 501 is returned).
 	OnboardWindows WindowsOnboardFunc
+	// ConnectGitHubWebhook auto-registers a project's push webhook through the
+	// configured GitHub App. Nil disables the connect action (a 501 is returned).
+	ConnectGitHubWebhook ConnectGitHubFunc
 }
 
 // Server holds the dependencies shared by every handler.
@@ -103,6 +106,7 @@ type Server struct {
 	setupToken        string
 	onboardWindows    WindowsOnboardFunc
 	onboardMu         sync.Mutex
+	connectGitHub     ConnectGitHubFunc
 	pages             map[string]*template.Template
 	assets            fs.FS
 }
@@ -170,6 +174,7 @@ func New(deps Deps) (*Server, error) {
 		newRunner:         deps.RunnerFactory,
 		proxy:             deps.Proxy,
 		onboardWindows:    deps.OnboardWindows,
+		connectGitHub:     deps.ConnectGitHubWebhook,
 		bootstrap:         deps.Bootstrap,
 		bootstrapRun:      deps.BootstrapRun,
 		bootstrapElevate:  deps.BootstrapElevate,
@@ -228,6 +233,7 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/projects/delete", s.handleProjectDelete)
 		r.Post("/projects/env", s.handleProjectEnvSave)
 		r.Post("/projects/deploy/{projectID}", s.handleManualDeploy)
+		r.Post("/projects/{projectID}/webhook/github", s.handleGitHubConnect)
 		r.Post("/deployments/start/{projectID}", s.handleDeployStart)
 		r.Get("/deployments/{id}/stream", s.handleDeploymentStream)
 		r.Get("/credentials", s.handleCredentialsPage)
