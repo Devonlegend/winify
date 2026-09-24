@@ -32,7 +32,22 @@
     <div class="placeholder">No servers yet. Add one below.</div>
   {{end}}
 
-  <h2 class="form-title">{{if .Edit}}Edit server{{else}}Add server{{end}}</h2>
+  <section class="onboard">
+    <h2 class="form-title">Onboard a Windows server</h2>
+    <p class="muted">Recommended for Windows. Provisions directories, NSSM and Caddy over WinRM, stores the credential encrypted, and adds the server. The target must already accept WinRM (HTTPS recommended).</p>
+    <form method="post" action="/servers/onboard" class="admin-form">
+      <label>WinRM endpoint<input name="endpoint" placeholder="https://win01:5986/wsman (or just win01)" required></label>
+      <label>Username<input name="user" autocomplete="off" placeholder="WIN01\deploy" required></label>
+      <label>Password<input type="password" name="password" autocomplete="new-password" required></label>
+      <label>Server ID (optional)<input name="id" placeholder="remote-win01"></label>
+      <label>Display name (optional)<input name="name"></label>
+      <label class="check"><input type="checkbox" name="insecure"> Allow HTTP or a self-signed certificate (insecure)</label>
+      <label class="check"><input type="checkbox" name="provision_caddy" checked> Provision Caddy on the target (HTTPS + static sites)</label>
+      <div class="form-actions"><button type="submit">Onboard server</button></div>
+    </form>
+  </section>
+
+  <h2 class="form-title">{{if .Edit}}Edit server{{else}}Add server manually (advanced){{end}}</h2>
   <form method="post" action="/servers" class="admin-form" data-server-form>
     <label>ID<input name="id" value="{{if .Edit}}{{.Edit.ID}}{{end}}" required {{if .Edit}}readonly{{end}}></label>
     <label>Name<input name="name" value="{{if .Edit}}{{.Edit.Name}}{{end}}" required></label>

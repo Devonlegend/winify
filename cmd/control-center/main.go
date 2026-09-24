@@ -275,7 +275,8 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 		BootstrapElevated: func(ctx context.Context) (bool, error) {
 			return bootstrap.IsElevated(ctx, deployment.NewLocalRunner())
 		},
-		SetupToken: setupToken,
+		SetupToken:     setupToken,
+		OnboardWindows: onboardWindowsServer(cfg, store, credStore, auditRecorder),
 	})
 	if err != nil {
 		log.Fatalf("server: %v", err)
@@ -769,6 +770,88 @@ func runRemoteBootstrap(cfg config.Config, store *models.Store, endpoint, user, 
 		log.Fatalf("remote bootstrap failed: %v", err)
 	}
 	log.Printf("remote bootstrap complete: %s (%s)", id, endpoint)
+}
+
+// onboardWindowsServer returns the UI onboarding implementation: it validates
+// the endpoint, dials WinRM, provisions directories/NSSM/Caddy on the target,
+// stores the WinRM credential encrypted and registers the winsvc server.
+func onboardWindowsServer(cfg config.Config, store *models.Store, credStore *auth.CredentialStore, auditRecorder deployment.AuditRecorder) server.WindowsOnboardFunc {
+	return func(ctx context.Context, p server.WindowsOnboardParams) (string, []bootstrap.Result, error) {
+		endpoint, err := config.NormalizeWinRMEndpoint(p.Endpoint, p.Insecure)
+		if err != nil {
+			return "", nil, err
+		}
+		id := p.ID
+		if id == "" {
+			id = remoteServerID(endpoint)
+		}
+		if err := config.ValidateResourceID("id", id); err != nil {
+			return "", nil, err
+		}
+		name := p.Name
+		if name == "" {
+			name = id
+		}
+
+		// The target is Windows regardless of the controller's platform, so an
+		// empty or POSIX-looking bootstrap.install_dir must not leak through.
+		root := cfg.Bootstrap.InstallDir
+		if root == "" || !looksLikeWindowsPath(root) {
+			root = `C:\ProgramData\winify`
+		}
+		paths := bootstrap.DefaultPaths(root)
+		refName := id + "-winrm"
+		srv := config.Server{
+			ID:             id,
+			Name:           name,
+			Type:           config.ServerTypeWindowsService,
+			WinRMEndpoint:  endpoint,
+			WinRMUser:      p.User,
+			WinRMTransport: "ntlm",
+			WinRMInsecure:  p.Insecure,
+			CredentialRef:  "vault:" + refName,
+			NSSMPath:       paths.NSSM,
+			CaddyPath:      paths.Caddy,
+		}
+		if err := config.ValidateServer(srv); err != nil {
+			return id, nil, err
+		}
+
+		runner, err := deployment.DialWinRM(srv, p.Password)
+		if err != nil {
+			return id, nil, fmt.Errorf("connect %s: %w", endpoint, err)
+		}
+		defer runner.Close()
+
+		opts := bootstrap.Options{
+			Paths:          paths,
+			NSSMSource:     cfg.Deploy.NSSMSource,
+			NSSMSHA256:     cfg.Deploy.NSSMSHA256,
+			EnableWinRM:    false, // the target must already accept WinRM
+			CaddyEnabled:   p.ProvisionCaddy,
+			CaddySource:    cfg.Bootstrap.Caddy.Source,
+			CaddyURL:       cfg.Bootstrap.Caddy.URL,
+			CaddySHA256:    cfg.Bootstrap.Caddy.SHA256,
+			CaddyAdmin:     cfg.Bootstrap.Caddy.Admin,
+			TargetStepName: "target",
+			Meta:           store,
+			Runner:         deployment.WithAuditRecorder(runner, auditRecorder),
+			AuditMeta:      deployment.AuditMeta{ServerID: id, ServerType: config.ServerTypeWindowsService, Action: "onboard"},
+			StateNamespace: id,
+			Logf:           log.Printf,
+		}
+		opts.TargetCheck, opts.TargetApply = targetSteps(store, credStore, srv, refName, p.Password)
+
+		results, err := bootstrap.New(opts).Run(ctx)
+		return id, results, err
+	}
+}
+
+func looksLikeWindowsPath(p string) bool {
+	if strings.HasPrefix(p, `\\`) {
+		return true
+	}
+	return len(p) >= 2 && ((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z')) && p[1] == ':'
 }
 
 // remoteServerID derives a server id from a WinRM endpoint host.

@@ -143,6 +143,32 @@ func TestValidateResourceInputs(t *testing.T) {
 	}
 }
 
+func TestNormalizeWinRMEndpoint(t *testing.T) {
+	cases := []struct {
+		raw      string
+		insecure bool
+		want     string
+	}{
+		{"win01", false, "https://win01:5986/wsman"},
+		{"win01:5986", false, "https://win01:5986/wsman"},
+		{"https://win01:5986/wsman", false, "https://win01:5986/wsman"},
+		{"https://win01", false, "https://win01:5986/wsman"},
+		{"http://win01:5985/wsman", true, "http://win01:5985/wsman"},
+	}
+	for _, tc := range cases {
+		got, err := NormalizeWinRMEndpoint(tc.raw, tc.insecure)
+		if err != nil || got != tc.want {
+			t.Errorf("NormalizeWinRMEndpoint(%q, %v) = %q, %v; want %q", tc.raw, tc.insecure, got, err, tc.want)
+		}
+	}
+	if _, err := NormalizeWinRMEndpoint("http://win01", false); err == nil {
+		t.Fatal("http endpoint accepted without insecure opt-in")
+	}
+	if _, err := NormalizeWinRMEndpoint("", false); err == nil {
+		t.Fatal("empty endpoint accepted")
+	}
+}
+
 func TestLoadEntitiesMissingFilesAreEmpty(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "nope.yaml")
 	servers, err := LoadServers(missing)

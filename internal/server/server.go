@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -79,6 +80,9 @@ type Deps struct {
 	// Proxy is used to remove stale public routes when projects are deleted or
 	// their domain changes. Nil disables cleanup in tests/embedded uses.
 	Proxy proxy.Registrar
+	// OnboardWindows provisions and registers a remote Windows server over
+	// WinRM. Nil disables the onboarding action (a 501 is returned).
+	OnboardWindows WindowsOnboardFunc
 }
 
 // Server holds the dependencies shared by every handler.
@@ -97,6 +101,8 @@ type Server struct {
 	bootstrapElevate  func() error
 	bootstrapElevated func(ctx context.Context) (bool, error)
 	setupToken        string
+	onboardWindows    WindowsOnboardFunc
+	onboardMu         sync.Mutex
 	pages             map[string]*template.Template
 	assets            fs.FS
 }
@@ -163,6 +169,7 @@ func New(deps Deps) (*Server, error) {
 		credentials:       deps.CredentialAdmin,
 		newRunner:         deps.RunnerFactory,
 		proxy:             deps.Proxy,
+		onboardWindows:    deps.OnboardWindows,
 		bootstrap:         deps.Bootstrap,
 		bootstrapRun:      deps.BootstrapRun,
 		bootstrapElevate:  deps.BootstrapElevate,
@@ -211,6 +218,7 @@ func (s *Server) Handler() http.Handler {
 
 		r.Get("/servers", s.handleServersPage)
 		r.Post("/servers", s.handleServerSave)
+		r.Post("/servers/onboard", s.handleServerOnboard)
 		r.Post("/servers/delete", s.handleServerDelete)
 		r.Get("/projects", s.handleProjectsPage)
 		r.Get("/projects/new", s.handleProjectNew)

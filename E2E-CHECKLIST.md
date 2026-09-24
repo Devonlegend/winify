@@ -45,7 +45,9 @@ Placeholders: replace `CC_HOST` (e.g. `http://127.0.0.1:8090`), `DOCKER_HOST`
       "webhook-secret-002"   | .\control-center cred add proj-002-webhook
 
 - [ ] Edit `servers.yaml` and `projects.yaml` for your hosts, paths, domains and
-      ports (see the "Adding a Project or Server" guide).
+      ports (see the "Adding a Project or Server" guide). For Windows targets
+      you can instead use **Servers → Onboard a Windows server** to provision
+      and register the host from the UI.
 - [ ] Start the control-center and sign in. The first-run page requires the
       setup token printed in the startup log; keep the default loopback listener
       until the admin account exists.

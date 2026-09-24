@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	pathpkg "path"
@@ -320,6 +321,40 @@ func ValidateRepoURL(repoURL string) error {
 		return fmt.Errorf("repo_url must use https, ssh, or an absolute local path")
 	}
 	return nil
+}
+
+// NormalizeWinRMEndpoint accepts the friendly forms operators type
+// ("win01", "win01:5986", "https://win01:5986/wsman") and returns the full URL.
+// Plain HTTP requires the explicit insecure opt-in.
+func NormalizeWinRMEndpoint(raw string, insecure bool) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", errors.New("winrm endpoint is required")
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return "", fmt.Errorf("invalid winrm endpoint %q", raw)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("winrm endpoint must use http or https")
+	}
+	if u.Scheme == "http" && !insecure {
+		return "", errors.New("http winrm endpoint requires the insecure opt-in")
+	}
+	if u.Port() == "" {
+		port := "5986"
+		if u.Scheme == "http" {
+			port = "5985"
+		}
+		u.Host = net.JoinHostPort(u.Hostname(), port)
+	}
+	if u.Path == "" || u.Path == "/" {
+		u.Path = "/wsman"
+	}
+	return u.String(), nil
 }
 
 // ValidateServer validates a server before it is persisted or dialed. Keeping
