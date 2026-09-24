@@ -110,6 +110,13 @@ func TestIISValidateFailureBlocksLiveChanges(t *testing.T) {
 	}
 }
 
+func TestBackupScriptDoesNotCreateEmptyFirstRelease(t *testing.T) {
+	script := backupScript(`C:\\inetpub\\wwwroot\\app`, `C:\\backups`, "app")
+	if !strings.Contains(script, "NO_BACKUP") || !strings.Contains(script, "PathType Container") {
+		t.Fatalf("backup script does not guard a missing live path:\n%s", script)
+	}
+}
+
 func TestIISBuildCommandRuns(t *testing.T) {
 	runner := &fakeRunner{outputs: func(cmd string) string {
 		if strings.Contains(cmd, "$stamp = Get-Date") {

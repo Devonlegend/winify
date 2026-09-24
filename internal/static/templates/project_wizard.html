@@ -78,7 +78,7 @@
       <div class="admin-form">
         <label>Server
           <select name="server_id" id="wz-server" required>
-            {{range .Servers}}<option value="{{.ID}}" data-type="{{.Type}}" data-ip="{{.PublicIP}}">{{.ID}} ({{.Type}})</option>{{end}}
+            {{range .Servers}}<option value="{{.ID}}" data-type="{{.Type}}" data-ip="{{.PublicIP}}" data-local="{{.Local}}">{{.ID}} ({{.Type}})</option>{{end}}
           </select>
         </label>
       </div>

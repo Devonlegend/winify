@@ -116,14 +116,16 @@ func (s *Server) handleSetupLocalTarget(w http.ResponseWriter, r *http.Request) 
 	if h, err := os.Hostname(); err == nil && h != "" {
 		name = h
 	}
+	paths := bootstrap.DefaultPaths(root)
 	srv := config.Server{
-		ID:       "local",
-		Name:     name,
-		Type:     config.ServerTypeWindowsService,
-		Local:    true,
-		NSSMPath: bootstrap.DefaultPaths(root).NSSM,
-		Host:     "127.0.0.1",
-		PublicIP: strings.TrimSpace(r.FormValue("public_ip")),
+		ID:        "local",
+		Name:      name,
+		Type:      config.ServerTypeWindowsService,
+		Local:     true,
+		NSSMPath:  paths.NSSM,
+		CaddyPath: paths.Caddy,
+		Host:      "127.0.0.1",
+		PublicIP:  strings.TrimSpace(r.FormValue("public_ip")),
 	}
 	if err := s.store.UpsertServer(r.Context(), srv); err != nil {
 		log.Printf("setup: local target server: %v", err)

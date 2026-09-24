@@ -39,6 +39,9 @@ func dockerSource(p config.Project) string {
 // Deploy runs the pipeline for the project's source and returns an artifact
 // reference for history (a built image tag, a registry image, or a commit).
 func (t *dockerTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) (string, error) {
+	if err := validateProjectID(job.project.ID); err != nil {
+		return "", err
+	}
 	switch dockerSource(job.project) {
 	case config.ProjectSourceImage:
 		return t.deployImage(ctx, job, logf)
@@ -51,6 +54,9 @@ func (t *dockerTarget) Deploy(ctx context.Context, job deployJob, logf loggerFun
 
 // Rollback restores the previous known-good state without rebuilding.
 func (t *dockerTarget) Rollback(ctx context.Context, job deployJob, logf loggerFunc) (string, error) {
+	if err := validateProjectID(job.project.ID); err != nil {
+		return "", err
+	}
 	if dockerSource(job.project) == config.ProjectSourceCompose {
 		return t.rollbackCompose(ctx, job, logf)
 	}
@@ -60,11 +66,11 @@ func (t *dockerTarget) Rollback(ctx context.Context, job deployJob, logf loggerF
 
 // deployDockerfile clones the repo, builds the image and runs it.
 func (t *dockerTarget) deployDockerfile(ctx context.Context, job deployJob, logf loggerFunc) (string, error) {
-	tag := imageTag(job.project.ID, deployRevision(job.project, job.commit))
 	workdir := path.Join(t.cfg.Deploy.WorkDir, job.project.ID)
-	logf("docker pipeline: build %s", tag)
+	logf("docker pipeline: build %s", job.project.ID)
 
-	if err := t.cloneAndBuild(ctx, job, workdir, tag, logf); err != nil {
+	tag, err := t.cloneAndBuild(ctx, job, workdir, logf)
+	if err != nil {
 		return "", err
 	}
 	if err := t.writeGeneratedCompose(ctx, job, workdir, tag, logf); err != nil {
@@ -110,9 +116,11 @@ func (t *dockerTarget) deployCompose(ctx context.Context, job deployJob, logf lo
 	}
 	logf("docker pipeline: compose %s @ %s", composePath, shortSHA(rev))
 
-	if err := t.cloneRepo(ctx, job, workdir, rev, logf); err != nil {
+	resolved, err := t.cloneRepo(ctx, job, workdir, rev, logf)
+	if err != nil {
 		return "", err
 	}
+	rev = resolved
 	if err := t.writeEnvFile(ctx, job, workdir, logf); err != nil {
 		return "", err
 	}
@@ -159,9 +167,11 @@ func (t *dockerTarget) rollbackCompose(ctx context.Context, job deployJob, logf 
 	}
 	logf("rollback: compose %s @ %s", composePath, shortSHA(rev))
 
-	if err := t.cloneRepo(ctx, job, workdir, rev, logf); err != nil {
+	resolved, err := t.cloneRepo(ctx, job, workdir, rev, logf)
+	if err != nil {
 		return "", err
 	}
+	rev = resolved
 	if err := t.writeEnvFile(ctx, job, workdir, logf); err != nil {
 		return "", err
 	}
@@ -174,30 +184,58 @@ func (t *dockerTarget) rollbackCompose(ctx context.Context, job deployJob, logf 
 	return rev, nil
 }
 
-// cloneRepo updates the repo on the target at rev.
-func (t *dockerTarget) cloneRepo(ctx context.Context, job deployJob, workdir, rev string, logf loggerFunc) error {
+// cloneRepo updates the repo on the target at rev and returns the actual
+// checked-out commit. Branch names are resolved through origin/* so a manual
+// deploy cannot silently reuse a stale local branch.
+func (t *dockerTarget) cloneRepo(ctx context.Context, job deployJob, workdir, rev string, logf loggerFunc) (string, error) {
 	if job.project.RepoURL == "" {
-		return fmt.Errorf("project %s has no repo_url", job.project.ID)
+		return "", fmt.Errorf("project %s has no repo_url", job.project.ID)
 	}
+	checkout := gitCheckoutRef(rev)
 	clone := fmt.Sprintf(
-		"mkdir -p %s && if [ -d %s/.git ]; then cd %s && git fetch --all --prune && git checkout --force %s; "+
-			"else git clone %s %s && cd %s && git checkout --force %s; fi",
-		shellQuote(workdir), shellQuote(workdir), shellQuote(workdir), shellQuote(rev),
-		shellQuote(job.project.RepoURL), shellQuote(workdir), shellQuote(workdir), shellQuote(rev))
-	if out, err := execCmd(ctx, t.runner, clone, "git clone/fetch + checkout "+shortSHA(rev), logf); err != nil {
-		return fmt.Errorf("clone/checkout: %w\n%s", err, out)
+		"mkdir -p %s && if [ -d %s/.git ]; then cd %s && git fetch --all --prune && git checkout --force %s --; "+
+			"else git clone %s %s && cd %s && git checkout --force %s --; fi && git clean -fdx && git rev-parse HEAD",
+		shellQuote(workdir), shellQuote(workdir), shellQuote(workdir), shellQuote(checkout),
+		shellQuote(job.project.RepoURL), shellQuote(workdir), shellQuote(workdir), shellQuote(checkout))
+	out, err := execCmd(ctx, t.runner, clone, "git clone/fetch + checkout "+shortSHA(rev), logf)
+	if err != nil {
+		return "", fmt.Errorf("clone/checkout: %w\n%s", err, out)
 	}
-	return nil
+	if resolved := lastLine(out); resolved != "" {
+		return resolved, nil
+	}
+	// Test doubles and older runners may not emit rev-parse output. Keep the
+	// requested revision as a conservative fallback.
+	return rev, nil
+}
+
+func gitCheckoutRef(rev string) string {
+	if isHexRevision(rev) {
+		return rev
+	}
+	return "origin/" + rev
+}
+
+func isHexRevision(rev string) bool {
+	if len(rev) != 40 && len(rev) != 64 {
+		return false
+	}
+	for _, r := range rev {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // cloneAndBuild updates the repo on the target and builds the image there.
-// Building on the target keeps the Docker layer cache next to where the image
-// runs, at the cost of requiring git + outbound network on the target.
-func (t *dockerTarget) cloneAndBuild(ctx context.Context, job deployJob, workdir, tag string, logf loggerFunc) error {
-	rev := deployRevision(job.project, job.commit)
-	if err := t.cloneRepo(ctx, job, workdir, rev, logf); err != nil {
-		return err
+// It returns the immutable tag created from the actual checked-out revision.
+func (t *dockerTarget) cloneAndBuild(ctx context.Context, job deployJob, workdir string, logf loggerFunc) (string, error) {
+	rev, err := t.cloneRepo(ctx, job, workdir, deployRevision(job.project, job.commit), logf)
+	if err != nil {
+		return "", err
 	}
+	tag := imageTag(job.project.ID, rev)
 
 	dockerfile := job.project.DockerfilePath
 	if dockerfile == "" {
@@ -215,9 +253,9 @@ func (t *dockerTarget) cloneAndBuild(ctx context.Context, job deployJob, workdir
 		buildCtx = withAuditRedaction(ctx, "docker build (build args redacted)")
 	}
 	if out, err := execCmd(buildCtx, t.runner, build, "docker build -t "+tag, logf); err != nil {
-		return fmt.Errorf("docker build: %w\n%s", err, out)
+		return "", fmt.Errorf("docker build: %w\n%s", err, out)
 	}
-	return nil
+	return tag, nil
 }
 
 // writeGeneratedCompose writes a compose file for a single image. The file is
@@ -251,6 +289,13 @@ func (t *dockerTarget) writeEnvFile(ctx context.Context, job deployJob, workdir 
 		merged[k] = v
 	}
 	if len(merged) == 0 {
+		// Remove stale values from a previous deployment. Leaving an old .env
+		// in the checkout can silently reintroduce removed secrets.
+		cmd := fmt.Sprintf(": > %s", shellQuote(path.Join(workdir, ".env")))
+		writeCtx := withAuditRedaction(ctx, "clear .env (contents redacted)")
+		if out, err := execCmd(writeCtx, t.runner, cmd, "clear .env", logf); err != nil {
+			return fmt.Errorf("clear .env: %w\n%s", err, out)
+		}
 		return nil
 	}
 	encoded := base64.StdEncoding.EncodeToString([]byte(envFileContent(merged)))
@@ -329,7 +374,19 @@ func (t *dockerTarget) diagnose(ctx context.Context, workdir, composePath string
 // central reverse proxy can reach the workload.
 func composePorts(project config.Project) []string {
 	if len(project.PortsMappings) > 0 {
-		return project.PortsMappings
+		out := make([]string, 0, len(project.PortsMappings))
+		for _, mapping := range project.PortsMappings {
+			host, container, err := config.ParsePortMapping(mapping)
+			if err != nil {
+				// Validation should reject this before deployment. Preserve the
+				// value so the remote Compose error remains visible if an old
+				// database row bypassed validation.
+				out = append(out, mapping)
+				continue
+			}
+			out = append(out, fmt.Sprintf("%d:%d", host, container))
+		}
+		return out
 	}
 	if project.PortsExposes > 0 {
 		return []string{fmt.Sprintf("%d:%d", project.PortsExposes, project.PortsExposes)}
@@ -379,5 +436,5 @@ func sortedKeys(m map[string]string) []string {
 }
 
 func imageTag(projectID, revision string) string {
-	return fmt.Sprintf("cc/%s:%s", sanitize(projectID), sanitize(shortSHA(revision)))
+	return fmt.Sprintf("cc/%s:%s", sanitize(projectID), sanitize(revision))
 }

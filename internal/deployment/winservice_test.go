@@ -178,6 +178,19 @@ func TestInstallServiceScriptGuardsNativeFailures(t *testing.T) {
 	}
 }
 
+func TestInstallServiceScriptClearsOptionalSettings(t *testing.T) {
+	p := winsvcProject()
+	p.ServiceArgs = ""
+	p.ServiceLogDir = ""
+	p.ServiceAccount = ""
+	script := installServiceScript(p, `C:\tools\nssm.exe`) + serviceEnvScript(p, `C:\tools\nssm.exe`)
+	for _, want := range []string{"reset 'MyWorker' AppParameters", "reset 'MyWorker' ObjectName", "reset 'MyWorker' AppEnvironmentExtra"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("clear command %q missing:\n%s", want, script)
+		}
+	}
+}
+
 func TestEnsureNSSMFallsBackToTargetCopy(t *testing.T) {
 	// The configured source is missing, but the target already has nssm.exe.
 	runner := &fakeRunner{outputs: func(cmd string) string {

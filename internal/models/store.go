@@ -170,9 +170,27 @@ func (s *Store) DeleteExpiredSessions(ctx context.Context, now time.Time) error 
 	return nil
 }
 
+// FailInterruptedDeployments closes rows left behind by a process crash or
+// restart. Deploy workers are currently in-process, so a nonterminal row at
+// startup cannot still have a live owner.
+func (s *Store) FailInterruptedDeployments(ctx context.Context, now time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE deployments
+		SET status = ?, error = ?, finished_at = ?
+		WHERE status IN (?, ?)`, DeployFailed, "deployment interrupted by service restart", now.Unix(), DeployQueued, DeployRunning)
+	if err != nil {
+		return 0, fmt.Errorf("fail interrupted deployments: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count interrupted deployments: %w", err)
+	}
+	return n, nil
+}
+
 // serverColumns is the shared SELECT list for servers.
 const serverColumns = `id, name, type, host, winrm_endpoint, winrm_user, winrm_transport, winrm_insecure,
-	credential_ref, ssh_host, ssh_port, ssh_user, ssh_key_ref, nssm_path, caddy_path, public_ip, local`
+	credential_ref, ssh_host, ssh_port, ssh_user, ssh_key_ref, nssm_path, caddy_path, public_ip, local,
+	services_json, disk_path`
 
 // UpsertServer syncs one entry from servers.yaml into the database.
 func (s *Store) UpsertServer(ctx context.Context, srv config.Server) error {
@@ -182,9 +200,13 @@ func (s *Store) UpsertServer(ctx context.Context, srv config.Server) error {
 	if srv.WinRMTransport == "" {
 		srv.WinRMTransport = "ntlm"
 	}
-	_, err := s.db.ExecContext(ctx, `
+	servicesJSON, err := json.Marshal(srv.Services)
+	if err != nil {
+		return fmt.Errorf("marshal server services: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO servers (`+serverColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			type = excluded.type,
@@ -202,11 +224,13 @@ func (s *Store) UpsertServer(ctx context.Context, srv config.Server) error {
 			caddy_path = excluded.caddy_path,
 			public_ip = excluded.public_ip,
 			local = excluded.local,
+			services_json = excluded.services_json,
+			disk_path = excluded.disk_path,
 			updated_at = CURRENT_TIMESTAMP`,
 		srv.ID, srv.Name, srv.Type, srv.Host, srv.WinRMEndpoint, srv.WinRMUser,
 		srv.WinRMTransport, boolToInt(srv.WinRMInsecure), srv.CredentialRef,
 		srv.SSHHost, srv.SSHPort, srv.SSHUser, srv.SSHKeyRef, srv.NSSMPath, srv.CaddyPath, srv.PublicIP,
-		boolToInt(srv.Local))
+		boolToInt(srv.Local), string(servicesJSON), srv.DiskPath)
 	if err != nil {
 		return fmt.Errorf("upsert server %q: %w", srv.ID, err)
 	}
@@ -247,18 +271,24 @@ func (s *Store) GetServer(ctx context.Context, id string) (config.Server, error)
 
 func scanServer(scan func(dest ...any) error) (config.Server, error) {
 	var (
-		srv      config.Server
-		insecure int
-		local    int
+		srv          config.Server
+		insecure     int
+		local        int
+		servicesJSON string
 	)
 	if err := scan(&srv.ID, &srv.Name, &srv.Type, &srv.Host, &srv.WinRMEndpoint,
 		&srv.WinRMUser, &srv.WinRMTransport, &insecure, &srv.CredentialRef,
 		&srv.SSHHost, &srv.SSHPort, &srv.SSHUser, &srv.SSHKeyRef, &srv.NSSMPath, &srv.CaddyPath, &srv.PublicIP,
-		&local); err != nil {
+		&local, &servicesJSON, &srv.DiskPath); err != nil {
 		return config.Server{}, fmt.Errorf("scan server: %w", err)
 	}
 	srv.WinRMInsecure = insecure != 0
 	srv.Local = local != 0
+	if servicesJSON != "" && servicesJSON != "null" {
+		if err := json.Unmarshal([]byte(servicesJSON), &srv.Services); err != nil {
+			return config.Server{}, fmt.Errorf("decode server services: %w", err)
+		}
+	}
 	return srv, nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Devonlegend/winify/internal/config"
 )
@@ -50,6 +51,9 @@ func (t *windowsServiceTarget) Close() error { return t.runner.Close() }
 // Deploy runs the full native-service pipeline and returns the pre-deploy
 // backup path as the deployment artifact.
 func (t *windowsServiceTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) (string, error) {
+	if err := validateProjectID(job.project.ID); err != nil {
+		return "", err
+	}
 	p := job.project
 	// A static site has no process to run: it is served by the per-target Caddy
 	// instead of being installed as a service.
@@ -109,33 +113,45 @@ func (t *windowsServiceTarget) Deploy(ctx context.Context, job deployJob, logf l
 	// 5. Stop the service (no-op on first deploy, and skipped for static sites).
 	if !staticOnly {
 		if _, err := execCmd(ctx, t.runner, stopServiceScript(p.ServiceName, nssmPath), "stop service", logf); err != nil {
+			t.recoverLive(ctx, p, nssmPath, "", logf)
 			return "", fmt.Errorf("stop: %w", err)
 		}
 	}
 
-	// 6. Backup the current install directory (timestamped).
+	// 6. Backup the current install directory (timestamped). A first deployment
+	// has no previous files and therefore no rollback artifact.
+	backup := ""
 	backupOut, err := execCmd(ctx, t.runner, backupScript(p.ServiceWorkDir, t.cfg.Deploy.IISBackupDir, p.ID), "backup live files", logf)
 	if err != nil {
+		t.recoverLive(ctx, p, nssmPath, backup, logf)
 		return "", fmt.Errorf("backup: %w", err)
 	}
-	backup := lastLine(backupOut)
-	logf("backup created: %s", backup)
+	backup = lastLine(backupOut)
+	if backup == "NO_BACKUP" {
+		backup = ""
+		logf("no previous live files; rollback is not available for this first deployment")
+	} else {
+		logf("backup created: %s", backup)
+	}
 
 	// 7. Deploy the new build output.
 	srcDir := winPath(repoDir, source)
 	if _, err := execCmd(ctx, t.runner, copyScript(srcDir, p.ServiceWorkDir, "deploy"), "deploy files", logf); err != nil {
+		t.recoverLive(ctx, p, nssmPath, backup, logf)
 		return "", fmt.Errorf("deploy files: %w", err)
 	}
 
 	// 8. Install or update the service definition (not for a static site).
 	if !staticOnly {
 		if _, err := execCmd(ctx, t.runner, installServiceScript(p, nssmPath), "install/update service "+p.ServiceName, logf); err != nil {
+			t.recoverLive(ctx, p, nssmPath, backup, logf)
 			return "", fmt.Errorf("install service: %w", err)
 		}
 		if envScript := serviceEnvScript(p, nssmPath); envScript != "" {
 			// Env values may hold secrets; record a label instead of the payload.
 			envCtx := withAuditRedaction(ctx, "set service environment (values redacted)")
 			if _, err := execCmd(envCtx, t.runner, envScript, "set service environment", logf); err != nil {
+				t.recoverLive(ctx, p, nssmPath, backup, logf)
 				return "", fmt.Errorf("set service environment: %w", err)
 			}
 		}
@@ -144,17 +160,20 @@ func (t *windowsServiceTarget) Deploy(ctx context.Context, job deployJob, logf l
 	// 9. Start and wait for Running.
 	if !staticOnly {
 		if _, err := execCmd(ctx, t.runner, startServiceScript(p.ServiceName, nssmPath), "start service "+p.ServiceName, logf); err != nil {
+			t.recoverLive(ctx, p, nssmPath, backup, logf)
 			return "", fmt.Errorf("start service: %w", err)
 		}
 	}
 
 	// 10. Per-target Caddy (static file serving). Central Caddy still owns TLS.
 	if err := t.configureCaddy(ctx, job, logf); err != nil {
+		t.recoverLive(ctx, p, nssmPath, backup, logf)
 		return "", err
 	}
 
 	// 11. Smoke test.
 	if err := t.smokeTest(ctx, p, logf); err != nil {
+		t.recoverLive(ctx, p, nssmPath, backup, logf)
 		return "", err
 	}
 	return backup, nil
@@ -163,6 +182,9 @@ func (t *windowsServiceTarget) Deploy(ctx context.Context, job deployJob, logf l
 // Rollback restores the most recent timestamped backup and restarts the service.
 // It discovers the backup on the target, so it does not depend on deploy history.
 func (t *windowsServiceTarget) Rollback(ctx context.Context, job deployJob, logf loggerFunc) (string, error) {
+	if err := validateProjectID(job.project.ID); err != nil {
+		return "", err
+	}
 	p := job.project
 	staticOnly := p.ServiceExe == "" && p.CaddyMode == config.CaddyModeStatic
 	if p.ServiceWorkDir == "" || (!staticOnly && p.ServiceName == "") {
@@ -182,18 +204,22 @@ func (t *windowsServiceTarget) Rollback(ctx context.Context, job deployJob, logf
 
 	if !staticOnly {
 		if _, err := execCmd(ctx, t.runner, stopServiceScript(p.ServiceName, nssmPath), "stop service", logf); err != nil {
+			t.recoverLive(ctx, p, nssmPath, backup, logf)
 			return "", fmt.Errorf("stop: %w", err)
 		}
 	}
 	if _, err := execCmd(ctx, t.runner, copyScript(backup, p.ServiceWorkDir, "restore backup"), "restore backup", logf); err != nil {
+		t.recoverLive(ctx, p, nssmPath, backup, logf)
 		return "", fmt.Errorf("restore backup: %w", err)
 	}
 	if !staticOnly {
 		if _, err := execCmd(ctx, t.runner, startServiceScript(p.ServiceName, nssmPath), "start service "+p.ServiceName, logf); err != nil {
+			t.recoverLive(ctx, p, nssmPath, backup, logf)
 			return "", fmt.Errorf("start service: %w", err)
 		}
 	}
 	if err := t.smokeTest(ctx, p, logf); err != nil {
+		t.recoverLive(ctx, p, nssmPath, backup, logf)
 		return "", err
 	}
 	return backup, nil
@@ -204,7 +230,7 @@ func (t *windowsServiceTarget) smokeTest(ctx context.Context, p config.Project, 
 		logf("health check disabled; skipping smoke test")
 		return nil
 	}
-	if p.Port == 0 {
+	if p.EffectiveHostPort() == 0 {
 		logf("no port configured; skipping smoke test")
 		return nil
 	}
@@ -219,8 +245,22 @@ func (t *windowsServiceTarget) smokeTest(ctx context.Context, p config.Project, 
 // ensureNSSM returns the target path to nssm.exe, uploading it from
 // deploy.nssm_source first if configured and not already present.
 func (t *windowsServiceTarget) ensureNSSM(ctx context.Context, srv config.Server, logf loggerFunc) (string, error) {
+	source := resolveNSSMSource(t.cfg, t.cfg.Deploy.NSSMSource)
 	return EnsureNSSM(ctx, t.runner, nssmPathFor(srv),
-		strings.TrimSpace(t.cfg.Deploy.NSSMSource), strings.TrimSpace(t.cfg.Deploy.NSSMSHA256), logf)
+		source, strings.TrimSpace(t.cfg.Deploy.NSSMSHA256), logf)
+}
+
+func resolveNSSMSource(cfg config.Config, source string) string {
+	source = strings.TrimSpace(source)
+	if source == "" || windowsAbsPath(source) || cfg.Bootstrap.InstallDir == "" {
+		return source
+	}
+	return strings.TrimRight(cfg.Bootstrap.InstallDir, `\\/`) + `\` + strings.ReplaceAll(source, "/", `\`)
+}
+
+func windowsAbsPath(path string) bool {
+	return strings.HasPrefix(path, `\\`) ||
+		(len(path) >= 3 && ((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) && path[1] == ':' && (path[2] == '\\' || path[2] == '/'))
 }
 
 // RemoteFileSHA256 returns the SHA-256 of a file on the target, or "" when the
@@ -380,6 +420,21 @@ func relUnder(base, path string) (string, bool) {
 	return path[len(base)+1:], true
 }
 
+func (t *windowsServiceTarget) recoverLive(ctx context.Context, p config.Project, nssmPath, backup string, logf loggerFunc) {
+	recCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancel()
+	if backup != "" && backup != "NO_BACKUP" {
+		if _, err := execCmd(recCtx, t.runner, copyScript(backup, p.ServiceWorkDir, "restore after failed deploy"), "restore previous release", logf); err != nil {
+			logf("recovery: restore previous release failed: %v", err)
+		}
+	}
+	if p.ServiceName != "" {
+		if _, err := execCmd(recCtx, t.runner, startServiceScript(p.ServiceName, nssmPath), "restart after failed deploy", logf); err != nil {
+			logf("recovery: restart failed: %v", err)
+		}
+	}
+}
+
 // ---- PowerShell script builders ----
 
 func fileExistsScript(path string) string {
@@ -471,15 +526,22 @@ func installServiceScript(p config.Project, nssmPath string) string {
 	fmt.Fprintf(&b, "& $nssm set %s AppDirectory %s%s", psQuote(p.ServiceName), psQuote(p.ServiceWorkDir), exitGuard("nssm set AppDirectory"))
 	if p.ServiceArgs != "" {
 		fmt.Fprintf(&b, "& $nssm set %s AppParameters %s%s", psQuote(p.ServiceName), psQuote(p.ServiceArgs), exitGuard("nssm set AppParameters"))
+	} else {
+		fmt.Fprintf(&b, "& $nssm reset %s AppParameters%s", psQuote(p.ServiceName), exitGuard("nssm reset AppParameters"))
 	}
 	if p.ServiceLogDir != "" {
 		fmt.Fprintf(&b, "New-Item -ItemType Directory -Force -Path %s | Out-Null\n", psQuote(p.ServiceLogDir))
 		fmt.Fprintf(&b, "& $nssm set %s AppStdout %s%s", psQuote(p.ServiceName), psQuote(winPath(p.ServiceLogDir, sanitize(p.ID)+".out.log")), exitGuard("nssm set AppStdout"))
 		fmt.Fprintf(&b, "& $nssm set %s AppStderr %s%s", psQuote(p.ServiceName), psQuote(winPath(p.ServiceLogDir, sanitize(p.ID)+".err.log")), exitGuard("nssm set AppStderr"))
 		fmt.Fprintf(&b, "& $nssm set %s AppRotateFiles 1%s", psQuote(p.ServiceName), exitGuard("nssm set AppRotateFiles"))
+	} else {
+		fmt.Fprintf(&b, "& $nssm reset %s AppStdout%s", psQuote(p.ServiceName), exitGuard("nssm reset AppStdout"))
+		fmt.Fprintf(&b, "& $nssm reset %s AppStderr%s", psQuote(p.ServiceName), exitGuard("nssm reset AppStderr"))
 	}
 	if p.ServiceAccount != "" {
 		fmt.Fprintf(&b, "& $nssm set %s ObjectName %s%s", psQuote(p.ServiceName), psQuote(p.ServiceAccount), exitGuard("nssm set ObjectName"))
+	} else {
+		fmt.Fprintf(&b, "& $nssm reset %s ObjectName%s", psQuote(p.ServiceName), exitGuard("nssm reset ObjectName"))
 	}
 	fmt.Fprintf(&b, "& $nssm set %s AppExit Default Restart%s", psQuote(p.ServiceName), exitGuard("nssm set AppExit"))
 	fmt.Fprintf(&b, "& $nssm set %s AppThrottle 1500%s", psQuote(p.ServiceName), exitGuard("nssm set AppThrottle"))
@@ -487,14 +549,16 @@ func installServiceScript(p config.Project, nssmPath string) string {
 	return b.String()
 }
 
-// serviceEnvScript renders AppEnvironmentExtra. Returns "" when there is no env.
+// serviceEnvScript renders AppEnvironmentExtra. An empty environment explicitly
+// resets the NSSM value so removed secrets do not survive a redeploy.
 func serviceEnvScript(p config.Project, nssmPath string) string {
-	if len(p.Env) == 0 {
-		return ""
-	}
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'\n")
 	fmt.Fprintf(&b, "$nssm = %s\n", psQuote(nssmPath))
+	if len(p.Env) == 0 {
+		fmt.Fprintf(&b, "& $nssm reset %s AppEnvironmentExtra%s", psQuote(p.ServiceName), exitGuard("nssm reset AppEnvironmentExtra"))
+		return b.String()
+	}
 	b.WriteString("$pairs = @(")
 	for i, k := range sortedKeys(p.Env) {
 		if i > 0 {

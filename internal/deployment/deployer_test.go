@@ -23,7 +23,7 @@ func TestWarnIfDomainNotPointedHere(t *testing.T) {
 
 	// Points elsewhere: warn.
 	lookupHost = func(context.Context, string) ([]string, error) { return []string{"1.2.3.4"}, nil }
-	warnIfDomainNotPointedHere(context.Background(), srv, "app.example.com", logf)
+	warnIfDomainNotPointedHere(context.Background(), srv.PublicIP, "app.example.com", logf)
 	if len(lines) != 1 || !strings.Contains(lines[0], "WARNING") || !strings.Contains(lines[0], "5.6.7.8") {
 		t.Fatalf("mismatch: got %v, want a warning naming the server IP", lines)
 	}
@@ -31,7 +31,7 @@ func TestWarnIfDomainNotPointedHere(t *testing.T) {
 	// Points here: informational line, no warning.
 	lines = nil
 	lookupHost = func(context.Context, string) ([]string, error) { return []string{"5.6.7.8"}, nil }
-	warnIfDomainNotPointedHere(context.Background(), srv, "app.example.com", logf)
+	warnIfDomainNotPointedHere(context.Background(), srv.PublicIP, "app.example.com", logf)
 	if len(lines) != 1 || strings.Contains(lines[0], "WARNING") {
 		t.Fatalf("match: got %v, want no warning", lines)
 	}
@@ -39,7 +39,7 @@ func TestWarnIfDomainNotPointedHere(t *testing.T) {
 	// Does not resolve: warn.
 	lines = nil
 	lookupHost = func(context.Context, string) ([]string, error) { return nil, errors.New("no such host") }
-	warnIfDomainNotPointedHere(context.Background(), srv, "app.example.com", logf)
+	warnIfDomainNotPointedHere(context.Background(), srv.PublicIP, "app.example.com", logf)
 	if len(lines) != 1 || !strings.Contains(lines[0], "WARNING") {
 		t.Fatalf("unresolved: got %v, want a warning", lines)
 	}

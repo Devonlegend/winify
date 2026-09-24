@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Devonlegend/winify/internal/config"
 )
@@ -29,6 +30,9 @@ func (t *iisTarget) Close() error { return t.runner.Close() }
 // Deploy runs the full IIS pipeline and returns the backup path as the
 // deployment artifact.
 func (t *iisTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) (string, error) {
+	if err := validateProjectID(job.project.ID); err != nil {
+		return "", err
+	}
 	p := job.project
 	if p.IISPhysicalPath == "" {
 		return "", fmt.Errorf("project %s has no iis_physical_path", p.ID)
@@ -78,30 +82,42 @@ func (t *iisTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) 
 
 	// 5. Stop the service and app pool.
 	if _, err := execCmd(ctx, t.runner, stopScript(p.IISAppPool, p.IISService), "stop service/app pool", logf); err != nil {
+		t.recoverLive(ctx, p, "", logf)
 		return "", fmt.Errorf("stop: %w", err)
 	}
 
-	// 6. Backup the current live files (timestamped).
+	// 6. Backup the current live files (timestamped). A first deployment has
+	// no previous release and therefore has no rollback artifact.
+	backup := ""
 	backupOut, err := execCmd(ctx, t.runner, backupScript(p.IISPhysicalPath, t.cfg.Deploy.IISBackupDir, p.ID), "backup live files", logf)
 	if err != nil {
+		t.recoverLive(ctx, p, backup, logf)
 		return "", fmt.Errorf("backup: %w", err)
 	}
-	backup := lastLine(backupOut)
-	logf("backup created: %s", backup)
+	backup = lastLine(backupOut)
+	if backup == "NO_BACKUP" {
+		backup = ""
+		logf("no previous live files; rollback is not available for this first deployment")
+	} else {
+		logf("backup created: %s", backup)
+	}
 
 	// 7. Deploy the new build files.
 	srcDir := winPath(repoDir, source)
 	if _, err := execCmd(ctx, t.runner, copyScript(srcDir, p.IISPhysicalPath, "deploy"), "deploy files", logf); err != nil {
+		t.recoverLive(ctx, p, backup, logf)
 		return "", fmt.Errorf("deploy files: %w", err)
 	}
 
 	// 8. Start the service and recycle the app pool.
 	if _, err := execCmd(ctx, t.runner, startScript(p.IISAppPool, p.IISService), "start service/recycle app pool", logf); err != nil {
+		t.recoverLive(ctx, p, backup, logf)
 		return "", fmt.Errorf("start: %w", err)
 	}
 
 	// 9. Smoke test.
 	if err := t.smokeTest(ctx, p, logf); err != nil {
+		t.recoverLive(ctx, p, backup, logf)
 		return "", err
 	}
 	return backup, nil
@@ -111,6 +127,9 @@ func (t *iisTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) 
 // up. It discovers the backup on the target rather than relying on history, so
 // it works even if deploy history was pruned.
 func (t *iisTarget) Rollback(ctx context.Context, job deployJob, logf loggerFunc) (string, error) {
+	if err := validateProjectID(job.project.ID); err != nil {
+		return "", err
+	}
 	p := job.project
 	if p.IISPhysicalPath == "" {
 		return "", fmt.Errorf("project %s has no iis_physical_path", p.ID)
@@ -127,15 +146,19 @@ func (t *iisTarget) Rollback(ctx context.Context, job deployJob, logf loggerFunc
 	logf("rollback: restoring %s", backup)
 
 	if _, err := execCmd(ctx, t.runner, stopScript(p.IISAppPool, p.IISService), "stop service/app pool", logf); err != nil {
+		t.recoverLive(ctx, p, backup, logf)
 		return "", fmt.Errorf("stop: %w", err)
 	}
 	if _, err := execCmd(ctx, t.runner, copyScript(backup, p.IISPhysicalPath, "restore backup"), "restore backup", logf); err != nil {
+		t.recoverLive(ctx, p, backup, logf)
 		return "", fmt.Errorf("restore backup: %w", err)
 	}
 	if _, err := execCmd(ctx, t.runner, startScript(p.IISAppPool, p.IISService), "start service/recycle app pool", logf); err != nil {
+		t.recoverLive(ctx, p, backup, logf)
 		return "", fmt.Errorf("start: %w", err)
 	}
 	if err := t.smokeTest(ctx, p, logf); err != nil {
+		t.recoverLive(ctx, p, backup, logf)
 		return "", err
 	}
 	return backup, nil
@@ -146,7 +169,7 @@ func (t *iisTarget) smokeTest(ctx context.Context, p config.Project, logf logger
 		logf("health check disabled; skipping smoke test")
 		return nil
 	}
-	if p.Port == 0 {
+	if p.EffectiveHostPort() == 0 {
 		logf("no port configured; skipping smoke test")
 		return nil
 	}
@@ -156,6 +179,22 @@ func (t *iisTarget) smokeTest(ctx context.Context, p config.Project, logf logger
 		return fmt.Errorf("smoke test failed: %w", err)
 	}
 	return nil
+}
+
+func (t *iisTarget) recoverLive(ctx context.Context, p config.Project, backup string, logf loggerFunc) {
+	// Recovery must still run when the deploy deadline caused the failure. Keep
+	// audit metadata from the original context, but give compensation its own
+	// bounded lifetime.
+	recCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancel()
+	if backup != "" && backup != "NO_BACKUP" {
+		if _, err := execCmd(recCtx, t.runner, copyScript(backup, p.IISPhysicalPath, "restore after failed deploy"), "restore previous release", logf); err != nil {
+			logf("recovery: restore previous release failed: %v", err)
+		}
+	}
+	if _, err := execCmd(recCtx, t.runner, startScript(p.IISAppPool, p.IISService), "restart after failed deploy", logf); err != nil {
+		logf("recovery: restart failed: %v", err)
+	}
 }
 
 // ---- PowerShell script builders ----
@@ -178,21 +217,18 @@ func gitSafe(dir string) string {
 
 func syncRepoScript(repoDir, repoURL, commit string) string {
 	var b strings.Builder
+	checkout := gitCheckoutRef(commit)
 	b.WriteString("$ErrorActionPreference='Stop'\n")
 	fmt.Fprintf(&b, "New-Item -ItemType Directory -Force -Path %s | Out-Null\n", psQuote(repoDir))
 	fmt.Fprintf(&b, "if (Test-Path (Join-Path %s '.git')) {\n", psQuote(repoDir))
 	fmt.Fprintf(&b, "  git %s -C %s fetch --all --prune%s", gitSafe(repoDir), psQuote(repoDir), exitGuard("git fetch"))
-	if commit != "" {
-		fmt.Fprintf(&b, "  git %s -C %s checkout --force %s%s", gitSafe(repoDir), psQuote(repoDir), psQuote(commit), exitGuard("git checkout"))
-	} else {
-		fmt.Fprintf(&b, "  git %s -C %s pull --ff-only%s", gitSafe(repoDir), psQuote(repoDir), exitGuard("git pull"))
-	}
+	fmt.Fprintf(&b, "  git %s -C %s checkout --force %s --%s", gitSafe(repoDir), psQuote(repoDir), psQuote(checkout), exitGuard("git checkout"))
 	b.WriteString("} else {\n")
 	fmt.Fprintf(&b, "  git clone %s %s%s", psQuote(repoURL), psQuote(repoDir), exitGuard("git clone"))
-	if commit != "" {
-		fmt.Fprintf(&b, "  git %s -C %s checkout --force %s%s", gitSafe(repoDir), psQuote(repoDir), psQuote(commit), exitGuard("git checkout"))
-	}
+	fmt.Fprintf(&b, "  git %s -C %s checkout --force %s --%s", gitSafe(repoDir), psQuote(repoDir), psQuote(checkout), exitGuard("git checkout"))
 	b.WriteString("}\n")
+	b.WriteString("git clean -fdx\n")
+	b.WriteString("git rev-parse HEAD\n")
 	return b.String()
 }
 
@@ -286,16 +322,17 @@ func startScript(appPool, service string) string {
 }
 
 // backupScript copies the live directory to a timestamped folder and prints its
-// full path as the last line of output.
+// full path as the last line of output. A first deployment has no previous
+// release, so it prints NO_BACKUP instead of creating an empty rollback target.
 func backupScript(physicalPath, backupRoot, projectID string) string {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'\n")
 	b.WriteString("$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'\n")
+	fmt.Fprintf(&b, "if (-not (Test-Path -LiteralPath %s -PathType Container)) { Write-Output 'NO_BACKUP'; exit 0 }\n", psQuote(physicalPath))
 	fmt.Fprintf(&b, "$dest = Join-Path %s (%s + $stamp)\n", psQuote(backupRoot), psQuote(projectID+`\`))
 	b.WriteString("New-Item -ItemType Directory -Force -Path $dest | Out-Null\n")
-	fmt.Fprintf(&b, "if (Test-Path %s) {\n", psQuote(physicalPath))
-	fmt.Fprintf(&b, "  robocopy %s $dest /MIR /NFL /NDL /NJH /NJS /NP | Out-Null\n", psQuote(physicalPath))
-	b.WriteString("  if ($LASTEXITCODE -ge 8) { throw \"backup robocopy failed: $LASTEXITCODE\" }\n}\n")
+	fmt.Fprintf(&b, "robocopy %s $dest /MIR /NFL /NDL /NJH /NJS /NP | Out-Null\n", psQuote(physicalPath))
+	b.WriteString("if ($LASTEXITCODE -ge 8) { throw \"backup robocopy failed: $LASTEXITCODE\" }\n")
 	b.WriteString("Write-Output $dest\n")
 	return b.String()
 }
@@ -305,7 +342,7 @@ func latestBackupScript(backupRoot, projectID string) string {
 	b.WriteString("$ErrorActionPreference='Stop'\n")
 	fmt.Fprintf(&b, "$root = Join-Path %s %s\n", psQuote(backupRoot), psQuote(projectID))
 	fmt.Fprintf(&b, "if (-not (Test-Path $root)) { throw \"no backups found for %s\" }\n", projectID)
-	b.WriteString("$latest = Get-ChildItem -LiteralPath $root -Directory | Sort-Object Name -Descending | Select-Object -First 1\n")
+	b.WriteString("$latest = Get-ChildItem -LiteralPath $root -Directory | Where-Object { @(Get-ChildItem -LiteralPath $_.FullName -Recurse -File -ErrorAction SilentlyContinue).Count -gt 0 } | Sort-Object Name -Descending | Select-Object -First 1\n")
 	fmt.Fprintf(&b, "if ($null -eq $latest) { throw \"no backups found for %s\" }\n", projectID)
 	b.WriteString("Write-Output $latest.FullName\n")
 	return b.String()

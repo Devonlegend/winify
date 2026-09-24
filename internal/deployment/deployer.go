@@ -28,6 +28,11 @@ type Deployer struct {
 	newTarget TargetFactory
 	timeout   time.Duration
 	inFlight  sync.Map // projectID -> struct{}
+
+	lifecycleCtx context.Context
+	cancel       context.CancelFunc
+	workers      sync.WaitGroup
+	stopOnce     sync.Once
 }
 
 // NewDeployer wires the pipeline dependencies.
@@ -36,7 +41,22 @@ func NewDeployer(cfg config.Config, store *models.Store, secrets SecretResolver,
 	if timeout <= 0 {
 		timeout = 30 * time.Minute
 	}
-	return &Deployer{cfg: cfg, store: store, secrets: secrets, proxy: reg, newTarget: newTarget, timeout: timeout}
+	lifecycleCtx, cancel := context.WithCancel(context.Background())
+	return &Deployer{
+		cfg: cfg, store: store, secrets: secrets, proxy: reg, newTarget: newTarget,
+		timeout: timeout, lifecycleCtx: lifecycleCtx, cancel: cancel,
+	}
+}
+
+// Stop cancels active deployment work and waits for compensation/finalization
+// to finish. Call it before closing the database during service shutdown.
+func (d *Deployer) Stop() {
+	d.stopOnce.Do(func() {
+		if d.cancel != nil {
+			d.cancel()
+		}
+	})
+	d.workers.Wait()
 }
 
 // deployJob is one unit of work handed to a Target.
@@ -70,9 +90,11 @@ func (d *Deployer) Trigger(ctx context.Context, project config.Project, srv conf
 		d.inFlight.Delete(project.ID)
 		return 0, err
 	}
+	d.workers.Add(1)
 	go func() {
+		defer d.workers.Done()
 		defer d.inFlight.Delete(project.ID)
-		runCtx, cancel := context.WithTimeout(context.Background(), d.timeout)
+		runCtx, cancel := context.WithTimeout(d.lifecycleCtx, d.timeout)
 		defer cancel()
 		d.run(runCtx, deployJob{
 			id: id, project: project, server: srv, trigger: trigger, commit: commit, ref: ref,
@@ -99,10 +121,17 @@ func (d *Deployer) Rollback(ctx context.Context, project config.Project, srv con
 	if _, loaded := d.inFlight.LoadOrStore(project.ID, struct{}{}); loaded {
 		return 0, ErrDeployInProgress
 	}
+	rollbackCommit := prev.CommitSHA
+	// Compose deployments store their actual checked-out commit in ImageTag
+	// because manual deploys have no webhook commit. Use that immutable value
+	// for rollback instead of the branch placeholder.
+	if project.Source == config.ProjectSourceCompose && prev.ImageTag != "" {
+		rollbackCommit = prev.ImageTag
+	}
 	id, err := d.store.CreateDeployment(ctx, models.Deployment{
 		ProjectID:  project.ID,
 		TargetType: srv.Type,
-		CommitSHA:  prev.CommitSHA,
+		CommitSHA:  rollbackCommit,
 		ImageTag:   prev.ImageTag,
 		Status:     models.DeployQueued,
 		Trigger:    "rollback",
@@ -112,13 +141,15 @@ func (d *Deployer) Rollback(ctx context.Context, project config.Project, srv con
 		d.inFlight.Delete(project.ID)
 		return 0, err
 	}
+	d.workers.Add(1)
 	go func() {
+		defer d.workers.Done()
 		defer d.inFlight.Delete(project.ID)
-		runCtx, cancel := context.WithTimeout(context.Background(), d.timeout)
+		runCtx, cancel := context.WithTimeout(d.lifecycleCtx, d.timeout)
 		defer cancel()
 		d.run(runCtx, deployJob{
 			id: id, project: project, server: srv, trigger: "rollback",
-			commit: prev.CommitSHA, ref: prev.Ref, artifact: prev.ImageTag, rollback: true,
+			commit: rollbackCommit, ref: prev.Ref, artifact: prev.ImageTag, rollback: true,
 		})
 	}()
 	return id, nil
@@ -257,7 +288,11 @@ func (d *Deployer) registerProxy(ctx context.Context, job deployJob, logf logger
 		return fmt.Errorf("register %s: %w", job.project.Domain, err)
 	}
 	logf("registered https://%s -> %s", job.project.Domain, upstream)
-	warnIfDomainNotPointedHere(ctx, job.server, job.project.Domain, logf)
+	proxyIP := d.cfg.Proxy.PublicIP
+	if proxyIP == "" && job.server.Local {
+		proxyIP = job.server.PublicIP
+	}
+	warnIfDomainNotPointedHere(ctx, proxyIP, job.project.Domain, logf)
 	return nil
 }
 
@@ -265,26 +300,25 @@ func (d *Deployer) registerProxy(ctx context.Context, job deployJob, logf logger
 var lookupHost = net.DefaultResolver.LookupHost
 
 // warnIfDomainNotPointedHere resolves the domain and warns when it does not
-// point at this server. A wrong record does not fail registration — Caddy adds
-// the route and retries the certificate later — but it is the usual reason a
-// domain "does not work", so it is surfaced loudly in the deploy log.
-func warnIfDomainNotPointedHere(ctx context.Context, srv config.Server, domain string, logf loggerFunc) {
-	if srv.PublicIP == "" {
+// point at the central Caddy ingress. The target server's public IP is not used
+// for remote projects because Caddy terminates TLS on the controller host.
+func warnIfDomainNotPointedHere(ctx context.Context, publicIP, domain string, logf loggerFunc) {
+	if publicIP == "" {
 		return
 	}
 	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	ips, err := lookupHost(lookupCtx, domain)
 	if err != nil {
-		logf("WARNING: %s does not resolve yet; add a DNS A record pointing to %s for TLS to be issued", domain, srv.PublicIP)
+		logf("WARNING: %s does not resolve yet; add a DNS A record pointing to the Caddy host (%s) for TLS to be issued", domain, publicIP)
 		return
 	}
 	for _, ip := range ips {
-		if ip == srv.PublicIP {
-			logf("%s resolves to %s", domain, srv.PublicIP)
+		if ip == publicIP {
+			logf("%s resolves to the Caddy host %s", domain, publicIP)
 			return
 		}
 	}
-	logf("WARNING: %s resolves to %s, but this server's public IP is %s; add an A record pointing at the server for TLS to be issued",
-		domain, strings.Join(ips, ", "), srv.PublicIP)
+	logf("WARNING: %s resolves to %s, but the Caddy host is %s; add an A record pointing at Caddy for TLS to be issued",
+		domain, strings.Join(ips, ", "), publicIP)
 }

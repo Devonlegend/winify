@@ -337,6 +337,9 @@ func ValidateProject(p Project, srv Server) error {
 		if p.IISAppPool == "" {
 			return errors.New("iis_app_pool is required for an IIS project")
 		}
+		if len(p.Env) > 0 {
+			return errors.New("runtime env is not supported for IIS projects; configure the application through web.config or the build")
+		}
 	case ServerTypeWindowsService:
 		if p.RepoURL == "" {
 			return errors.New("repo_url is required for a Windows service project")

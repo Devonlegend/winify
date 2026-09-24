@@ -1,0 +1,2 @@
+ALTER TABLE servers ADD COLUMN services_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE servers ADD COLUMN disk_path TEXT NOT NULL DEFAULT '';

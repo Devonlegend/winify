@@ -232,6 +232,10 @@ func sanitize(s string) string {
 }
 
 // shellQuote wraps s in single quotes for safe use in a POSIX shell command.
+func validateProjectID(id string) error {
+	return config.ValidateResourceID("project id", id)
+}
+
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

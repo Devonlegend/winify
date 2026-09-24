@@ -48,7 +48,7 @@ func TestDockerDeploySuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Deploy: %v", err)
 	}
-	if artifact != "cc/proj-001:abcdef1" {
+	if artifact != "cc/proj-001:abcdef1234567" {
 		t.Fatalf("artifact = %q", artifact)
 	}
 	cmds := runner.joined()
@@ -60,6 +60,28 @@ func TestDockerDeploySuccess(t *testing.T) {
 	if !runner.closed {
 		// dockerTarget.Close is called by the Deployer, not by Deploy itself.
 		t.Log("runner not closed by target (closed by Deployer)")
+	}
+}
+
+func TestDockerManualDeployUsesResolvedCommit(t *testing.T) {
+	runner := &fakeRunner{outputs: func(cmd string) string {
+		if strings.Contains(cmd, "git rev-parse HEAD") {
+			return "0123456789abcdef0123456789abcdef01234567\n"
+		}
+		return ""
+	}}
+	tgt := NewDockerTarget(config.Default(), runner)
+	p := dockerProject()
+	p.Branch = "main"
+	artifact, err := tgt.Deploy(context.Background(), deployJob{project: p}, noopLogf)
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if artifact != "cc/proj-001:0123456789abcdef0123456789abcdef01234567" {
+		t.Fatalf("artifact = %q", artifact)
+	}
+	if !strings.Contains(runner.joined(), "origin/main") {
+		t.Fatalf("manual deploy did not resolve origin/main:\n%s", runner.joined())
 	}
 }
 

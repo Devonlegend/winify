@@ -36,6 +36,12 @@ func TestCaddyReachableFailsOnBadStatus(t *testing.T) {
 	}
 }
 
+func TestRouteIDDoesNotCollideOnPunctuation(t *testing.T) {
+	if routeID("a.example.com") == routeID("a-example-com") {
+		t.Fatal("route IDs collided")
+	}
+}
+
 func TestCaddyRegisterUpsertsRoute(t *testing.T) {
 	var posted []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

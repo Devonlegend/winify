@@ -23,6 +23,7 @@ import (
 	"github.com/Devonlegend/winify/internal/config"
 	"github.com/Devonlegend/winify/internal/deployment"
 	"github.com/Devonlegend/winify/internal/models"
+	"github.com/Devonlegend/winify/internal/proxy"
 	"github.com/Devonlegend/winify/internal/static"
 )
 
@@ -73,6 +74,9 @@ type Deps struct {
 	// beyond loopback. An empty token is allowed for tests and embedded uses;
 	// the production entrypoint always supplies one on a fresh database.
 	SetupToken string
+	// Proxy is used to remove stale public routes when projects are deleted or
+	// their domain changes. Nil disables cleanup in tests/embedded uses.
+	Proxy proxy.Registrar
 }
 
 // Server holds the dependencies shared by every handler.
@@ -85,6 +89,7 @@ type Server struct {
 	assistant         Assistant
 	credentials       CredentialAdmin
 	newRunner         deployment.RunnerFactory
+	proxy             proxy.Registrar
 	bootstrap         *bootstrap.Bootstrap
 	bootstrapRun      func(ctx context.Context) error
 	bootstrapElevate  func() error
@@ -155,6 +160,7 @@ func New(deps Deps) (*Server, error) {
 		assistant:         deps.Assistant,
 		credentials:       deps.CredentialAdmin,
 		newRunner:         deps.RunnerFactory,
+		proxy:             deps.Proxy,
 		bootstrap:         deps.Bootstrap,
 		bootstrapRun:      deps.BootstrapRun,
 		bootstrapElevate:  deps.BootstrapElevate,

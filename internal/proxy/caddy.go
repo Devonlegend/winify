@@ -3,11 +3,14 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,6 +22,7 @@ type Caddy struct {
 	adminURL string
 	server   string
 	client   *http.Client
+	mu       sync.Mutex
 }
 
 // NewCaddy builds a client for the Caddy admin API (default port 2019).
@@ -50,13 +54,16 @@ func (c *Caddy) Reachable(ctx context.Context) error {
 }
 
 func routeID(host string) string {
-	replacer := strings.NewReplacer(".", "-", ":", "-", "*", "wildcard")
-	return "cc-route-" + replacer.Replace(host)
+	canonical := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	sum := sha256.Sum256([]byte(canonical))
+	return "cc-route-" + hex.EncodeToString(sum[:])[:24]
 }
 
 // Register ensures the HTTP server exists, then upserts a host-matched route
 // that reverse-proxies to upstream (host:port).
 func (c *Caddy) Register(ctx context.Context, host, upstream string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if host == "" {
 		return fmt.Errorf("caddy: empty host")
 	}
@@ -66,7 +73,9 @@ func (c *Caddy) Register(ctx context.Context, host, upstream string) error {
 
 	id := routeID(host)
 	// Idempotent upsert: drop any existing route with this id, then add it.
-	_ = c.do(ctx, http.MethodDelete, "/id/"+id, nil, http.StatusOK, http.StatusNotFound)
+	if err := c.do(ctx, http.MethodDelete, "/id/"+id, nil, http.StatusOK, http.StatusNotFound); err != nil {
+		return fmt.Errorf("caddy remove old route %s: %w", host, err)
+	}
 
 	route := map[string]any{
 		"@id":   id,
@@ -86,6 +95,8 @@ func (c *Caddy) Register(ctx context.Context, host, upstream string) error {
 
 // Deregister removes the route for host. A missing route is not an error.
 func (c *Caddy) Deregister(ctx context.Context, host string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if host == "" {
 		return nil
 	}

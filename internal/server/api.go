@@ -240,16 +240,34 @@ func (s *Server) apiSaveProject(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	oldProject, _ := s.store.GetProject(r.Context(), p.ID)
 	if err := s.store.UpsertProject(r.Context(), p); err != nil {
 		log.Printf("api: save project: %v", err)
 		apiError(w, http.StatusInternalServerError, "failed to save project")
 		return
 	}
+	if oldProject.Domain != "" && oldProject.Domain != p.Domain && s.proxy != nil {
+		if err := s.proxy.Deregister(r.Context(), oldProject.Domain); err != nil {
+			log.Printf("api: deregister old domain %s: %v", oldProject.Domain, err)
+		}
+	}
 	writeJSON(w, http.StatusOK, redactProject(p))
 }
 
 func (s *Server) apiDeleteProject(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.DeleteProject(r.Context(), chi.URLParam(r, "id")); err != nil {
+	id := chi.URLParam(r, "id")
+	project, err := s.store.GetProject(r.Context(), id)
+	if err != nil && !errors.Is(err, models.ErrNotFound) {
+		apiError(w, http.StatusInternalServerError, "failed to load project")
+		return
+	}
+	if err == nil && project.Domain != "" && s.proxy != nil {
+		if err := s.proxy.Deregister(r.Context(), project.Domain); err != nil {
+			apiError(w, http.StatusBadGateway, "failed to remove public route")
+			return
+		}
+	}
+	if err := s.store.DeleteProject(r.Context(), id); err != nil {
 		log.Printf("api: delete project: %v", err)
 		apiError(w, http.StatusInternalServerError, "failed to delete project")
 		return

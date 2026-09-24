@@ -137,6 +137,10 @@ type ProxyConfig struct {
 	AdminURL string `yaml:"admin_url"`
 	// ServerName is the Caddy HTTP server object routes are added to.
 	ServerName string `yaml:"server_name"`
+	// PublicIP is the public address of the central Caddy ingress. It is
+	// separate from a deployment target's PublicIP because remote targets are
+	// usually behind the controller's proxy.
+	PublicIP string `yaml:"public_ip"`
 }
 
 // MonitoringConfig controls the metrics poller.
@@ -225,8 +229,8 @@ func Default() Config {
 		},
 		Deploy: DeployConfig{
 			WorkDir:               "/opt/control-center",
-			IISWorkDir:            `C:\control-center`,
-			IISBackupDir:          `C:\control-center\backups`,
+			IISWorkDir:            `C:\ProgramData\winify\work`,
+			IISBackupDir:          `C:\ProgramData\winify\backups`,
 			NSSMSource:            "tools/nssm.exe",
 			HealthTimeoutSeconds:  60,
 			HealthIntervalSeconds: 3,
@@ -328,6 +332,9 @@ func (cfg *Config) applyEnv() error {
 	}
 	if v := os.Getenv("CC_PROXY_ADMIN_URL"); v != "" {
 		cfg.Proxy.AdminURL = v
+	}
+	if v := os.Getenv("CC_PROXY_PUBLIC_IP"); v != "" {
+		cfg.Proxy.PublicIP = v
 	}
 	if v := os.Getenv("CC_DEPLOY_WORKDIR"); v != "" {
 		cfg.Deploy.WorkDir = v

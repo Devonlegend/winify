@@ -20,7 +20,12 @@
       var idEl = form.querySelector('[name=id]');
       var opt = sel ? sel.options[sel.selectedIndex] : null;
       var ip = opt ? (opt.getAttribute('data-ip') || '').trim() : '';
+      var local = opt ? opt.getAttribute('data-local') === 'true' : false;
       var id = idEl ? (idEl.value || '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') : '';
+      if (!local) {
+        window.alert('Automatic sslip.io generation is only available for a local target. Set the domain to the central Caddy host for remote targets.');
+        return;
+      }
       if (!ip) {
         window.alert('Set the server public IP first (Servers, then edit the server).');
         return;

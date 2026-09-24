@@ -6,7 +6,7 @@
     <select name="server_id" required>
       <option value="">&mdash; select &mdash;</option>
       {{range .Servers}}
-      <option value="{{.ID}}" data-ip="{{.PublicIP}}" {{if $.Form}}{{if eq $.Form.ServerID .ID}}selected{{end}}{{end}}>{{.ID}} ({{.Type}})</option>
+      <option value="{{.ID}}" data-ip="{{.PublicIP}}" data-local="{{.Local}}" {{if $.Form}}{{if eq $.Form.ServerID .ID}}selected{{end}}{{end}}>{{.ID}} ({{.Type}})</option>
       {{end}}
     </select>
   </label>

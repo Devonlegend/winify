@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Devonlegend/winify/internal/assistant"
@@ -103,7 +104,7 @@ func runServe(args []string) {
 
 	// Interactive: stop on Ctrl-C / SIGINT. signal.NotifyContext is the modern
 	// way to turn a signal into a context instead of a global handler.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := serve(cfg, *configPath, ctx); err != nil {
 		log.Fatalf("serve: %v", err)
@@ -127,6 +128,11 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 
 	if err := store.DeleteExpiredSessions(ctx, time.Now()); err != nil {
 		log.Printf("prune sessions: %v", err)
+	}
+	if n, err := store.FailInterruptedDeployments(ctx, time.Now()); err != nil {
+		log.Printf("reconcile interrupted deployments: %v", err)
+	} else if n > 0 {
+		log.Printf("marked %d interrupted deployment(s) as failed", n)
 	}
 
 	seedAdmin(ctx, store, cfg)
@@ -189,6 +195,7 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 
 	targetFactory := deployment.NewTargetFactory(cfg, sshDial, auditRecorder)
 	deployer := deployment.NewDeployer(cfg, store, credStore, registrar, targetFactory)
+	defer deployer.Stop()
 
 	// Metrics reuse the same SSH/WinRM connection code as deploys (no agent).
 	collector := monitoring.NewCollector(monitoring.NewRunnerFactory(cfg, credStore, auditRecorder))
@@ -237,6 +244,7 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 		Assistant:       assistantSvc,
 		CredentialAdmin: credStore,
 		RunnerFactory:   deployment.NewRunnerFactory(sshDial, auditRecorder),
+		Proxy:           registrar,
 		Bootstrap:       boot,
 		BootstrapRun: func(runCtx context.Context) error {
 			if boot == nil {
@@ -563,12 +571,13 @@ func localTargetServer(paths bootstrap.Paths) config.Server {
 		name = h
 	}
 	return config.Server{
-		ID:       "local",
-		Name:     name,
-		Type:     config.ServerTypeWindowsService,
-		Local:    true,
-		NSSMPath: paths.NSSM,
-		Host:     "127.0.0.1",
+		ID:        "local",
+		Name:      name,
+		Type:      config.ServerTypeWindowsService,
+		Local:     true,
+		NSSMPath:  paths.NSSM,
+		CaddyPath: paths.Caddy,
+		Host:      "127.0.0.1",
 	}
 }
 
@@ -644,6 +653,11 @@ func runRemoteBootstrap(cfg config.Config, store *models.Store, endpoint, user, 
 		name = id
 	}
 
+	root := cfg.Bootstrap.InstallDir
+	if root == "" {
+		root = bootstrap.DefaultRoot()
+	}
+	paths := bootstrap.DefaultPaths(root)
 	srv := config.Server{
 		ID:             id,
 		Name:           name,
@@ -651,6 +665,8 @@ func runRemoteBootstrap(cfg config.Config, store *models.Store, endpoint, user, 
 		WinRMEndpoint:  endpoint,
 		WinRMUser:      user,
 		WinRMTransport: "ntlm",
+		NSSMPath:       paths.NSSM,
+		CaddyPath:      paths.Caddy,
 	}
 	runner, err := deployment.DialWinRM(srv, password)
 	if err != nil {
@@ -667,15 +683,11 @@ func runRemoteBootstrap(cfg config.Config, store *models.Store, endpoint, user, 
 		log.Fatalf("credential store: %v", err)
 	}
 
-	root := cfg.Bootstrap.InstallDir
-	if root == "" {
-		root = bootstrap.DefaultRoot()
-	}
 	refName := id + "-winrm"
 	srv.CredentialRef = "vault:" + refName
 
 	opts := bootstrap.Options{
-		Paths:          bootstrap.DefaultPaths(root),
+		Paths:          paths,
 		NSSMSource:     cfg.Deploy.NSSMSource,
 		NSSMSHA256:     cfg.Deploy.NSSMSHA256,
 		EnableWinRM:    cfg.Bootstrap.EnableWinRM,

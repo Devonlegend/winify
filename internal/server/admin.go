@@ -445,7 +445,9 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 	}
 	// The compact settings form does not include every advanced field. Preserve
 	// omitted values on updates instead of silently erasing them.
+	oldDomain := ""
 	if existing, err := s.store.GetProject(r.Context(), p.ID); err == nil {
+		oldDomain = existing.Domain
 		if _, present := r.Form["iis_site"]; !present {
 			p.IISSite = existing.IISSite
 		}
@@ -492,6 +494,11 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 		s.renderProjectForm(w, r, http.StatusInternalServerError, &p, "Failed to save project.")
 		return
 	}
+	if oldDomain != "" && oldDomain != p.Domain && s.proxy != nil {
+		if err := s.proxy.Deregister(r.Context(), oldDomain); err != nil {
+			log.Printf("projects: deregister old domain %s: %v", oldDomain, err)
+		}
+	}
 	http.Redirect(w, r, "/projects/"+p.ID+"?notice="+urlQuery("Saved"), http.StatusSeeOther)
 }
 
@@ -500,6 +507,19 @@ func (s *Server) handleProjectDelete(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		http.Redirect(w, r, "/projects?error=Missing+project+id", http.StatusSeeOther)
 		return
+	}
+	project, err := s.store.GetProject(r.Context(), id)
+	if err != nil && !errors.Is(err, models.ErrNotFound) {
+		log.Printf("projects: delete lookup: %v", err)
+		http.Error(w, "error", http.StatusInternalServerError)
+		return
+	}
+	if err == nil && project.Domain != "" && s.proxy != nil {
+		if err := s.proxy.Deregister(r.Context(), project.Domain); err != nil {
+			log.Printf("projects: deregister %s: %v", project.Domain, err)
+			http.Redirect(w, r, "/projects?error="+urlQuery("Could not remove the public route; project was not deleted"), http.StatusSeeOther)
+			return
+		}
 	}
 	if err := s.store.DeleteProject(r.Context(), id); err != nil {
 		log.Printf("projects: delete: %v", err)

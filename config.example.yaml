@@ -34,14 +34,16 @@ proxy:
   enabled: true
   admin_url: "http://127.0.0.1:2019"
   server_name: "srv0"
+  # Public address of this Caddy host; used only for DNS warnings.
+  public_ip: ""
 
 deploy:
   # Parent directory on Docker/Linux targets for cloned repos.
   work_dir: "/opt/control-center"
   # Parent directory on Windows/IIS targets (separate path syntax).
-  iis_work_dir: 'C:\control-center'
+  iis_work_dir: 'C:\ProgramData\winify\work'
   # Where timestamped pre-deploy IIS backups are stored for rollback.
-  iis_backup_dir: 'C:\control-center\backups'
+  iis_backup_dir: 'C:\ProgramData\winify\backups'
   # Path on THIS host to the nssm.exe uploaded to winsvc targets on first
   # deploy. The public-domain binary is ~300 KB. Empty disables upload and
   # requires NSSM to already be present on the target.

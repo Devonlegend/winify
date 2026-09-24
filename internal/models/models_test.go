@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Devonlegend/winify/internal/config"
 )
@@ -66,6 +67,44 @@ func TestMigrateOpenAllowsRoundTrip(t *testing.T) {
 	}
 	if v == "" {
 		t.Fatal("read empty value from app_meta")
+	}
+}
+
+func TestServerMonitoringFieldsRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	store := NewStore(db)
+	want := config.Server{ID: "s1", Name: "Server", Type: config.ServerTypeDocker, SSHHost: "host", Services: []string{"docker", "nginx"}, DiskPath: "/data"}
+	if err := store.UpsertServer(context.Background(), want); err != nil {
+		t.Fatalf("UpsertServer: %v", err)
+	}
+	got, err := store.GetServer(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("GetServer: %v", err)
+	}
+	if got.DiskPath != want.DiskPath || len(got.Services) != 2 || got.Services[1] != "nginx" {
+		t.Fatalf("server monitoring fields = %+v", got)
+	}
+}
+
+func TestFailInterruptedDeployments(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	store := NewStore(db)
+	if _, err := store.CreateDeployment(context.Background(), Deployment{ProjectID: "p", Status: DeployRunning, StartedAt: time.Now()}); err != nil {
+		t.Fatalf("create deployment: %v", err)
+	}
+	n, err := store.FailInterruptedDeployments(context.Background(), time.Now())
+	if err != nil || n != 1 {
+		t.Fatalf("FailInterruptedDeployments = %d, %v", n, err)
+	}
+	deploys, err := store.ListDeployments(context.Background(), "p", 10)
+	if err != nil || len(deploys) != 1 || deploys[0].Status != DeployFailed || !deploys[0].FinishedAt.After(time.Time{}) {
+		t.Fatalf("deployment was not finalized: %+v, %v", deploys, err)
 	}
 }
 
