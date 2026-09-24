@@ -150,6 +150,84 @@ func TestIISMissingAppPoolFailsFast(t *testing.T) {
 	}
 }
 
+func TestIISBlueGreenDeploySwapsSlot(t *testing.T) {
+	runner := &fakeRunner{outputs: func(cmd string) string {
+		if strings.Contains(cmd, "Get-Content -Raw -LiteralPath") && strings.Contains(cmd, ".active") {
+			return `C:\inetpub\wwwroot\portal` + "\n" // active slot is A
+		}
+		return ""
+	}}
+	project := iisProject()
+	project.IISBlueGreen = true
+	tgt := iisTargetWith(runner)
+
+	artifact, err := tgt.Deploy(context.Background(), deployJob{project: project, commit: "abc1234"}, noopLogf)
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	wantSlot := `C:\inetpub\wwwroot\portal.blue`
+	if artifact != wantSlot {
+		t.Fatalf("artifact = %q, want slot %q", artifact, wantSlot)
+	}
+	cmds := runner.joined()
+	if strings.Contains(cmds, "Stop-WebAppPool") {
+		t.Error("blue-green deploy stopped the app pool (should never stop it)")
+	}
+	if strings.Contains(cmds, "$stamp = Get-Date") {
+		t.Error("blue-green deploy took a backup (slots replace backups)")
+	}
+	if !strings.Contains(cmds, "Set-ItemProperty") || !strings.Contains(cmds, "Restart-WebAppPool") {
+		t.Error("blue-green deploy did not swap/restart")
+	}
+	if !strings.Contains(cmds, wantSlot) {
+		t.Errorf("inactive slot %q not referenced:\n%s", wantSlot, cmds)
+	}
+	// The swap must happen after the copy to the slot.
+	if copyIdx, swapIdx := runner.indexOf("deploy to slot"), runner.indexOf("physicalPath -Value $target"); copyIdx < 0 || swapIdx < 0 || swapIdx < copyIdx {
+		t.Errorf("slot copy (cmd %d) must precede the swap (cmd %d)", copyIdx, swapIdx)
+	}
+}
+
+func TestIISBlueGreenRollbackSwapsBack(t *testing.T) {
+	slotB := `C:\inetpub\wwwroot\portal.blue`
+	runner := &fakeRunner{outputs: func(cmd string) string {
+		if strings.Contains(cmd, ".active") {
+			return slotB + "\n"
+		}
+		return ""
+	}}
+	project := iisProject()
+	project.IISBlueGreen = true
+	tgt := iisTargetWith(runner)
+
+	artifact, err := tgt.Rollback(context.Background(), deployJob{project: project, rollback: true}, noopLogf)
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if artifact != `C:\inetpub\wwwroot\portal` {
+		t.Fatalf("artifact = %q, want slot A", artifact)
+	}
+	cmds := runner.joined()
+	if !strings.Contains(cmds, "physicalPath -Value $target") {
+		t.Error("rollback did not repoint the site")
+	}
+	if !strings.Contains(cmds, "Set-Content -LiteralPath $marker") {
+		t.Error("rollback did not update the active-slot marker")
+	}
+}
+
+func TestEnsureIISBlueGreenKeepsActivePath(t *testing.T) {
+	project := iisProject()
+	project.IISBlueGreen = true
+	script := ensureIISScript(project)
+	if !strings.Contains(script, "New-Website") {
+		t.Error("site creation missing")
+	}
+	if strings.Contains(script, "Set-ItemProperty \"IIS:\\Sites\\$site\" -Name physicalPath") {
+		t.Error("blue-green ensure must not repoint an existing site's physicalPath")
+	}
+}
+
 func TestIISRollbackRestoresLatestBackup(t *testing.T) {
 	runner := &fakeRunner{outputs: func(cmd string) string {
 		if strings.Contains(cmd, "Get-ChildItem -LiteralPath") {

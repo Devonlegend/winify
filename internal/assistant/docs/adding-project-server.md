@@ -80,6 +80,12 @@ Same form, but pick the IIS server and fill in `iis_physical_path` and
 the service and app pool, backs up the live directory, copies the new files,
 restarts the service and recycles the app pool, then smoke-tests the site.
 
+Enable **Blue-green deploy** (`iis_blue_green: true`) for near-zero downtime:
+the build is copied to the inactive slot (`<physical_path>.blue`), validated
+there, and the site is repointed without stopping the app pool. Rollback
+repoints the site to the other slot — no backup copy needed. A marker file
+(`<physical_path>.active`) records the live slot.
+
 ## Credentials
 
 Open the **Credentials** tab to add or delete secrets. Values are encrypted at

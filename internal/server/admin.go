@@ -424,6 +424,7 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 		IISAppPool:               strings.TrimSpace(r.FormValue("iis_app_pool")),
 		IISService:               strings.TrimSpace(r.FormValue("iis_service")),
 		IISBuildCommand:          strings.TrimSpace(r.FormValue("iis_build_command")),
+		IISBlueGreen:             r.FormValue("iis_blue_green") != "",
 		IISSourceSubdir:          strings.TrimSpace(r.FormValue("iis_source_subdir")),
 		ServiceName:              strings.TrimSpace(r.FormValue("service_name")),
 		ServiceExe:               strings.TrimSpace(r.FormValue("service_exe")),

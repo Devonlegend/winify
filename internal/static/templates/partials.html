@@ -56,6 +56,7 @@
     <label>Service (optional)<input name="iis_service" value="{{if .Form}}{{.Form.IISService}}{{end}}"></label>
     <label>Build command (optional)<input name="iis_build_command" value="{{if .Form}}{{.Form.IISBuildCommand}}{{end}}" placeholder="dotnet publish -c Release -o publish"></label>
     <label>Source subdir<input name="iis_source_subdir" value="{{if .Form}}{{.Form.IISSourceSubdir}}{{end}}" placeholder="publish"></label>
+    <label class="check"><input type="checkbox" name="iis_blue_green" {{if .Form}}{{if .Form.IISBlueGreen}}checked{{end}}{{end}}> Blue-green deploy (slot swap, near-zero downtime; rollback repoints the site)</label>
   </fieldset>
 
   <fieldset>

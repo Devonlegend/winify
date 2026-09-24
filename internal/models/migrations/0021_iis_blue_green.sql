@@ -1,0 +1,1 @@
+ALTER TABLE projects ADD COLUMN iis_blue_green INTEGER NOT NULL DEFAULT 0;

@@ -87,6 +87,10 @@ type Project struct {
 	IISService      string   `yaml:"iis_service" json:"iis_service,omitempty"`
 	IISBuildCommand string   `yaml:"iis_build_command" json:"iis_build_command,omitempty"`
 	IISSourceSubdir string   `yaml:"iis_source_subdir" json:"iis_source_subdir,omitempty"`
+	// IISBlueGreen deploys to the inactive slot and atomically repoints the
+	// site (physicalPath swap), so the live directory is never overwritten
+	// mid-request. Rollback repoints to the other slot.
+	IISBlueGreen bool `yaml:"iis_blue_green" json:"iis_blue_green,omitempty"`
 	// Service* fields drive the winsvc target (native Windows service via NSSM).
 	// ServiceName is the Windows service name; ServiceExe is the executable NSSM
 	// runs (absolute path on the target); ServiceWorkDir is the install

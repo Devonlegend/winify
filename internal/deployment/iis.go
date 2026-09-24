@@ -83,6 +83,10 @@ func (t *iisTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) 
 		return "", fmt.Errorf("validation failed: %w", err)
 	}
 
+	if p.IISBlueGreen {
+		return t.deployBlueGreen(ctx, p, repoDir, source, logf)
+	}
+
 	// 5. Stop the service and app pool.
 	if _, err := execCmd(ctx, t.runner, stopScript(p.IISAppPool, p.IISService), "stop service/app pool", logf); err != nil {
 		t.recoverLive(ctx, p, "", logf)
@@ -128,7 +132,8 @@ func (t *iisTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) 
 
 // Rollback restores the most recent timestamped backup and brings the app back
 // up. It discovers the backup on the target rather than relying on history, so
-// it works even if deploy history was pruned.
+// it works even if deploy history was pruned. Blue-green projects instead
+// repoint the site to the other slot.
 func (t *iisTarget) Rollback(ctx context.Context, job deployJob, logf loggerFunc) (string, error) {
 	if err := validateProjectID(job.project.ID); err != nil {
 		return "", err
@@ -139,6 +144,9 @@ func (t *iisTarget) Rollback(ctx context.Context, job deployJob, logf loggerFunc
 	p := job.project
 	if p.IISPhysicalPath == "" {
 		return "", fmt.Errorf("project %s has no iis_physical_path", p.ID)
+	}
+	if p.IISBlueGreen {
+		return t.rollbackBlueGreen(ctx, p, logf)
 	}
 
 	backupOut, err := execCmd(ctx, t.runner, latestBackupScript(t.cfg.Deploy.IISBackupDir, p.ID), "find latest backup", logf)
@@ -168,6 +176,129 @@ func (t *iisTarget) Rollback(ctx context.Context, job deployJob, logf loggerFunc
 		return "", err
 	}
 	return backup, nil
+}
+
+// ---- blue-green (slot swap) ----
+//
+// The live directory is never overwritten: the build is copied to the inactive
+// slot, validated there, and the site's physicalPath is repointed atomically
+// (the app pool restart recycles the worker without stopping it). A marker file
+// next to the physical path records which slot is live, so rollback just
+// repoints at the other slot — no file copies, no backups needed.
+
+func blueGreenMarkerPath(physical string) string { return physical + ".active" }
+func blueGreenSlotB(physical string) string      { return physical + ".blue" }
+
+func blueGreenInactive(physical, active string) string {
+	if active == "" || active == blueGreenSlotB(physical) {
+		return physical
+	}
+	return blueGreenSlotB(physical)
+}
+
+func (t *iisTarget) deployBlueGreen(ctx context.Context, p config.Project, repoDir, source string, logf loggerFunc) (string, error) {
+	marker := blueGreenMarkerPath(p.IISPhysicalPath)
+	activeOut, err := execCmd(ctx, t.runner, blueGreenActiveScript(p.IISPhysicalPath, marker), "read active slot", logf)
+	if err != nil {
+		return "", fmt.Errorf("read active slot: %w", err)
+	}
+	active := lastLine(activeOut)
+	target := blueGreenInactive(p.IISPhysicalPath, active)
+	logf("blue-green: active=%q target=%q", active, target)
+
+	srcDir := winPath(repoDir, source)
+	if _, err := execCmd(ctx, t.runner, copyScript(srcDir, target, "deploy to slot"), "copy build to slot", logf); err != nil {
+		return "", fmt.Errorf("copy to slot: %w", err)
+	}
+	if _, err := execCmd(ctx, t.runner, validateDirScript(target, p.IISAppPool, p.IISService), "validate slot", logf); err != nil {
+		return "", fmt.Errorf("slot validation failed: %w", err)
+	}
+	site := p.IISSite
+	if site == "" {
+		site = p.ID
+	}
+	if _, err := execCmd(ctx, t.runner, blueGreenSwapScript(site, p.IISAppPool, p.IISService, target, marker), "swap slot", logf); err != nil {
+		t.swapBack(ctx, site, p, active, marker, logf)
+		return "", fmt.Errorf("swap slot: %w", err)
+	}
+	if err := t.smokeTest(ctx, p, logf); err != nil {
+		t.swapBack(ctx, site, p, active, marker, logf)
+		return "", err
+	}
+	return target, nil
+}
+
+func (t *iisTarget) rollbackBlueGreen(ctx context.Context, p config.Project, logf loggerFunc) (string, error) {
+	marker := blueGreenMarkerPath(p.IISPhysicalPath)
+	activeOut, err := execCmd(ctx, t.runner, blueGreenActiveScript(p.IISPhysicalPath, marker), "read active slot", logf)
+	if err != nil {
+		return "", fmt.Errorf("read active slot: %w", err)
+	}
+	active := lastLine(activeOut)
+	if active == "" {
+		return "", fmt.Errorf("no active slot recorded for %s; nothing to roll back to", p.ID)
+	}
+	other := blueGreenInactive(p.IISPhysicalPath, active)
+	site := p.IISSite
+	if site == "" {
+		site = p.ID
+	}
+	logf("blue-green rollback: %s -> %s", active, other)
+	if _, err := execCmd(ctx, t.runner, blueGreenSwapScript(site, p.IISAppPool, p.IISService, other, marker), "swap back", logf); err != nil {
+		return "", fmt.Errorf("swap back: %w", err)
+	}
+	if err := t.smokeTest(ctx, p, logf); err != nil {
+		t.swapBack(ctx, site, p, active, marker, logf)
+		return "", err
+	}
+	return other, nil
+}
+
+// swapBack restores the previously active slot after a failed swap/smoke test.
+func (t *iisTarget) swapBack(ctx context.Context, site string, p config.Project, active, marker string, logf loggerFunc) {
+	if active == "" {
+		return
+	}
+	recCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancel()
+	if _, err := execCmd(recCtx, t.runner, blueGreenSwapScript(site, p.IISAppPool, p.IISService, active, marker), "restore previous slot", logf); err != nil {
+		logf("recovery: restore previous slot failed: %v", err)
+	}
+}
+
+func blueGreenActiveScript(physical, marker string) string {
+	var b strings.Builder
+	b.WriteString("$ErrorActionPreference='Stop'\n")
+	fmt.Fprintf(&b, "$marker = %s\n", psQuote(marker))
+	fmt.Fprintf(&b, "$physical = %s\n", psQuote(physical))
+	b.WriteString("if (Test-Path -LiteralPath $marker) {\n")
+	b.WriteString("  $active = (Get-Content -Raw -LiteralPath $marker).Trim()\n")
+	b.WriteString("  if ($active -and (Test-Path -LiteralPath $active -PathType Container)) { Write-Output $active; exit 0 }\n")
+	b.WriteString("}\n")
+	b.WriteString("if (Test-Path -LiteralPath $physical -PathType Container) { Write-Output $physical }\n")
+	return b.String()
+}
+
+func blueGreenSwapScript(site, appPool, service, target, marker string) string {
+	var b strings.Builder
+	b.WriteString("$ErrorActionPreference='Stop'\n")
+	b.WriteString("Import-Module WebAdministration\n")
+	fmt.Fprintf(&b, "$site = %s\n", psQuote(site))
+	fmt.Fprintf(&b, "$pool = %s\n", psQuote(appPool))
+	fmt.Fprintf(&b, "$service = %s\n", psQuote(service))
+	fmt.Fprintf(&b, "$target = %s\n", psQuote(target))
+	fmt.Fprintf(&b, "$marker = %s\n", psQuote(marker))
+	b.WriteString("if (-not (Test-Path -LiteralPath $target -PathType Container)) { throw \"slot not found: $target\" }\n")
+	b.WriteString("if (-not (Get-ChildItem -LiteralPath $target -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1)) { throw \"slot is empty: $target\" }\n")
+	b.WriteString("Set-ItemProperty \"IIS:\\Sites\\$site\" -Name physicalPath -Value $target\n")
+	fmt.Fprintf(&b, "$poolPath = 'IIS:\\AppPools\\' + $pool\n")
+	b.WriteString("if (Test-Path $poolPath) {\n")
+	b.WriteString("  if ((Get-WebAppPoolState -Name $pool).Value -eq 'Stopped') { Start-WebAppPool -Name $pool }\n")
+	b.WriteString("  Restart-WebAppPool -Name $pool\n}\n")
+	b.WriteString("if ($service -and (Get-Service -Name $service -ErrorAction SilentlyContinue)) { Restart-Service -Name $service -Force }\n")
+	b.WriteString("Set-Content -LiteralPath $marker -Value $target -Encoding ASCII -NoNewline\n")
+	b.WriteString("Write-Output $target\n")
+	return b.String()
 }
 
 func (t *iisTarget) smokeTest(ctx context.Context, p config.Project, logf loggerFunc) error {
@@ -276,7 +407,9 @@ func ensureIISScript(p config.Project) string {
 	b.WriteString("if (-not (Get-Website -Name $site -ErrorAction SilentlyContinue)) {\n")
 	fmt.Fprintf(&b, "  New-Website -Name $site -PhysicalPath $path -Port %d -ApplicationPool $pool | Out-Null\n", port)
 	b.WriteString("} else {\n")
-	b.WriteString("  Set-ItemProperty \"IIS:\\Sites\\$site\" -Name physicalPath -Value $path\n")
+	if !p.IISBlueGreen {
+		b.WriteString("  Set-ItemProperty \"IIS:\\Sites\\$site\" -Name physicalPath -Value $path\n")
+	}
 	b.WriteString("  Set-ItemProperty \"IIS:\\Sites\\$site\" -Name applicationPool -Value $pool\n")
 	b.WriteString("}\n")
 	return b.String()
@@ -288,15 +421,28 @@ func validateScript(repoDir, source, appPool, service string) string {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'\n")
 	fmt.Fprintf(&b, "$src = Join-Path %s %s\n", psQuote(repoDir), psQuote(source))
+	return validateBody(&b, appPool, service)
+}
+
+// validateDirScript validates an already-materialized directory (a blue-green
+// slot) with the same checks as the source tree.
+func validateDirScript(dir, appPool, service string) string {
+	var b strings.Builder
+	b.WriteString("$ErrorActionPreference='Stop'\n")
+	fmt.Fprintf(&b, "$src = %s\n", psQuote(dir))
+	return validateBody(&b, appPool, service)
+}
+
+func validateBody(b *strings.Builder, appPool, service string) string {
 	b.WriteString("if (-not (Test-Path $src)) { throw \"source directory not found: $src\" }\n")
 	b.WriteString("$wc = Join-Path $src 'web.config'\n")
 	b.WriteString("if (Test-Path $wc) { $null = [xml](Get-Content -Raw -LiteralPath $wc); Write-Output 'web.config is valid XML' }\n")
 	b.WriteString("else { Write-Output 'no web.config present; skipping XML validation' }\n")
 	b.WriteString("Import-Module WebAdministration\n")
-	fmt.Fprintf(&b, "$poolPath = 'IIS:\\AppPools\\' + %s\n", psQuote(appPool))
-	fmt.Fprintf(&b, "if (-not (Test-Path $poolPath)) { throw \"IIS app pool not found: %s\" }\n", appPool)
+	fmt.Fprintf(b, "$poolPath = 'IIS:\\AppPools\\' + %s\n", psQuote(appPool))
+	fmt.Fprintf(b, "if (-not (Test-Path $poolPath)) { throw \"IIS app pool not found: %s\" }\n", appPool)
 	if service != "" {
-		fmt.Fprintf(&b, "if (-not (Get-Service -Name %s -ErrorAction SilentlyContinue)) { throw \"service not found: %s\" }\n", psQuote(service), service)
+		fmt.Fprintf(b, "if (-not (Get-Service -Name %s -ErrorAction SilentlyContinue)) { throw \"service not found: %s\" }\n", psQuote(service), service)
 	}
 	return b.String()
 }

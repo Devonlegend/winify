@@ -121,6 +121,7 @@
         <label>Service (optional)<input name="iis_service"></label>
         <label>Build command (optional)<input name="iis_build_command" placeholder="dotnet publish -c Release -o publish"></label>
         <label>Source subdir<input name="iis_source_subdir" placeholder="publish"></label>
+        <label class="check"><input type="checkbox" name="iis_blue_green" checked> Blue-green deploy (slot swap, near-zero downtime)</label>
       </div>
       <div class="admin-form" data-group="winsvc" hidden>
         <label>Service name<input name="service_name" placeholder="MyApp"></label>
