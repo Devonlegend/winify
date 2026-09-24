@@ -39,6 +39,7 @@ import (
 	"github.com/Devonlegend/winify/internal/githubapp"
 	"github.com/Devonlegend/winify/internal/models"
 	"github.com/Devonlegend/winify/internal/monitoring"
+	"github.com/Devonlegend/winify/internal/notify"
 	"github.com/Devonlegend/winify/internal/proxy"
 	"github.com/Devonlegend/winify/internal/server"
 	"github.com/Devonlegend/winify/internal/service"
@@ -207,7 +208,7 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 	}
 
 	targetFactory := deployment.NewTargetFactory(cfg, sshDial, auditRecorder)
-	deployer := deployment.NewDeployer(cfg, store, credStore, registrar, targetFactory)
+	deployer := deployment.NewDeployer(cfg, store, credStore, registrar, buildNotifier(cfg, credStore), targetFactory)
 	defer deployer.Stop()
 
 	// Metrics reuse the same SSH/WinRM connection code as deploys (no agent).
@@ -772,6 +773,32 @@ func runRemoteBootstrap(cfg config.Config, store *models.Store, endpoint, user, 
 		log.Fatalf("remote bootstrap failed: %v", err)
 	}
 	log.Printf("remote bootstrap complete: %s (%s)", id, endpoint)
+}
+
+// buildNotifier assembles the outbound notification sinks: generic webhook,
+// Slack, and GitHub commit statuses (only when the App is configured).
+func buildNotifier(cfg config.Config, credStore *auth.CredentialStore) notify.Notifier {
+	var sinks notify.Multi
+	if cfg.Notify.WebhookURL != "" {
+		sinks = append(sinks, &notify.WebhookNotifier{URL: cfg.Notify.WebhookURL})
+	}
+	if cfg.Notify.SlackURL != "" {
+		sinks = append(sinks, &notify.SlackNotifier{URL: cfg.Notify.SlackURL})
+	}
+	if cfg.GitHub.Enabled() {
+		sinks = append(sinks, &notify.GitHubNotifier{
+			AppID:          cfg.GitHub.AppID,
+			InstallationID: cfg.GitHub.InstallationID,
+			APIURL:         cfg.GitHub.APIURL,
+			PrivateKey: func(ctx context.Context) (string, error) {
+				return deployment.ResolveRef(ctx, credStore, cfg.GitHub.PrivateKeyRef)
+			},
+		})
+	}
+	if len(sinks) == 0 {
+		return nil
+	}
+	return sinks
 }
 
 // onboardWindowsServer returns the UI onboarding implementation: it validates

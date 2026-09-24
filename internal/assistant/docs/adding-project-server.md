@@ -118,6 +118,19 @@ secret, stores it encrypted and creates (or updates) the push hook. The manual
 flow (`webhook_secret_ref` + registering the URL yourself) still works for
 GitLab or unmanaged repos.
 
+### Deployment notifications and commit statuses
+
+Configure outbound notifications in `config.yaml`:
+
+    notifications:
+      webhook_url: "https://hooks.example.com/deploys"       # DeployEvent JSON
+      slack_webhook_url: "https://hooks.slack.com/..."       # Slack text
+
+Every deployment posts `pending`, `success` or `failed`. Notifications never
+block or fail the deployment. For projects connected via the GitHub App
+(`github_repo` set), winify also posts commit statuses (`winify/deploy`), so
+GitHub shows the deploy check on commits and PRs.
+
 ## Verifying a deployment
 
 Watch the **Deployment** tab: each attempt shows its status, commit, artifact

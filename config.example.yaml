@@ -106,6 +106,15 @@ github:
   private_key_ref: "vault:github-app-key"
   # api_url: "https://ghe.example.com/api/v3"  # GitHub Enterprise only
 
+# Outbound deployment notifications (all optional, all non-fatal).
+notifications:
+  # Receives the DeployEvent JSON on pending/success/failed.
+  webhook_url: ""
+  # Slack incoming webhook.
+  slack_webhook_url: ""
+  # GitHub commit statuses are posted automatically for projects linked via
+  # github_repo once the GitHub App above is configured.
+
 monitoring:
   # Poll each registered server over its existing SSH/WinRM connection.
   enabled: true

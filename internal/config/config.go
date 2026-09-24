@@ -57,6 +57,15 @@ type Config struct {
 	Monitoring  MonitoringConfig  `yaml:"monitoring"`
 	Assistant   AssistantConfig   `yaml:"assistant"`
 	GitHub      GitHubConfig      `yaml:"github"`
+	Notify      NotifyConfig      `yaml:"notifications"`
+}
+
+// NotifyConfig configures outbound deployment notifications.
+type NotifyConfig struct {
+	// WebhookURL receives the DeployEvent JSON on every lifecycle transition.
+	WebhookURL string `yaml:"webhook_url"`
+	// SlackURL is a Slack incoming webhook URL.
+	SlackURL string `yaml:"slack_webhook_url"`
 }
 
 // GitHubConfig configures the GitHub App used for automatic webhook
@@ -421,6 +430,15 @@ func (cfg Config) Validate() error {
 			return errors.New("github.api_url must be an http or https URL")
 		}
 	}
+	for name, v := range map[string]string{"notifications.webhook_url": cfg.Notify.WebhookURL, "notifications.slack_webhook_url": cfg.Notify.SlackURL} {
+		if v == "" {
+			continue
+		}
+		u, err := url.Parse(v)
+		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+			return fmt.Errorf("%s must be an http or https URL", name)
+		}
+	}
 	return nil
 }
 
@@ -691,6 +709,12 @@ func (cfg *Config) applyEnv() error {
 	}
 	if v := os.Getenv("CC_GITHUB_API_URL"); v != "" {
 		cfg.GitHub.APIURL = v
+	}
+	if v := os.Getenv("CC_NOTIFY_WEBHOOK_URL"); v != "" {
+		cfg.Notify.WebhookURL = v
+	}
+	if v := os.Getenv("CC_NOTIFY_SLACK_WEBHOOK_URL"); v != "" {
+		cfg.Notify.SlackURL = v
 	}
 	return nil
 }

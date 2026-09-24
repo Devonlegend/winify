@@ -12,6 +12,7 @@ import (
 
 	"github.com/Devonlegend/winify/internal/config"
 	"github.com/Devonlegend/winify/internal/models"
+	"github.com/Devonlegend/winify/internal/notify"
 	"github.com/Devonlegend/winify/internal/proxy"
 )
 
@@ -25,6 +26,7 @@ type Deployer struct {
 	store     *models.Store
 	secrets   SecretResolver
 	proxy     proxy.Registrar
+	notifier  notify.Notifier
 	newTarget TargetFactory
 	timeout   time.Duration
 	inFlight  sync.Map // projectID -> struct{}
@@ -36,14 +38,14 @@ type Deployer struct {
 }
 
 // NewDeployer wires the pipeline dependencies.
-func NewDeployer(cfg config.Config, store *models.Store, secrets SecretResolver, reg proxy.Registrar, newTarget TargetFactory) *Deployer {
+func NewDeployer(cfg config.Config, store *models.Store, secrets SecretResolver, reg proxy.Registrar, notifier notify.Notifier, newTarget TargetFactory) *Deployer {
 	timeout := time.Duration(cfg.Deploy.TimeoutMinutes) * time.Minute
 	if timeout <= 0 {
 		timeout = 30 * time.Minute
 	}
 	lifecycleCtx, cancel := context.WithCancel(context.Background())
 	return &Deployer{
-		cfg: cfg, store: store, secrets: secrets, proxy: reg, newTarget: newTarget,
+		cfg: cfg, store: store, secrets: secrets, proxy: reg, notifier: notifier, newTarget: newTarget,
 		timeout: timeout, lifecycleCtx: lifecycleCtx, cancel: cancel,
 	}
 }
@@ -213,12 +215,14 @@ func (d *Deployer) run(ctx context.Context, job deployJob) {
 			log.Printf("deploy %d: finish: %v", job.id, ferr)
 		}
 		log.Printf("deploy %d (%s) failed: %s", job.id, job.project.ID, safeErr)
+		d.notify(job, "failed", safeErr)
 	}
 
 	if err := d.store.SetDeploymentStatus(dbCtx, job.id, models.DeployRunning, job.artifact); err != nil {
 		log.Printf("deploy %d: set running: %v", job.id, err)
 		return
 	}
+	d.notify(job, "pending", "")
 	verb := "deploy"
 	if job.rollback {
 		verb = "rollback"
@@ -277,6 +281,53 @@ func (d *Deployer) run(ctx context.Context, job deployJob) {
 		log.Printf("deploy %d: finish: %v", job.id, err)
 	}
 	log.Printf("%s %d (%s) succeeded", verb, job.id, job.project.ID)
+	d.notify(job, "success", "")
+}
+
+// notify fires the deployment event asynchronously. Notifications are
+// observability only: they never block or fail the deployment.
+func (d *Deployer) notify(job deployJob, status, errText string) {
+	if d.notifier == nil {
+		return
+	}
+	ev := notify.DeployEvent{
+		DeploymentID: job.id,
+		ProjectID:    job.project.ID,
+		ProjectName:  job.project.Name,
+		ServerID:     job.server.ID,
+		Status:       status,
+		CommitSHA:    eventCommit(job),
+		Ref:          job.ref,
+		Error:        errText,
+		GitHubRepo:   job.project.GitHubRepo,
+		At:           time.Now(),
+	}
+	if base := strings.TrimRight(d.cfg.Server.PublicURL, "/"); base != "" {
+		ev.URL = base + "/projects/" + job.project.ID
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := d.notifier.NotifyDeploy(ctx, ev); err != nil {
+			log.Printf("notify deploy %d (%s): %v", job.id, status, err)
+		}
+	}()
+}
+
+// eventCommit picks the best full commit SHA for external status reporting:
+// the webhook's commit when present, then the recorded artifact (compose stores
+// the resolved SHA; dockerfile image tags embed it after the colon).
+func eventCommit(job deployJob) string {
+	if isHexRevision(job.commit) {
+		return job.commit
+	}
+	if isHexRevision(job.artifact) {
+		return job.artifact
+	}
+	if i := strings.LastIndex(job.artifact, ":"); i >= 0 && isHexRevision(job.artifact[i+1:]) {
+		return job.artifact[i+1:]
+	}
+	return ""
 }
 
 // resolveSharedVars expands shared-variable references in the project's runtime

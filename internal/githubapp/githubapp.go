@@ -180,6 +180,23 @@ func (c *Client) EnsurePushHook(ctx context.Context, token, ownerRepo, url, secr
 	return created, err
 }
 
+// CommitStatus is the payload for the commit statuses API.
+type CommitStatus struct {
+	State       string `json:"state"` // error | failure | pending | success
+	Context     string `json:"context"`
+	Description string `json:"description,omitempty"`
+	TargetURL   string `json:"target_url,omitempty"`
+}
+
+// SetCommitStatus posts a commit status (the check mark on commits/PRs).
+func (c *Client) SetCommitStatus(ctx context.Context, token, ownerRepo, sha string, st CommitStatus) error {
+	owner, repo, ok := strings.Cut(strings.Trim(ownerRepo, "/"), "/")
+	if !ok || owner == "" || repo == "" {
+		return fmt.Errorf("repository must be owner/repo, got %q", ownerRepo)
+	}
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/statuses/%s", owner, repo, sha), token, st, nil)
+}
+
 // Ping triggers the test delivery for a hook, surfacing connectivity issues.
 func (c *Client) PingHook(ctx context.Context, token, ownerRepo string, hookID int64) error {
 	owner, repo, _ := strings.Cut(ownerRepo, "/")

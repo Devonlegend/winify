@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Devonlegend/winify/internal/config"
 	"github.com/Devonlegend/winify/internal/models"
+	"github.com/Devonlegend/winify/internal/notify"
 )
 
 func TestWarnIfDomainNotPointedHere(t *testing.T) {
@@ -113,7 +115,7 @@ func newTestDeployer(t *testing.T, target Target) (*Deployer, *models.Store, *fa
 	cfg.Proxy.Enabled = true
 	reg := &fakeRegistrar{}
 	factory := func(context.Context, deployJob, SecretResolver) (Target, error) { return target, nil }
-	return NewDeployer(cfg, store, fakeSecrets{value: "x"}, reg, factory), store, reg
+	return NewDeployer(cfg, store, fakeSecrets{value: "x"}, reg, nil, factory), store, reg
 }
 
 func dockerProject() config.Project {
@@ -269,6 +271,47 @@ func TestRollbackIISNeedsNoHistory(t *testing.T) {
 	}
 	if target.lastJob.artifact != "" {
 		t.Fatalf("iis rollback should not pass a prior artifact, got %q", target.lastJob.artifact)
+	}
+}
+
+type recordingNotifier struct {
+	mu     sync.Mutex
+	events []notify.DeployEvent
+}
+
+func (n *recordingNotifier) NotifyDeploy(_ context.Context, ev notify.DeployEvent) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.events = append(n.events, ev)
+	return nil
+}
+
+func TestDeployerNotifiesLifecycle(t *testing.T) {
+	target := &fakeTarget{deployArtifact: "cc/proj-001:abc1234"}
+	d, store, _ := newTestDeployer(t, target)
+	n := &recordingNotifier{}
+	d.notifier = n
+
+	id, err := d.Trigger(context.Background(), dockerProject(), dockerServer(), "webhook", "abc1234", "refs/heads/main")
+	if err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+	waitTerminal(t, store, id)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		n.mu.Lock()
+		statuses := []string{}
+		for _, ev := range n.events {
+			statuses = append(statuses, ev.Status)
+		}
+		n.mu.Unlock()
+		if len(statuses) >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("notification statuses = %v, want pending+success", statuses)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
