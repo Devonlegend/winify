@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Devonlegend/winify/internal/config"
@@ -19,14 +20,40 @@ var ErrNotFound = errors.New("not found")
 // already had a user (for example, registering an admin when one exists).
 var ErrAlreadyInitialized = errors.New("already initialized")
 
+const (
+	maxDeploymentLogBytes = 4 << 20
+	maxDeploymentErrorLen = 16 << 10
+	maxAuditTextLen       = 64 << 10
+)
+
+func capStoredText(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	return value[len(value)-limit:]
+}
+
 // Store is the typed data-access layer over *sql.DB. Handlers and services use
 // it instead of writing SQL inline.
 type Store struct {
-	db *sql.DB
+	db    *sql.DB
+	codec SecretCodec
+}
+
+// SecretCodec encrypts sensitive configuration fields at rest. It is injected
+// after the application master key is loaded so the models package remains
+// independent of the auth package.
+type SecretCodec interface {
+	Encrypt(name, value string) (string, error)
+	Decrypt(name, value string) (string, error)
 }
 
 // NewStore wraps an open database handle.
 func NewStore(db *sql.DB) *Store { return &Store{db: db} }
+
+// SetSecretCodec enables encryption for environment and shared-variable values.
+// Call it during startup before serving requests.
+func (s *Store) SetSecretCodec(codec SecretCodec) { s.codec = codec }
 
 // DB exposes the raw handle for migrations and diagnostics.
 func (s *Store) DB() *sql.DB { return s.db }
@@ -194,6 +221,9 @@ const serverColumns = `id, name, type, host, winrm_endpoint, winrm_user, winrm_t
 
 // UpsertServer syncs one entry from servers.yaml into the database.
 func (s *Store) UpsertServer(ctx context.Context, srv config.Server) error {
+	if err := config.ValidateResourceID("server id", srv.ID); err != nil {
+		return err
+	}
 	if srv.SSHPort == 0 {
 		srv.SSHPort = 22
 	}
@@ -301,6 +331,9 @@ func boolToInt(b bool) int {
 
 // UpsertProject syncs one entry from projects.yaml into the database.
 func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
+	if err := config.ValidateResourceID("project id", p.ID); err != nil {
+		return err
+	}
 	if p.Branch == "" {
 		p.Branch = "main"
 	}
@@ -316,6 +349,12 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 	if p.Environment == "" {
 		p.Environment = "production"
 	}
+	if err := config.ValidateEnvValues("env", p.Env); err != nil {
+		return err
+	}
+	if err := config.ValidateEnvValues("build_env", p.BuildEnv); err != nil {
+		return err
+	}
 	envJSON, err := json.Marshal(p.Env)
 	if err != nil {
 		return fmt.Errorf("marshal project env: %w", err)
@@ -323,6 +362,14 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 	buildEnvJSON, err := json.Marshal(p.BuildEnv)
 	if err != nil {
 		return fmt.Errorf("marshal project build env: %w", err)
+	}
+	envStored, err := encodeSecret(s.codec, "project:"+p.ID+":env", string(envJSON))
+	if err != nil {
+		return err
+	}
+	buildEnvStored, err := encodeSecret(s.codec, "project:"+p.ID+":build_env", string(buildEnvJSON))
+	if err != nil {
+		return err
 	}
 	mappingsJSON, err := json.Marshal(p.PortsMappings)
 	if err != nil {
@@ -378,10 +425,10 @@ func (s *Store) UpsertProject(ctx context.Context, p config.Project) error {
 		p.IISBuildCommand, p.IISSourceSubdir,
 		p.ServiceName, p.ServiceExe, p.ServiceArgs, p.ServiceWorkDir, p.ServiceBuildCommand,
 		p.ServiceSourceSubdir, p.ServiceLogDir, p.ServiceAccount, p.CaddyMode,
-		string(mappingsJSON), string(buildEnvJSON),
+		string(mappingsJSON), buildEnvStored,
 		p.Branch, p.Domain, p.Port, p.HealthPath,
 		p.HealthIntervalSeconds, p.HealthTimeoutSeconds, p.HealthRetries, p.HealthStartPeriodSeconds,
-		p.WebhookSecretRef, string(envJSON), p.ProjectGroup, p.Environment, boolToInt(p.DisableHealthCheck), p.Runtime)
+		p.WebhookSecretRef, envStored, p.ProjectGroup, p.Environment, boolToInt(p.DisableHealthCheck), p.Runtime)
 	if err != nil {
 		return fmt.Errorf("upsert project %q: %w", p.ID, err)
 	}
@@ -407,7 +454,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]config.Project, error) {
 
 	var out []config.Project
 	for rows.Next() {
-		p, err := scanProject(rows.Scan)
+		p, err := s.scanProject(rows.Scan)
 		if err != nil {
 			return nil, err
 		}
@@ -419,7 +466,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]config.Project, error) {
 // GetProject loads one project by id.
 func (s *Store) GetProject(ctx context.Context, id string) (config.Project, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT `+projectColumns+` FROM projects WHERE id = ?`, id)
-	p, err := scanProject(row.Scan)
+	p, err := s.scanProject(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return config.Project{}, ErrNotFound
 	}
@@ -431,7 +478,7 @@ func (s *Store) GetProject(ctx context.Context, id string) (config.Project, erro
 
 // scanProject reads the common project column list. It takes a Scan func so it
 // works for both *sql.Row and *sql.Rows.
-func scanProject(scan func(dest ...any) error) (config.Project, error) {
+func (s *Store) scanProject(scan func(dest ...any) error) (config.Project, error) {
 	var (
 		p            config.Project
 		envJSON      string
@@ -452,6 +499,14 @@ func scanProject(scan func(dest ...any) error) (config.Project, error) {
 		return config.Project{}, err
 	}
 	p.DisableHealthCheck = disabled != 0
+	envJSON, err := decodeSecret(s.codec, "project:"+p.ID+":env", envJSON)
+	if err != nil {
+		return config.Project{}, err
+	}
+	buildEnvJSON, err = decodeSecret(s.codec, "project:"+p.ID+":build_env", buildEnvJSON)
+	if err != nil {
+		return config.Project{}, err
+	}
 	if err := decodeJSONMap(envJSON, &p.Env); err != nil {
 		return config.Project{}, fmt.Errorf("decode project %q env: %w", p.ID, err)
 	}
@@ -464,6 +519,33 @@ func scanProject(scan func(dest ...any) error) (config.Project, error) {
 		}
 	}
 	return p, nil
+}
+
+const encryptedSecretPrefix = "enc:v1:"
+
+func encodeSecret(codec SecretCodec, name, value string) (string, error) {
+	if codec == nil || value == "" || value == "null" {
+		return value, nil
+	}
+	encoded, err := codec.Encrypt(name, value)
+	if err != nil {
+		return "", fmt.Errorf("encrypt %s: %w", name, err)
+	}
+	return encryptedSecretPrefix + encoded, nil
+}
+
+func decodeSecret(codec SecretCodec, name, value string) (string, error) {
+	if !strings.HasPrefix(value, encryptedSecretPrefix) {
+		return value, nil
+	}
+	if codec == nil {
+		return "", fmt.Errorf("encrypted %s requires the application master key", name)
+	}
+	decoded, err := codec.Decrypt(name, strings.TrimPrefix(value, encryptedSecretPrefix))
+	if err != nil {
+		return "", fmt.Errorf("decrypt %s: %w", name, err)
+	}
+	return decoded, nil
 }
 
 // decodeJSONMap unmarshals a JSON object string into a map, treating empty and
@@ -485,6 +567,10 @@ type SharedVariable struct {
 	Value   string `json:"value"`
 }
 
+func sharedSecretName(v SharedVariable) string {
+	return "shared:" + v.Scope + ":" + v.ScopeID + ":" + v.Key
+}
+
 // ListSharedVariables returns all shared variables ordered by scope and key.
 func (s *Store) ListSharedVariables(ctx context.Context) ([]SharedVariable, error) {
 	rows, err := s.db.QueryContext(ctx,
@@ -500,6 +586,11 @@ func (s *Store) ListSharedVariables(ctx context.Context) ([]SharedVariable, erro
 		if err := rows.Scan(&v.Scope, &v.ScopeID, &v.Key, &v.Value); err != nil {
 			return nil, fmt.Errorf("scan shared variable: %w", err)
 		}
+		value, err := decodeSecret(s.codec, sharedSecretName(v), v.Value)
+		if err != nil {
+			return nil, err
+		}
+		v.Value = value
 		out = append(out, v)
 	}
 	return out, rows.Err()
@@ -507,12 +598,28 @@ func (s *Store) ListSharedVariables(ctx context.Context) ([]SharedVariable, erro
 
 // UpsertSharedVariable stores one shared variable.
 func (s *Store) UpsertSharedVariable(ctx context.Context, v SharedVariable) error {
-	_, err := s.db.ExecContext(ctx, `
+	if v.Scope != "project" && v.Scope != "environment" {
+		return fmt.Errorf("shared variable scope must be project or environment")
+	}
+	if strings.TrimSpace(v.ScopeID) == "" {
+		return errors.New("shared variable scope_id is required")
+	}
+	if err := config.ValidateEnvKey(v.Key); err != nil {
+		return err
+	}
+	if strings.ContainsAny(v.Value, "\x00\r\n") {
+		return fmt.Errorf("shared variable %q contains a newline or NUL", v.Key)
+	}
+	storedValue, err := encodeSecret(s.codec, sharedSecretName(v), v.Value)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO shared_variables (scope, scope_id, key, value) VALUES (?, ?, ?, ?)
 		ON CONFLICT(scope, scope_id, key) DO UPDATE SET
 			value = excluded.value,
 			updated_at = CURRENT_TIMESTAMP`,
-		v.Scope, v.ScopeID, v.Key, v.Value)
+		v.Scope, v.ScopeID, v.Key, storedValue)
 	if err != nil {
 		return fmt.Errorf("upsert shared variable: %w", err)
 	}
@@ -548,7 +655,17 @@ func (s *Store) SharedVariablesFor(ctx context.Context, projectGroup, environmen
 		if err := rows.Scan(&scope, &key, &value); err != nil {
 			return nil, fmt.Errorf("scan shared variable: %w", err)
 		}
-		out[scope+"."+key] = value
+		v := SharedVariable{Scope: scope, ScopeID: "", Key: key}
+		if scope == "project" {
+			v.ScopeID = projectGroup
+		} else {
+			v.ScopeID = projectGroup + "/" + environment
+		}
+		decoded, decodeErr := decodeSecret(s.codec, sharedSecretName(v), value)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		out[scope+"."+key] = decoded
 	}
 	return out, rows.Err()
 }
@@ -659,11 +776,16 @@ func (s *Store) SetDeploymentStatus(ctx context.Context, id int64, status, artif
 	return nil
 }
 
-// AppendDeploymentLog appends a chunk to the deployment log. SQLite string
-// concatenation keeps each write small instead of rewriting the whole log.
+// AppendDeploymentLog appends a bounded chunk to the deployment log. Keeping a
+// rolling tail preserves the final error/diagnostic while preventing a noisy
+// remote command from growing the SQLite row without limit.
 func (s *Store) AppendDeploymentLog(ctx context.Context, id int64, chunk string) error {
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE deployments SET log = log || ? WHERE id = ?`, chunk, id); err != nil {
+	var current string
+	if err := s.db.QueryRowContext(ctx, `SELECT log FROM deployments WHERE id = ?`, id).Scan(&current); err != nil {
+		return fmt.Errorf("read deployment log: %w", err)
+	}
+	combined := capStoredText(current+chunk, maxDeploymentLogBytes)
+	if _, err := s.db.ExecContext(ctx, `UPDATE deployments SET log = ? WHERE id = ?`, combined, id); err != nil {
 		return fmt.Errorf("append deployment log: %w", err)
 	}
 	return nil
@@ -671,6 +793,7 @@ func (s *Store) AppendDeploymentLog(ctx context.Context, id int64, chunk string)
 
 // FinishDeployment marks the attempt terminal and stamps the finish time.
 func (s *Store) FinishDeployment(ctx context.Context, id int64, status, errMsg string, finished time.Time) error {
+	errMsg = capStoredText(errMsg, maxDeploymentErrorLen)
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE deployments SET status = ?, error = ?, finished_at = ? WHERE id = ?`,
 		status, errMsg, finished.Unix(), id); err != nil {
@@ -887,6 +1010,104 @@ func percent(used, total uint64) float64 {
 	return float64(used) / float64(total) * 100
 }
 
+// RecordWebhookDelivery atomically records a provider delivery. The boolean is
+// false when the same provider/project/delivery tuple was already accepted,
+// allowing webhook handlers to reject replays without holding process memory.
+func (s *Store) RecordWebhookDelivery(ctx context.Context, provider, projectID, deliveryID, commitSHA string) (bool, error) {
+	now := time.Now()
+	// Bound replay-protection storage; an old provider retry is treated as a
+	// new delivery after this retention window.
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM webhook_deliveries WHERE received_at < ?`, now.Add(-30*24*time.Hour).Unix())
+	res, err := s.db.ExecContext(ctx, `INSERT INTO webhook_deliveries
+		(provider, project_id, delivery_id, commit_sha, received_at) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(provider, project_id, delivery_id) DO UPDATE SET
+			commit_sha = excluded.commit_sha, received_at = excluded.received_at
+		WHERE webhook_deliveries.received_at < ?`,
+		provider, projectID, deliveryID, commitSHA, now.Unix(), now.Add(-10*time.Minute).Unix())
+	if err != nil {
+		return false, fmt.Errorf("record webhook delivery: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("webhook delivery result: %w", err)
+	}
+	return n == 1, nil
+}
+
+// PruneDeployments removes old terminal deployment history and its embedded log.
+func (s *Store) PruneDeployments(ctx context.Context, before time.Time) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM deployments WHERE started_at < ? AND status IN (?, ?)`, before.Unix(), DeploySuccess, DeployFailed); err != nil {
+		return fmt.Errorf("prune deployments: %w", err)
+	}
+	return nil
+}
+
+// PruneRemoteCommands bounds the audit table independently of deployment history.
+func (s *Store) PruneRemoteCommands(ctx context.Context, before time.Time) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM remote_commands WHERE executed_at < ?`, before.Unix()); err != nil {
+		return fmt.Errorf("prune remote commands: %w", err)
+	}
+	return nil
+}
+
+// DeleteWebhookDelivery releases a delivery reservation when the deployment
+// could not be started, allowing the provider's retry to be processed.
+func (s *Store) DeleteWebhookDelivery(ctx context.Context, provider, projectID, deliveryID string) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM webhook_deliveries
+		WHERE provider = ? AND project_id = ? AND delivery_id = ?`, provider, projectID, deliveryID); err != nil {
+		return fmt.Errorf("delete webhook delivery: %w", err)
+	}
+	return nil
+}
+
+// RetireProxyDomain records a domain that must be removed only after the next
+// successful deployment. Keeping the old route until then avoids an outage
+// while a project is being reconfigured.
+func (s *Store) RetireProxyDomain(ctx context.Context, projectID, domain string) error {
+	if projectID == "" || domain == "" {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO retired_proxy_domains
+		(project_id, domain, retired_at) VALUES (?, ?, ?)`, projectID, domain, time.Now().Unix()); err != nil {
+		return fmt.Errorf("retire proxy domain: %w", err)
+	}
+	return nil
+}
+
+// ListRetiredProxyDomains returns old domains awaiting cleanup.
+func (s *Store) ListRetiredProxyDomains(ctx context.Context, projectID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT domain FROM retired_proxy_domains WHERE project_id = ? ORDER BY domain`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list retired proxy domains: %w", err)
+	}
+	defer rows.Close()
+	var domains []string
+	for rows.Next() {
+		var domain string
+		if err := rows.Scan(&domain); err != nil {
+			return nil, fmt.Errorf("scan retired proxy domain: %w", err)
+		}
+		domains = append(domains, domain)
+	}
+	return domains, rows.Err()
+}
+
+// DeleteRetiredProxyDomain removes a cleanup marker.
+func (s *Store) DeleteRetiredProxyDomain(ctx context.Context, projectID, domain string) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM retired_proxy_domains WHERE project_id = ? AND domain = ?`, projectID, domain); err != nil {
+		return fmt.Errorf("delete retired proxy domain: %w", err)
+	}
+	return nil
+}
+
+// DeleteRetiredProxyDomains removes all cleanup markers for a deleted project.
+func (s *Store) DeleteRetiredProxyDomains(ctx context.Context, projectID string) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM retired_proxy_domains WHERE project_id = ?`, projectID); err != nil {
+		return fmt.Errorf("delete retired proxy domains: %w", err)
+	}
+	return nil
+}
+
 // RemoteCommand is one audited remote command execution. Command never contains
 // a credential (authentication is out of band) and sensitive payloads such as a
 // generated compose file are recorded as a redacted label.
@@ -905,6 +1126,8 @@ const remoteCommandColumns = `id, server_id, server_type, action, deployment_id,
 
 // InsertRemoteCommand appends one audit record.
 func (s *Store) InsertRemoteCommand(ctx context.Context, rc RemoteCommand) error {
+	rc.Command = capStoredText(rc.Command, maxAuditTextLen)
+	rc.Error = capStoredText(rc.Error, maxDeploymentErrorLen)
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO remote_commands (server_id, server_type, action, deployment_id, command, error, executed_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,

@@ -16,6 +16,9 @@ func postForm(t *testing.T, s *Server, path string, form url.Values, cookie *htt
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	if cookie != nil {
+		req.Header.Set("Origin", "http://"+req.Host)
+	}
+	if cookie != nil {
 		req.AddCookie(cookie)
 	}
 	rec := httptest.NewRecorder()
@@ -127,6 +130,7 @@ func TestResourcePageAndEnvSave(t *testing.T) {
 	if err := store.UpsertProject(ctx, config.Project{
 		ID: "r1", Name: "App", ServerID: "s1", RepoURL: "x", Branch: "main",
 		Port: 8080, HealthPath: "/", ProjectGroup: "Storefront", Environment: "production",
+		Env: map[string]string{"EXISTING": "keep-me"}, BuildEnv: map[string]string{"TOKEN": "old-secret"},
 	}); err != nil {
 		t.Fatalf("UpsertProject: %v", err)
 	}
@@ -141,7 +145,7 @@ func TestResourcePageAndEnvSave(t *testing.T) {
 		}
 	}
 
-	rec := postForm(t, s, "/projects/env", url.Values{"id": {"r1"}, "env": {"FOO=bar\nBAZ=qux"}}, cookie)
+	rec := postForm(t, s, "/projects/env", url.Values{"id": {"r1"}, "env": {"FOO=bar\nBAZ=qux\nEXISTING=keep-me"}}, cookie)
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("env save status = %d, want 303", rec.Code)
 	}
@@ -151,6 +155,19 @@ func TestResourcePageAndEnvSave(t *testing.T) {
 	}
 	if p.Env["FOO"] != "bar" || p.Env["BAZ"] != "qux" {
 		t.Fatalf("env = %v", p.Env)
+	}
+	rec = postForm(t, s, "/projects/env", url.Values{
+		"id": {"r1"}, "env": {"EXISTING=[redacted]\nNEW=value"}, "build_env": {"TOKEN=[redacted]"},
+	}, cookie)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("redacted env save status = %d, want 303", rec.Code)
+	}
+	p, err = store.GetProject(ctx, "r1")
+	if err != nil {
+		t.Fatalf("GetProject after redaction: %v", err)
+	}
+	if p.Env["EXISTING"] != "keep-me" || p.BuildEnv["TOKEN"] != "old-secret" {
+		t.Fatalf("redacted values were not preserved: env=%v build=%v", p.Env, p.BuildEnv)
 	}
 }
 
@@ -201,7 +218,7 @@ func TestAdminProjectImageSourceValidation(t *testing.T) {
 
 	// image source without an image is rejected.
 	rec := postForm(t, s, "/projects", url.Values{
-		"id": {"p1"}, "name": {"A"}, "server_id": {"s1"}, "repo_url": {"x"},
+		"id": {"p1"}, "name": {"A"}, "server_id": {"s1"},
 		"port": {"8080"}, "source": {"image"},
 	}, cookie)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "image is required") {
@@ -210,7 +227,7 @@ func TestAdminProjectImageSourceValidation(t *testing.T) {
 
 	// with an image it saves.
 	rec = postForm(t, s, "/projects", url.Values{
-		"id": {"p1"}, "name": {"A"}, "server_id": {"s1"}, "repo_url": {"x"},
+		"id": {"p1"}, "name": {"A"}, "server_id": {"s1"},
 		"port": {"8080"}, "source": {"image"}, "image": {"nginx:1.27"},
 	}, cookie)
 	if rec.Code != http.StatusSeeOther {

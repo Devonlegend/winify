@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Devonlegend/winify/internal/config"
 	"github.com/Devonlegend/winify/internal/models"
 )
 
@@ -28,6 +29,9 @@ func (s *Server) renderVariables(w http.ResponseWriter, r *http.Request, status 
 		log.Printf("variables: list: %v", err)
 		http.Error(w, "failed to load variables", http.StatusInternalServerError)
 		return
+	}
+	for i := range vars {
+		vars[i].Value = redactedEnvValue
 	}
 	data := variablesPageData{
 		pageData:  s.page(r),
@@ -59,6 +63,9 @@ func (s *Server) handleVariableSave(w http.ResponseWriter, r *http.Request) {
 		return
 	case v.Key == "":
 		s.renderVariables(w, r, http.StatusBadRequest, "Key is required.")
+		return
+	case config.ValidateEnvKey(v.Key) != nil:
+		s.renderVariables(w, r, http.StatusBadRequest, "Key must be a valid environment variable name.")
 		return
 	}
 	if err := s.store.UpsertSharedVariable(r.Context(), v); err != nil {

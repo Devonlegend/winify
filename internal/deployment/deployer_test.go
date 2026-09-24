@@ -169,6 +169,26 @@ func seedSuccess(t *testing.T, store *models.Store, projectID, commit, tag strin
 	}
 }
 
+func TestRollbackAfterFailedAttemptUsesLatestSuccess(t *testing.T) {
+	target := &fakeTarget{rollbackArtifact: "cc/proj-001:good"}
+	d, store, _ := newTestDeployer(t, target)
+	seedSuccess(t, store, "proj-001", "good", "cc/proj-001:good")
+	if _, err := store.CreateDeployment(context.Background(), models.Deployment{
+		ProjectID: "proj-001", TargetType: config.ServerTypeDocker, Status: models.DeployFailed,
+		Trigger: "webhook", StartedAt: time.Now(), Error: "bad image",
+	}); err != nil {
+		t.Fatalf("seed failed deployment: %v", err)
+	}
+	id, err := d.Rollback(context.Background(), dockerProject(), dockerServer())
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	waitTerminal(t, store, id)
+	if target.lastJob.artifact != "cc/proj-001:good" {
+		t.Fatalf("rollback artifact = %q, want latest successful tag", target.lastJob.artifact)
+	}
+}
+
 func TestTriggerSuccess(t *testing.T) {
 	target := &fakeTarget{deployArtifact: "cc/proj-001:abc1234"}
 	d, store, reg := newTestDeployer(t, target)

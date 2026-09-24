@@ -67,8 +67,13 @@ func (s *Server) apiAuth(next http.Handler) http.Handler {
 			apiError(w, http.StatusForbidden, "token is read-only")
 			return
 		}
-		// Best-effort bookkeeping; never blocks the request.
-		_ = s.store.TouchAPIToken(context.WithoutCancel(r.Context()), record.ID, time.Now())
+		// Best-effort bookkeeping; never blocks the request or holds a database
+		// writer lock while the deployment API is being called.
+		go func() {
+			touchCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = s.store.TouchAPIToken(touchCtx, record.ID, time.Now())
+		}()
 		next.ServeHTTP(w, r)
 	})
 }
@@ -97,6 +102,7 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 }
 
 func redactProject(p config.Project) config.Project {
+	p.RepoURL = deployment.RedactAuditText(p.RepoURL)
 	if len(p.Env) > 0 {
 		redacted := make(map[string]string, len(p.Env))
 		for key := range p.Env {
@@ -236,19 +242,25 @@ func (s *Server) apiSaveProject(w http.ResponseWriter, r *http.Request) {
 	}
 	// The host port is derived; keep the legacy field in sync for records.
 	p.Port = p.EffectiveHostPort()
+	oldProject, _ := s.store.GetProject(r.Context(), p.ID)
+	p.Env = preserveRedactedEnv(p.Env, oldProject.Env)
+	p.BuildEnv = preserveRedactedEnv(p.BuildEnv, oldProject.BuildEnv)
 	if err := validateProject(p, srv); err != nil {
 		apiError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	oldProject, _ := s.store.GetProject(r.Context(), p.ID)
+	if err := s.validateProjectTargetPaths(p, srv); err != nil {
+		apiError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := s.store.UpsertProject(r.Context(), p); err != nil {
 		log.Printf("api: save project: %v", err)
 		apiError(w, http.StatusInternalServerError, "failed to save project")
 		return
 	}
-	if oldProject.Domain != "" && oldProject.Domain != p.Domain && s.proxy != nil {
-		if err := s.proxy.Deregister(r.Context(), oldProject.Domain); err != nil {
-			log.Printf("api: deregister old domain %s: %v", oldProject.Domain, err)
+	if oldProject.Domain != "" && oldProject.Domain != p.Domain {
+		if err := s.store.RetireProxyDomain(r.Context(), p.ID, oldProject.Domain); err != nil {
+			log.Printf("api: retire old domain %s: %v", oldProject.Domain, err)
 		}
 	}
 	writeJSON(w, http.StatusOK, redactProject(p))
@@ -271,6 +283,9 @@ func (s *Server) apiDeleteProject(w http.ResponseWriter, r *http.Request) {
 		log.Printf("api: delete project: %v", err)
 		apiError(w, http.StatusInternalServerError, "failed to delete project")
 		return
+	}
+	if err := s.store.DeleteRetiredProxyDomains(r.Context(), id); err != nil {
+		log.Printf("api: clear retired domains: %v", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }

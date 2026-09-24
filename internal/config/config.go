@@ -8,8 +8,12 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -187,6 +191,11 @@ type DeployConfig struct {
 	// IISBackupDir is where timestamped pre-deploy copies of the live IIS
 	// directory are stored for rollback.
 	IISBackupDir string `yaml:"iis_backup_dir"`
+	// TargetRoot bounds destructive live-directory copies on Windows targets.
+	// Set AllowExternalTargetPaths only for a deliberately managed IIS/site
+	// root outside this tree.
+	TargetRoot               string `yaml:"target_root"`
+	AllowExternalTargetPaths bool   `yaml:"allow_external_target_paths"`
 	// NSSMSource is the path on the control-center host to the nssm.exe that
 	// gets uploaded to a winsvc target on first deploy (public-domain binary).
 	// The target path is Server.NSSMPath. Empty disables upload and requires
@@ -195,13 +204,18 @@ type DeployConfig struct {
 	// NSSMSHA256 pins the expected SHA-256 (hex) of the uploaded nssm.exe.
 	// Empty skips the check; set it to detect a tampered/incorrect binary.
 	NSSMSHA256 string `yaml:"nssm_sha256"`
-	// KnownHostsFile enables SSH host-key verification. Empty disables it
-	// (insecure; only acceptable for throwaway environments).
+	// KnownHostsFile enables SSH host-key verification. It should point to a
+	// file maintained from a trusted provisioning source.
 	KnownHostsFile string `yaml:"known_hosts_file"`
+	// AllowInsecureHostKey is an explicit emergency escape hatch. It is false
+	// by default; never enable it for production targets.
+	AllowInsecureHostKey bool `yaml:"allow_insecure_host_key"`
 	// HealthTimeoutSeconds bounds how long the post-deploy health check waits.
 	HealthTimeoutSeconds int `yaml:"health_timeout_seconds"`
 	// HealthIntervalSeconds is the delay between health-check attempts.
 	HealthIntervalSeconds int `yaml:"health_interval_seconds"`
+	// RetentionDays bounds deployment/audit history growth.
+	RetentionDays int `yaml:"retention_days"`
 	// TimeoutMinutes bounds a whole deploy/rollback so a hung remote command
 	// cannot leave a deployment stuck in "running" forever.
 	TimeoutMinutes int `yaml:"timeout_minutes"`
@@ -231,15 +245,17 @@ func Default() Config {
 			WorkDir:               "/opt/control-center",
 			IISWorkDir:            `C:\ProgramData\winify\work`,
 			IISBackupDir:          `C:\ProgramData\winify\backups`,
+			TargetRoot:            `C:\ProgramData\winify\apps`,
 			NSSMSource:            "tools/nssm.exe",
 			HealthTimeoutSeconds:  60,
 			HealthIntervalSeconds: 3,
+			RetentionDays:         90,
 			TimeoutMinutes:        30,
 		},
 		Bootstrap: BootstrapConfig{
 			Enabled:     true,
 			ServiceName: "winify",
-			EnableWinRM: true,
+			EnableWinRM: false,
 			Caddy: CaddyBootstrapConfig{
 				Enabled: true,
 				URL:     "https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_windows_amd64.zip",
@@ -285,10 +301,147 @@ func Load(path string) (Config, error) {
 		return cfg, fmt.Errorf("read %s: %w", path, err)
 	}
 
+	// Resolve paths from the YAML file before applying environment overrides:
+	// CLI/library callers commonly set CC_* paths relative to their current
+	// working directory, while file-backed settings should be stable when the
+	// service starts with System32 as its working directory.
+	if info, statErr := os.Stat(path); statErr == nil && !info.IsDir() {
+		abs, absErr := filepath.Abs(path)
+		if absErr != nil {
+			return cfg, fmt.Errorf("resolve config path %s: %w", path, absErr)
+		}
+		resolveConfigPaths(&cfg, filepath.Dir(abs))
+	}
 	if err := cfg.applyEnv(); err != nil {
 		return cfg, err
 	}
+	if err := cfg.Validate(); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
+}
+
+// Validate checks settings that would otherwise fail much later during a
+// deployment or monitoring pass. It is intentionally independent of the
+// database so a malformed service configuration cannot start in a half-ready
+// state.
+func (cfg Config) Validate() error {
+	if _, port, err := net.SplitHostPort(cfg.Server.Addr); err != nil {
+		return fmt.Errorf("server.addr must be host:port: %w", err)
+	} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return errors.New("server.addr port must be between 1 and 65535")
+	}
+	if cfg.Auth.SessionTTLHours < 1 {
+		return errors.New("auth.session_ttl_hours must be positive")
+	}
+	if cfg.Deploy.WorkDir == "" {
+		return errors.New("deploy.work_dir is required")
+	}
+	if strings.TrimSpace(cfg.Deploy.TargetRoot) == "" {
+		return errors.New("deploy.target_root is required")
+	}
+	if cfg.Deploy.HealthTimeoutSeconds < 1 || cfg.Deploy.HealthIntervalSeconds < 1 {
+		return errors.New("deploy health timeout and interval must be positive")
+	}
+	if cfg.Deploy.RetentionDays < 1 {
+		return errors.New("deploy.retention_days must be positive")
+	}
+	if cfg.Deploy.TimeoutMinutes < 1 {
+		return errors.New("deploy.timeout_minutes must be positive")
+	}
+	if cfg.Monitoring.Enabled {
+		if cfg.Monitoring.IntervalSeconds < 1 || cfg.Monitoring.TimeoutSeconds < 1 || cfg.Monitoring.RetentionHours < 1 || cfg.Monitoring.HistoryPoints < 1 {
+			return errors.New("enabled monitoring intervals, retention and history_points must be positive")
+		}
+	}
+	if strings.TrimSpace(cfg.Proxy.ServerName) == "" || strings.ContainsAny(cfg.Proxy.ServerName, "/\\\r\n ") {
+		return errors.New("proxy.server_name must be a simple Caddy server object name")
+	}
+	if cfg.Proxy.Enabled && strings.TrimSpace(cfg.Proxy.AdminURL) == "" {
+		return errors.New("proxy.admin_url is required when proxy.enabled is true")
+	}
+	if cfg.Proxy.AdminURL != "" {
+		u, err := url.Parse(cfg.Proxy.AdminURL)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return errors.New("proxy.admin_url must be an http or https URL")
+		}
+		if u.Scheme == "http" && !isLoopbackHost(u.Hostname()) {
+			return errors.New("proxy.admin_url must use HTTPS unless it points to loopback")
+		}
+	}
+	if cfg.Bootstrap.Caddy.Admin != "" {
+		if err := ValidateCaddyAdmin(cfg.Bootstrap.Caddy.Admin); err != nil {
+			return err
+		}
+	}
+	if cfg.Bootstrap.Caddy.URL != "" {
+		u, err := url.Parse(cfg.Bootstrap.Caddy.URL)
+		if err != nil || u.Scheme != "https" || u.Host == "" {
+			return errors.New("bootstrap.caddy.url must be an HTTPS URL")
+		}
+	}
+	return nil
+}
+
+// ValidateCaddyAdmin rejects an unauthenticated admin API exposed on a
+// non-loopback HTTP interface. HTTPS may be used for a protected remote admin.
+func ValidateCaddyAdmin(admin string) error {
+	if !validCaddyAdmin(admin) {
+		return errors.New("caddy admin address must be loopback HTTP or HTTPS")
+	}
+	return nil
+}
+
+func validCaddyAdmin(admin string) bool {
+	value := strings.TrimSpace(admin)
+	if value == "" {
+		return true
+	}
+	if !strings.Contains(value, "://") {
+		value = "http://" + value
+	}
+	u, err := url.Parse(value)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	return u.Scheme == "https" || (u.Scheme == "http" && isLoopbackHost(u.Hostname()))
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func looksLikeWindowsAbs(value string) bool {
+	if strings.HasPrefix(value, `\\`) {
+		return true
+	}
+	return len(value) >= 3 && ((value[0] >= 'a' && value[0] <= 'z') || (value[0] >= 'A' && value[0] <= 'Z')) && value[1] == ':' && (value[2] == '\\' || value[2] == '/')
+}
+
+func resolveConfigPaths(cfg *Config, base string) {
+	resolve := func(value string) string {
+		value = strings.TrimSpace(value)
+		if value == "" || value == ":memory:" || filepath.IsAbs(value) || looksLikeWindowsAbs(value) || strings.HasPrefix(value, "/") {
+			return value
+		}
+		return filepath.Clean(filepath.Join(base, value))
+	}
+	cfg.Database.Path = resolve(cfg.Database.Path)
+	cfg.Files.Servers = resolve(cfg.Files.Servers)
+	cfg.Files.Projects = resolve(cfg.Files.Projects)
+	// Credentials.MasterKey is base64 key material, not a filesystem path.
+	// Leave it untouched; the generated key path is derived from Database.Path.
+	cfg.Deploy.WorkDir = resolve(cfg.Deploy.WorkDir)
+	cfg.Deploy.IISWorkDir = resolve(cfg.Deploy.IISWorkDir)
+	cfg.Deploy.IISBackupDir = resolve(cfg.Deploy.IISBackupDir)
+	cfg.Deploy.NSSMSource = resolve(cfg.Deploy.NSSMSource)
+	cfg.Deploy.KnownHostsFile = resolve(cfg.Deploy.KnownHostsFile)
+	cfg.Bootstrap.InstallDir = resolve(cfg.Bootstrap.InstallDir)
+	cfg.Bootstrap.Caddy.Source = resolve(cfg.Bootstrap.Caddy.Source)
 }
 
 // applyEnv overrides selected fields from environment variables, so secrets
@@ -345,6 +498,16 @@ func (cfg *Config) applyEnv() error {
 	if v := os.Getenv("CC_DEPLOY_IIS_BACKUP_DIR"); v != "" {
 		cfg.Deploy.IISBackupDir = v
 	}
+	if v := os.Getenv("CC_DEPLOY_TARGET_ROOT"); v != "" {
+		cfg.Deploy.TargetRoot = v
+	}
+	if v := os.Getenv("CC_ALLOW_EXTERNAL_TARGET_PATHS"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("CC_ALLOW_EXTERNAL_TARGET_PATHS: %w", err)
+		}
+		cfg.Deploy.AllowExternalTargetPaths = b
+	}
 	if v := os.Getenv("CC_DEPLOY_NSSM_SOURCE"); v != "" {
 		cfg.Deploy.NSSMSource = v
 	}
@@ -353,6 +516,20 @@ func (cfg *Config) applyEnv() error {
 	}
 	if v := os.Getenv("CC_DEPLOY_KNOWN_HOSTS"); v != "" {
 		cfg.Deploy.KnownHostsFile = v
+	}
+	if v := os.Getenv("CC_ALLOW_INSECURE_SSH"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("CC_ALLOW_INSECURE_SSH: %w", err)
+		}
+		cfg.Deploy.AllowInsecureHostKey = b
+	}
+	if v := os.Getenv("CC_DEPLOY_RETENTION_DAYS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("CC_DEPLOY_RETENTION_DAYS: %w", err)
+		}
+		cfg.Deploy.RetentionDays = n
 	}
 	if v := os.Getenv("CC_DEPLOY_TIMEOUT_MINUTES"); v != "" {
 		n, err := strconv.Atoi(v)

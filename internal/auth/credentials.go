@@ -46,12 +46,49 @@ func NewCredentialStore(store *models.Store, key []byte) (*CredentialStore, erro
 // as additional authenticated data, so a ciphertext cannot be moved to another
 // credential name without detection.
 func (c *CredentialStore) Put(ctx context.Context, name, secret string) error {
-	nonce := make([]byte, c.aead.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return fmt.Errorf("generate nonce: %w", err)
+	nonce, ciphertext, err := c.seal(name, secret)
+	if err != nil {
+		return err
 	}
-	ciphertext := c.aead.Seal(nil, nonce, []byte(secret), []byte(name))
 	return c.store.PutCredential(ctx, name, nonce, ciphertext)
+}
+
+// Encrypt seals a value for the models layer's at-rest configuration codec.
+// The caller supplies a stable, non-secret AAD name such as project:<id>:env.
+func (c *CredentialStore) Encrypt(name, value string) (string, error) {
+	nonce, ciphertext, err := c.seal(name, value)
+	if err != nil {
+		return "", err
+	}
+	payload := append(nonce, ciphertext...)
+	return base64.RawStdEncoding.EncodeToString(payload), nil
+}
+
+// Decrypt opens a value produced by Encrypt.
+func (c *CredentialStore) Decrypt(name, value string) (string, error) {
+	payload, err := base64.RawStdEncoding.DecodeString(value)
+	if err != nil {
+		return "", fmt.Errorf("decode encrypted %s: %w", name, err)
+	}
+	if len(payload) < c.aead.NonceSize() {
+		return "", fmt.Errorf("encrypted %s is truncated", name)
+	}
+	nonce := payload[:c.aead.NonceSize()]
+	ciphertext := payload[c.aead.NonceSize():]
+	plaintext, err := c.aead.Open(nil, nonce, ciphertext, []byte(name))
+	if err != nil {
+		return "", fmt.Errorf("decrypt %s: %w", name, err)
+	}
+	return string(plaintext), nil
+}
+
+func (c *CredentialStore) seal(name, value string) (nonce, ciphertext []byte, err error) {
+	nonce = make([]byte, c.aead.NonceSize())
+	if _, err = rand.Read(nonce); err != nil {
+		return nil, nil, fmt.Errorf("generate nonce: %w", err)
+	}
+	ciphertext = c.aead.Seal(nil, nonce, []byte(value), []byte(name))
+	return nonce, ciphertext, nil
 }
 
 // Get loads and decrypts the credential named name. Errors mention the name
@@ -83,16 +120,27 @@ func (c *CredentialStore) Delete(ctx context.Context, name string) error {
 // The key is never logged.
 func LoadMasterKey(explicitBase64, path string) ([]byte, error) {
 	if explicitBase64 != "" {
+		if strings.TrimSpace(path) != "" {
+			if err := prepareMasterKeyDir(path); err != nil {
+				return nil, err
+			}
+		}
 		return decodeKey(explicitBase64, "master key")
 	}
+	if strings.TrimSpace(path) == "" {
+		return nil, errors.New("master key path is required")
+	}
+	if err := prepareMasterKeyDir(path); err != nil {
+		return nil, err
+	}
 
-	data, err := os.ReadFile(path)
+	// Reject symlinks and non-regular files. The key is a trust anchor: an
+	// attacker who can replace it can decrypt every stored credential.
+	data, err := readMasterKeyFile(path)
 	switch {
 	case err == nil:
 		return decodeKey(strings.TrimSpace(string(data)), path)
-	case errors.Is(err, os.ErrNotExist):
-		// Fall through to generate.
-	default:
+	case !errors.Is(err, os.ErrNotExist):
 		return nil, fmt.Errorf("read master key %s: %w", path, err)
 	}
 
@@ -100,14 +148,71 @@ func LoadMasterKey(explicitBase64, path string) ([]byte, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("generate master key: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("create key dir: %w", err)
-	}
 	encoded := base64.StdEncoding.EncodeToString(key)
-	if err := os.WriteFile(path, []byte(encoded), 0o600); err != nil {
+	// O_EXCL prevents two processes starting together from overwriting one
+	// another's trust anchor. If another process won the race, read its key.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		data, readErr := readMasterKeyFile(path)
+		if readErr != nil {
+			return nil, fmt.Errorf("read concurrently created master key %s: %w", path, readErr)
+		}
+		return decodeKey(strings.TrimSpace(string(data)), path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create master key %s: %w", path, err)
+	}
+	if _, err := f.WriteString(encoded); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
 		return nil, fmt.Errorf("write master key %s: %w", path, err)
 	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("sync master key %s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("close master key %s: %w", path, err)
+	}
 	return key, nil
+}
+
+func prepareMasterKeyDir(path string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create key dir: %w", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("stat key dir: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("key parent %s is not a directory", dir)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return fmt.Errorf("secure key dir: %w", err)
+		}
+	}
+	return nil
+}
+
+func readMasterKeyFile(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("master key %s is not a regular file", path)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		if err := os.Chmod(path, 0o600); err != nil {
+			return nil, fmt.Errorf("secure master key %s: %w", path, err)
+		}
+	}
+	return os.ReadFile(path)
 }
 
 func decodeKey(encoded, source string) ([]byte, error) {

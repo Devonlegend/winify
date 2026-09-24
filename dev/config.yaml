@@ -30,7 +30,10 @@ deploy:
   work_dir: "/opt/control-center"
   iis_work_dir: 'C:\control-center'
   iis_backup_dir: 'C:\control-center\backups'
+  target_root: 'C:\control-center\apps'
   known_hosts_file: ""
+  # Development harness only; production must use a populated known_hosts file.
+  allow_insecure_host_key: true
   health_timeout_seconds: 60
   health_interval_seconds: 3
   timeout_minutes: 15

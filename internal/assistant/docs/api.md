@@ -10,7 +10,9 @@ Create a token on the **Tokens** tab. The value is shown once and stored only as
 a hash; revoke it from the same page. A token has a scope:
 
 - **read** — `GET` requests only.
-- **write** — `GET`, `POST` and `DELETE`.
+- **write** — `GET`, `POST` and `DELETE`. It is intentionally global and
+  administrator-equivalent: it can change any server/project and trigger
+  privileged deployments. Do not issue it to untrusted automation.
 
 Send it on every request:
 
@@ -72,8 +74,8 @@ Create or update a project:
 - A deploy returns `202 Accepted` with the new `deployment_id`; poll
   `GET /api/v1/deployments/{id}` for status and the log.
 - A project's `source` is `dockerfile`, `compose` or `image`. The `image`
-  source needs `image` (and optionally `container_port`); the others need
-  `repo_url`.
+  source needs `image` (and optionally `ports_exposes`/`ports_mappings`); the
+  others need `repo_url`.
 - A second deploy for the same project while one is running returns `409`.
 - A read-only token used on a mutating endpoint returns `403`.
 - Missing or invalid tokens return `401`.

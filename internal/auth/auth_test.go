@@ -34,6 +34,20 @@ func newTestService(t *testing.T) (*Service, *models.Store) {
 	return NewService(store, false, time.Hour), store
 }
 
+func TestLoginBackoff(t *testing.T) {
+	svc := NewService(nil, false, time.Hour)
+	for i := 0; i < 5; i++ {
+		svc.RecordLoginFailure("ip|user")
+	}
+	if svc.LoginRetryAfter("ip|user") <= 0 {
+		t.Fatal("login backoff was not applied after five failures")
+	}
+	svc.ClearLoginFailures("ip|user")
+	if svc.LoginRetryAfter("ip|user") != 0 {
+		t.Fatal("login backoff was not cleared")
+	}
+}
+
 func TestAuthenticate(t *testing.T) {
 	svc, _ := newTestService(t)
 	ctx := context.Background()

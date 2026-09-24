@@ -4,7 +4,8 @@
   var app = document.getElementById('app');
   if (toggle && app) {
     toggle.addEventListener('click', function () {
-      app.classList.toggle('sidebar-open');
+      var open = app.classList.toggle('sidebar-open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     });
   }
 

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,8 +21,8 @@ import (
 const nssmUploadChunk = 100000
 
 const (
-	defaultNSSMPath  = `C:\control-center\tools\nssm.exe`
-	defaultCaddyPath = `C:\control-center\tools\caddy.exe`
+	defaultNSSMPath  = `C:\ProgramData\winify\tools\nssm.exe`
+	defaultCaddyPath = `C:\ProgramData\winify\tools\caddy.exe`
 )
 
 // windowsServiceTarget deploys a native Windows executable as a service managed
@@ -54,7 +55,18 @@ func (t *windowsServiceTarget) Deploy(ctx context.Context, job deployJob, logf l
 	if err := validateProjectID(job.project.ID); err != nil {
 		return "", err
 	}
+	if err := validateTargetProjectPaths(t.cfg, job.project, job.server); err != nil {
+		return "", err
+	}
+	if err := validateServiceExecutablePath(job.project.ServiceExe, job.project.ServiceWorkDir); err != nil {
+		return "", err
+	}
 	p := job.project
+	if p.ServiceName != "" {
+		if err := config.ValidateServiceName(p.ServiceName); err != nil {
+			return "", err
+		}
+	}
 	// A static site has no process to run: it is served by the per-target Caddy
 	// instead of being installed as a service.
 	staticOnly := p.ServiceExe == "" && p.CaddyMode == config.CaddyModeStatic
@@ -185,7 +197,18 @@ func (t *windowsServiceTarget) Rollback(ctx context.Context, job deployJob, logf
 	if err := validateProjectID(job.project.ID); err != nil {
 		return "", err
 	}
+	if err := validateTargetProjectPaths(t.cfg, job.project, job.server); err != nil {
+		return "", err
+	}
+	if err := validateServiceExecutablePath(job.project.ServiceExe, job.project.ServiceWorkDir); err != nil {
+		return "", err
+	}
 	p := job.project
+	if p.ServiceName != "" {
+		if err := config.ValidateServiceName(p.ServiceName); err != nil {
+			return "", err
+		}
+	}
 	staticOnly := p.ServiceExe == "" && p.CaddyMode == config.CaddyModeStatic
 	if p.ServiceWorkDir == "" || (!staticOnly && p.ServiceName == "") {
 		return "", fmt.Errorf("project %s is not configured as a Windows service", p.ID)
@@ -279,7 +302,17 @@ func RemoteFileSHA256(ctx context.Context, runner Runner, path string) (string, 
 // pins the expected hash of the source binary. It returns nssmPath.
 func EnsureNSSM(ctx context.Context, runner Runner, nssmPath, source, pinSHA256 string, logf func(format string, args ...any)) (string, error) {
 	source = strings.TrimSpace(source)
+	pinSHA256 = strings.TrimSpace(pinSHA256)
 	if source == "" {
+		if pinSHA256 != "" {
+			got, err := RemoteFileSHA256(ctx, runner, nssmPath)
+			if err != nil {
+				return "", fmt.Errorf("verify existing nssm: %w", err)
+			}
+			if !strings.EqualFold(got, pinSHA256) {
+				return "", fmt.Errorf("existing nssm sha256 %s does not match configured pin %s", got, pinSHA256)
+			}
+		}
 		// No upload configured; the caller validates presence separately.
 		return nssmPath, nil
 	}
@@ -290,6 +323,9 @@ func EnsureNSSM(ctx context.Context, runner Runner, nssmPath, source, pinSHA256 
 		// when the target already has nssm.exe; otherwise it is a real
 		// misconfiguration and the caller's validation will fail.
 		if got, herr := RemoteFileSHA256(ctx, runner, nssmPath); herr == nil && got != "" {
+			if pinSHA256 != "" && !strings.EqualFold(got, pinSHA256) {
+				return "", fmt.Errorf("existing nssm sha256 %s does not match configured pin %s", got, pinSHA256)
+			}
 			if logf != nil {
 				logf("nssm source %s is unavailable; using the copy already on the target", source)
 			}
@@ -575,7 +611,7 @@ func serviceEnvScript(p config.Project, nssmPath string) string {
 func caddyFile(p config.Project) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, ":%d {\n", p.EffectiveHostPort())
-	fmt.Fprintf(&b, "\troot * %s\n", p.ServiceWorkDir)
+	fmt.Fprintf(&b, "\troot * %s\n", strconv.Quote(p.ServiceWorkDir))
 	b.WriteString("\tfile_server\n")
 	b.WriteString("\ttry_files {path} /index.html\n")
 	b.WriteString("}\n")

@@ -14,6 +14,9 @@ auth:
   # bcrypt hash. Generate with: control-center hash-password
   # Prefer CC_ADMIN_PASSWORD in the environment over putting a hash in a file.
   admin_password_hash: ""
+  # Optional one-time first-run token. If empty, the server generates and logs
+  # one on a fresh database; the Windows installer writes it to new configs.
+  setup_token: ""
   # Keep true in production. Browsers still accept Secure cookies on localhost.
   cookie_secure: true
   session_ttl_hours: 12
@@ -44,16 +47,25 @@ deploy:
   iis_work_dir: 'C:\ProgramData\winify\work'
   # Where timestamped pre-deploy IIS backups are stored for rollback.
   iis_backup_dir: 'C:\ProgramData\winify\backups'
+  # Destructive live-directory copies must stay below this managed root.
+  target_root: 'C:\ProgramData\winify\apps'
+  # Set true only for a separately governed IIS/site root.
+  allow_external_target_paths: false
   # Path on THIS host to the nssm.exe uploaded to winsvc targets on first
   # deploy. The public-domain binary is ~300 KB. Empty disables upload and
   # requires NSSM to already be present on the target.
   nssm_source: "tools/nssm.exe"
   # Optional pinned SHA-256 (hex) of nssm.exe; a mismatch aborts the deploy.
   nssm_sha256: ""
-  # Empty disables SSH host-key verification (insecure; set a known_hosts file).
+  # SSH host-key verification is fail-closed. Populate this from a trusted
+  # provisioning source before registering Docker/SSH targets.
   known_hosts_file: ""
+  # Emergency development-only escape hatch; never enable in production.
+  allow_insecure_host_key: false
   health_timeout_seconds: 60
   health_interval_seconds: 3
+  # Retain deployment and audit history for this many days.
+  retention_days: 90
   # Bound a whole deploy so a hung remote command cannot leave it "running".
   timeout_minutes: 30
 
@@ -65,8 +77,10 @@ bootstrap:
   install_dir: ""
   # Windows service name winify installs for itself (used in a later phase).
   service_name: "winify"
-  # Enable PowerShell Remoting so this host can be a deploy target.
-  enable_winrm: true
+  # Enable PowerShell Remoting so this host can be a deploy target. Keep false
+  # unless the host is on a trusted management network; the step refuses public
+  # profiles.
+  enable_winrm: false
   caddy:
     # Install Caddy (binary + NSSM service) and open 80/443. Requires source or
     # url. After it is running, set proxy.enabled: true to register routes.

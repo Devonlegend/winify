@@ -42,6 +42,7 @@ func TestAssistantAskEndpoint(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/assistant/ask", strings.NewReader(`{"question":"how do I roll back?"}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://"+req.Host)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
@@ -64,6 +65,7 @@ func TestAssistantAskRejectsEmptyQuestion(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/assistant/ask", strings.NewReader(`{"question":"  "}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://"+req.Host)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)

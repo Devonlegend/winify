@@ -1,11 +1,12 @@
 package deployment
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,11 +21,16 @@ type SSHRunner struct {
 	client *ssh.Client
 }
 
-// DialSSH opens an SSH connection using key authentication. privateKeyPEM is
-// the decrypted key from the credential store. knownHostsFile may be empty, in
-// which case host keys are NOT verified (insecure; log a warning at the call
-// site). The key is never logged.
+// DialSSH opens an SSH connection using key authentication and verifies the
+// host key against knownHostsFile. The key is never logged.
 func DialSSH(ctx context.Context, host string, port int, user, privateKeyPEM, knownHostsFile string) (*SSHRunner, error) {
+	return DialSSHVerified(ctx, host, port, user, privateKeyPEM, knownHostsFile, false)
+}
+
+// DialSSHVerified is the explicit policy-bearing SSH dialer. An empty
+// known_hosts file fails closed; callers must opt into
+// DialSSHAllowInsecureHostKey for throwaway environments.
+func DialSSHVerified(ctx context.Context, host string, port int, user, privateKeyPEM, knownHostsFile string, allowInsecure bool) (*SSHRunner, error) {
 	if port == 0 {
 		port = 22
 	}
@@ -34,13 +40,15 @@ func DialSSH(ctx context.Context, host string, port int, user, privateKeyPEM, kn
 	}
 
 	var hostKey ssh.HostKeyCallback
-	if knownHostsFile != "" {
+	if strings.TrimSpace(knownHostsFile) != "" {
 		hostKey, err = knownhosts.New(knownHostsFile)
 		if err != nil {
 			return nil, fmt.Errorf("load known_hosts: %w", err)
 		}
-	} else {
+	} else if allowInsecure {
 		hostKey = ssh.InsecureIgnoreHostKey()
+	} else {
+		return nil, errors.New("SSH known_hosts_file is required; refusing an unverified host key")
 	}
 
 	clientCfg := &ssh.ClientConfig{
@@ -64,24 +72,53 @@ func DialSSH(ctx context.Context, host string, port int, user, privateKeyPEM, kn
 	return &SSHRunner{client: ssh.NewClient(clientConn, chans, reqs)}, nil
 }
 
-// syncBuffer is a mutex-protected buffer. x/crypto/ssh copies stdout and stderr
-// concurrently, so a plain bytes.Buffer shared by both would be a data race and
-// can silently drop output.
+// syncBuffer is a mutex-protected bounded buffer. x/crypto/ssh copies stdout
+// and stderr concurrently, so a plain bytes.Buffer shared by both is a data
+// race. Keeping a head and tail preserves diagnostics and the final rev/backup
+// line without allowing an unbounded command to exhaust memory.
 type syncBuffer struct {
-	mu sync.Mutex
-	b  bytes.Buffer
+	mu        sync.Mutex
+	head      []byte
+	tail      []byte
+	total     int
+	truncated bool
 }
 
 func (s *syncBuffer) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.b.Write(p)
+	original := len(p)
+	s.total += original
+	headLimit := maxCommandOutput / 2
+	tailLimit := maxCommandOutput - headLimit
+	if len(s.head) < headLimit {
+		n := headLimit - len(s.head)
+		if n > len(p) {
+			n = len(p)
+		}
+		s.head = append(s.head, p[:n]...)
+		p = p[n:]
+	}
+	if len(p) > 0 {
+		s.tail = append(s.tail, p...)
+		if len(s.tail) > tailLimit {
+			s.tail = append([]byte(nil), s.tail[len(s.tail)-tailLimit:]...)
+			s.truncated = true
+		}
+	}
+	if s.total > maxCommandOutput {
+		s.truncated = true
+	}
+	return original, nil
 }
 
 func (s *syncBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.b.String()
+	if !s.truncated {
+		return string(append(append([]byte(nil), s.head...), s.tail...))
+	}
+	return string(s.head) + "\n...[command output truncated]...\n" + string(s.tail)
 }
 
 // Run executes command through the target's login shell and returns combined
@@ -108,6 +145,12 @@ func (r *SSHRunner) Run(ctx context.Context, command string) (string, error) {
 	case err := <-done:
 		return buf.String(), err
 	}
+}
+
+// DialSSHAllowInsecureHostKey is reserved for explicitly isolated development
+// targets. Production code should use DialSSH or DialSSHVerified instead.
+func DialSSHAllowInsecureHostKey(ctx context.Context, host string, port int, user, privateKeyPEM string) (*SSHRunner, error) {
+	return DialSSHVerified(ctx, host, port, user, privateKeyPEM, "", true)
 }
 
 // Close ends the SSH connection.

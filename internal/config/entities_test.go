@@ -121,6 +121,14 @@ func TestValidateResourceInputs(t *testing.T) {
 	if err := ValidateDomain("https://example.com"); err == nil {
 		t.Fatal("URL was accepted as a domain")
 	}
+	if err := ValidateProject(Project{ID: "p-image", Name: "Image", ServerID: "s1", Source: ProjectSourceImage, Image: "registry.example:5000/team/app:tag", DisableHealthCheck: true}, Server{ID: "s1", Type: ServerTypeDocker}); err != nil {
+		t.Fatalf("private registry image reference rejected: %v", err)
+	}
+	for _, repo := range []string{"ext::sh -c whoami", "file:///tmp/repo", "http://example.com/repo.git"} {
+		if err := ValidateRepoURL(repo); err == nil {
+			t.Errorf("unsafe repository URL %q was accepted", repo)
+		}
+	}
 	if err := ValidateProject(Project{
 		ID: "p1", Name: "App", ServerID: "s1", Source: ProjectSourceImage,
 		Image: "nginx", DisableHealthCheck: true,

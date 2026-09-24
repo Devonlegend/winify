@@ -61,6 +61,9 @@ echo "uptime=$uptime"
 echo "load1=$load1"
 `)
 	for _, svc := range srv.Services {
+		if config.ValidateServiceName(svc) != nil {
+			continue
+		}
 		fmt.Fprintf(&b, "state=unknown\n")
 		fmt.Fprintf(&b, "if command -v systemctl >/dev/null 2>&1; then state=$(systemctl is-active %s 2>/dev/null); fi\n", shellQuote(svc))
 		fmt.Fprintf(&b, "if [ -z \"$state\" ]; then state=unknown; fi\n")
@@ -99,6 +102,9 @@ func windowsScript(srv config.Server) string {
 	b.WriteString("Write-Output \"uptime=$uptime\"\n")
 	b.WriteString("Write-Output \"load1=0\"\n")
 	for _, svc := range srv.Services {
+		if config.ValidateServiceName(svc) != nil {
+			continue
+		}
 		fmt.Fprintf(&b, "$svc = Get-Service -Name %s -ErrorAction SilentlyContinue\n", psQuote(svc))
 		fmt.Fprintf(&b, "if ($null -ne $svc) { Write-Output \"service:%s=$($svc.Status)\" } else { Write-Output \"service:%s=not-found\" }\n", svc, svc)
 	}

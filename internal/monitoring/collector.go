@@ -52,7 +52,7 @@ func NewRunnerFactory(cfg config.Config, secrets deployment.SecretResolver, audi
 			if err != nil {
 				return nil, fmt.Errorf("resolve ssh key: %w", err)
 			}
-			runner, err := deployment.DialSSH(ctx, srv.SSHHost, srv.SSHPort, srv.SSHUser, key, cfg.Deploy.KnownHostsFile)
+			runner, err := deployment.DialSSHVerified(ctx, srv.SSHHost, srv.SSHPort, srv.SSHUser, key, cfg.Deploy.KnownHostsFile, cfg.Deploy.AllowInsecureHostKey)
 			if err != nil {
 				return nil, err
 			}

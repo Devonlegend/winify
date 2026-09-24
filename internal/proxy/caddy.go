@@ -67,12 +67,24 @@ func (c *Caddy) Register(ctx context.Context, host, upstream string) error {
 	if host == "" {
 		return fmt.Errorf("caddy: empty host")
 	}
+	if strings.ContainsAny(host, "\r\n/") {
+		return fmt.Errorf("caddy: invalid host")
+	}
+	if strings.TrimSpace(upstream) == "" {
+		return fmt.Errorf("caddy: empty upstream")
+	}
 	if err := c.ensureServer(ctx); err != nil {
 		return err
 	}
 
 	id := routeID(host)
-	// Idempotent upsert: drop any existing route with this id, then add it.
+	// Keep a copy so a failed replacement can be compensated. This narrows the
+	// delete/add window and avoids leaving a project offline when Caddy rejects
+	// the new route.
+	oldRoute, hadOld, err := c.routeSnapshot(ctx, id)
+	if err != nil {
+		return fmt.Errorf("caddy read old route %s: %w", host, err)
+	}
 	if err := c.do(ctx, http.MethodDelete, "/id/"+id, nil, http.StatusOK, http.StatusNotFound); err != nil {
 		return fmt.Errorf("caddy remove old route %s: %w", host, err)
 	}
@@ -88,7 +100,13 @@ func (c *Caddy) Register(ctx context.Context, host, upstream string) error {
 	}
 	path := "/config/apps/http/servers/" + c.server + "/routes"
 	if err := c.do(ctx, http.MethodPost, path, route, http.StatusOK); err != nil {
-		return fmt.Errorf("caddy register %s: %w", host, err)
+		registerErr := fmt.Errorf("caddy register %s: %w", host, err)
+		if hadOld {
+			if restoreErr := c.do(ctx, http.MethodPost, path, json.RawMessage(oldRoute), http.StatusOK); restoreErr != nil {
+				return fmt.Errorf("%w (also failed to restore previous route: %v)", registerErr, restoreErr)
+			}
+		}
+		return registerErr
 	}
 	return nil
 }
@@ -130,6 +148,25 @@ func (c *Caddy) ensureServer(ctx context.Context) error {
 	default:
 		return fmt.Errorf("caddy get server %q: unexpected status %d", c.server, resp.StatusCode)
 	}
+}
+
+func (c *Caddy) routeSnapshot(ctx context.Context, id string) ([]byte, bool, error) {
+	resp, err := c.request(ctx, http.MethodGet, "/id/"+id, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, false, fmt.Errorf("status %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, false, err
+	}
+	return data, true, nil
 }
 
 func (c *Caddy) do(ctx context.Context, method, path string, body any, want ...int) error {

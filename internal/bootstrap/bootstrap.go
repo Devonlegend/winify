@@ -14,11 +14,13 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/Devonlegend/winify/internal/deployment"
 )
@@ -119,20 +121,55 @@ type Options struct {
 	DryRun         bool
 	Meta           MetaStore
 	Runner         deployment.Runner
+	// AuditMeta is attached to every runner command when the runner is wrapped
+	// with deployment.WithAuditRecorder.
+	AuditMeta      deployment.AuditMeta
+	StateNamespace string
 	Logf           func(format string, args ...any)
 }
 
 // Bootstrap runs the provisioning steps in order.
 type Bootstrap struct {
-	steps  []Step
-	meta   MetaStore
-	runner deployment.Runner
-	dryRun bool
-	logf   func(format string, args ...any)
+	steps          []Step
+	meta           MetaStore
+	runner         deployment.Runner
+	dryRun         bool
+	logf           func(format string, args ...any)
+	auditMeta      deployment.AuditMeta
+	stateNamespace string
+	mu             sync.Mutex
 }
 
 // New builds the step list for the given options.
 func New(opts Options) *Bootstrap {
+	if opts.Paths.Root == "" {
+		opts.Paths.Root = DefaultRoot()
+	}
+	defaults := DefaultPaths(opts.Paths.Root)
+	if opts.Paths.Tools == "" {
+		opts.Paths.Tools = defaults.Tools
+	}
+	if opts.Paths.NSSM == "" {
+		opts.Paths.NSSM = defaults.NSSM
+	}
+	if opts.Paths.Caddy == "" {
+		opts.Paths.Caddy = defaults.Caddy
+	}
+	if opts.Paths.Work == "" {
+		opts.Paths.Work = defaults.Work
+	}
+	if opts.Paths.Apps == "" {
+		opts.Paths.Apps = defaults.Apps
+	}
+	if opts.Paths.Backups == "" {
+		opts.Paths.Backups = defaults.Backups
+	}
+	if opts.Paths.Logs == "" {
+		opts.Paths.Logs = defaults.Logs
+	}
+	if opts.Paths.Data == "" {
+		opts.Paths.Data = defaults.Data
+	}
 	if opts.Logf == nil {
 		opts.Logf = func(string, ...any) {}
 	}
@@ -172,7 +209,7 @@ func New(opts Options) *Bootstrap {
 			firewallStep{ports: []int{80, 443}},
 		)
 	}
-	return &Bootstrap{steps: steps, meta: opts.Meta, runner: opts.Runner, dryRun: opts.DryRun, logf: opts.Logf}
+	return &Bootstrap{steps: steps, meta: opts.Meta, runner: opts.Runner, dryRun: opts.DryRun, logf: opts.Logf, auditMeta: opts.AuditMeta, stateNamespace: opts.StateNamespace}
 }
 
 // StatusKind is the outcome of a step.
@@ -195,13 +232,17 @@ type Result struct {
 // Run executes every step, stopping at the first failure. A nil error means all
 // steps are satisfied.
 func (b *Bootstrap) Run(ctx context.Context) ([]Result, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	results := make([]Result, 0, len(b.steps))
+	runCtx := deployment.WithAudit(ctx, b.auditMeta)
 	for _, step := range b.steps {
-		done, err := step.Check(ctx, b.runner)
+		done, err := step.Check(runCtx, b.runner)
 		if err != nil {
-			results = append(results, Result{Name: step.Name(), Status: StatusError, Error: err.Error()})
-			b.record(ctx, step.Name(), "error: "+err.Error())
-			return results, fmt.Errorf("%s: check: %w", step.Name(), err)
+			safeErr := deployment.RedactAuditText(err.Error())
+			results = append(results, Result{Name: step.Name(), Status: StatusError, Error: safeErr})
+			b.record(ctx, step.Name(), "error: "+safeErr)
+			return results, fmt.Errorf("%s: check: %s", step.Name(), safeErr)
 		}
 		if done {
 			results = append(results, Result{Name: step.Name(), Status: StatusDone})
@@ -213,10 +254,11 @@ func (b *Bootstrap) Run(ctx context.Context) ([]Result, error) {
 			continue
 		}
 		b.logf("bootstrap: applying %s", step.Name())
-		if err := step.Apply(ctx, b.runner); err != nil {
-			results = append(results, Result{Name: step.Name(), Status: StatusError, Error: err.Error()})
-			b.record(ctx, step.Name(), "error: "+err.Error())
-			return results, fmt.Errorf("%s: %w", step.Name(), err)
+		if err := step.Apply(runCtx, b.runner); err != nil {
+			safeErr := deployment.RedactAuditText(err.Error())
+			results = append(results, Result{Name: step.Name(), Status: StatusError, Error: safeErr})
+			b.record(ctx, step.Name(), "error: "+safeErr)
+			return results, fmt.Errorf("%s: %s", step.Name(), safeErr)
 		}
 		results = append(results, Result{Name: step.Name(), Status: StatusApplied})
 		b.record(ctx, step.Name(), "done")
@@ -238,7 +280,7 @@ func (b *Bootstrap) Status(ctx context.Context) ([]StepStatus, error) {
 	for _, step := range b.steps {
 		st := StepStatus{Name: step.Name()}
 		if b.meta != nil {
-			v, err := b.meta.GetMeta(ctx, metaKey(step.Name()))
+			v, err := b.meta.GetMeta(ctx, metaKey(b.stateNamespace, step.Name()))
 			if err != nil {
 				return nil, err
 			}
@@ -254,14 +296,28 @@ func (b *Bootstrap) Status(ctx context.Context) ([]StepStatus, error) {
 	return out, nil
 }
 
-// Complete reports whether every step has been recorded done.
+// Complete reports whether every step is both recorded done and still
+// satisfied on the target. A deleted binary or removed directory must not be
+// hidden forever by a stale app_meta value.
 func (b *Bootstrap) Complete(ctx context.Context) (bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.runner == nil {
+		return false, errors.New("bootstrap runner is nil")
+	}
 	statuses, err := b.Status(ctx)
 	if err != nil {
 		return false, err
 	}
-	for _, st := range statuses {
+	for i, st := range statuses {
 		if !st.Done {
+			return false, nil
+		}
+		done, err := b.steps[i].Check(ctx, b.runner)
+		if err != nil {
+			return false, err
+		}
+		if !done {
 			return false, nil
 		}
 	}
@@ -272,7 +328,7 @@ func (b *Bootstrap) record(ctx context.Context, step, value string) {
 	if b.meta == nil {
 		return
 	}
-	if err := b.meta.SetMeta(ctx, metaKey(step), value); err != nil {
+	if err := b.meta.SetMeta(ctx, metaKey(b.stateNamespace, step), value); err != nil {
 		b.logf("bootstrap: record %s: %v", step, err)
 	}
 }

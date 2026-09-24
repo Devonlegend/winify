@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,6 +87,21 @@ func TestCredentialNameIsAuthenticated(t *testing.T) {
 	}
 }
 
+func TestCredentialStoreConfigCodec(t *testing.T) {
+	cs, _ := newTestCredStore(t)
+	encoded, err := cs.Encrypt("project:p1:env", `{"TOKEN":"secret"}`)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	if strings.Contains(encoded, "secret") {
+		t.Fatalf("encoded config value contains plaintext: %s", encoded)
+	}
+	decoded, err := cs.Decrypt("project:p1:env", encoded)
+	if err != nil || decoded != `{"TOKEN":"secret"}` {
+		t.Fatalf("Decrypt = %q, %v", decoded, err)
+	}
+}
+
 func TestCredentialMissing(t *testing.T) {
 	cs, _ := newTestCredStore(t)
 	if _, err := cs.Get(context.Background(), "nope"); err == nil {
@@ -108,6 +125,28 @@ func TestLoadMasterKeyGeneratesAndPersists(t *testing.T) {
 	}
 	if !bytes.Equal(first, second) {
 		t.Fatal("generated key was not persisted")
+	}
+}
+
+func TestLoadMasterKeyTightensExistingPermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "master.key")
+	key := make([]byte, MasterKeySize)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	encoded := base64.StdEncoding.EncodeToString(key)
+	if err := os.WriteFile(path, []byte(encoded), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadMasterKey("", path); err != nil {
+		t.Fatalf("LoadMasterKey: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("key permissions = %o, want 600", info.Mode().Perm())
 	}
 }
 

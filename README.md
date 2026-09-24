@@ -31,8 +31,11 @@ dashboard that watches an external CI system.
     Copy-Item config.example.yaml config.yaml
     .\control-center serve -config config.yaml
 
-Open the dashboard (default `:8080`) and sign in. On first run the database and
-master key are created and the admin user is seeded.
+Open the dashboard at `http://127.0.0.1:8080` and sign in. On first run the
+listener is loopback-only, the database and master key are created, and a
+one-time setup token is printed in the service log (the Windows installer also
+prints it). The token is required on the registration page; do not expose the
+listener until registration is complete.
 
 ## Documentation
 

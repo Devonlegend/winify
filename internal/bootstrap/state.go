@@ -9,5 +9,11 @@ type MetaStore interface {
 	SetMeta(ctx context.Context, key, value string) error
 }
 
-// metaKey is the app_meta key holding one step's state.
-func metaKey(step string) string { return "bootstrap." + step }
+// metaKey is the app_meta key holding one step's state. A namespace keeps
+// local and remote target progress from satisfying one another.
+func metaKey(namespace, step string) string {
+	if namespace == "" {
+		return "bootstrap." + step
+	}
+	return "bootstrap." + namespace + "." + step
+}

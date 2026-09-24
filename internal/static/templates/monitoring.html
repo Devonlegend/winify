@@ -13,7 +13,7 @@
     <section class="card metric-card" data-server-id="{{.Server.ID}}" data-state="{{if not .HasData}}waiting{{else if .Down}}down{{else if .Stale}}stale{{else}}ok{{end}}">
       <header class="card-head">
         <h2>{{.Server.Name}} <span class="badge badge-{{.Server.Type}}">{{.Server.Type}}</span></h2>
-        <span class="pill pill-{{if not .HasData}}waiting{{else if .Down}}down{{else if .Stale}}stale{{else}}ok{{end}}" data-role="status">{{if not .HasData}}waiting{{else if .Down}}down{{else if .Stale}}stale{{else}}ok{{end}}</span>
+        <span class="pill pill-{{if not .HasData}}waiting{{else if .Down}}down{{else if .Stale}}stale{{else}}ok{{end}}" data-role="status" aria-live="polite">{{if not .HasData}}waiting{{else if .Down}}down{{else if .Stale}}stale{{else}}ok{{end}}</span>
       </header>
       <p class="muted card-host">{{if .Server.Host}}{{.Server.Host}}{{else if .Server.SSHHost}}{{.Server.SSHHost}}{{else}}{{.Server.WinRMEndpoint}}{{end}}</p>
 
@@ -42,7 +42,7 @@
 
       <div class="services" data-role="services"></div>
 
-      <div class="chart-wrap"><canvas data-role="chart"></canvas></div>
+      <div class="chart-wrap"><canvas data-role="chart" role="img" aria-label="Metric history chart">Metric history chart</canvas></div>
     </section>
   {{end}}
   </div>

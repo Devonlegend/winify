@@ -3,7 +3,8 @@
 ## How do I roll back a deployment?
 
 Open the Deployment tab, find the project, and click **Roll back**. The button
-appears once a project has at least two successful deployments. Docker rollback
+appears when there is a prior successful release to restore (or after a failed
+attempt when one successful release exists). Docker rollback
 reuses the previous successful image tag without rebuilding; IIS rollback
 restores the most recent timestamped backup and restarts the service and app
 pool. The rollback is recorded in deploy history.
@@ -11,7 +12,8 @@ pool. The rollback is recorded in deploy history.
 ## How do I trigger a deployment?
 
 Push to the project's configured branch. The signed webhook starts the pipeline
-automatically. There is intentionally no manual deploy button in v1.
+automatically; you can also use **Deploy** on the project page for a manual
+deployment of the configured branch.
 
 ## Where are credentials stored?
 

@@ -13,6 +13,8 @@ Placeholders: replace `CC_HOST` (e.g. `http://127.0.0.1:8090`), `DOCKER_HOST`
 
 - [ ] Docker target: reachable over SSH; `git`, `docker`, and the `docker compose`
       plugin installed.
+- [ ] Populate `deploy.known_hosts_file` from a trusted host-key source (SSH
+      verification is fail-closed).
 - [ ] IIS target: WinRM enabled (`winrm quickconfig`), an account that can stop
       services and recycle app pools; `git` and the build tooling installed.
 - [ ] A repository with a Dockerfile (Docker) or a publishable web app (IIS).
@@ -30,7 +32,10 @@ Placeholders: replace `CC_HOST` (e.g. `http://127.0.0.1:8090`), `DOCKER_HOST`
       admin API, and a listen address that is free.
 - [ ] Start Caddy with its admin API reachable from the control-center:
 
-      docker run -d --name caddy -p 80:80 -p 443:443 -p 2019:2019 caddy:2 caddy run --admin 0.0.0.0:2019
+      docker run -d --name caddy --network host caddy:2 caddy run --admin 127.0.0.1:2019
+
+  The Caddy admin API is unauthenticated; keep it on loopback or a protected
+  management network. Never publish port 2019 on a public interface.
 
 - [ ] Add the encrypted credentials:
 
@@ -41,7 +46,9 @@ Placeholders: replace `CC_HOST` (e.g. `http://127.0.0.1:8090`), `DOCKER_HOST`
 
 - [ ] Edit `servers.yaml` and `projects.yaml` for your hosts, paths, domains and
       ports (see the "Adding a Project or Server" guide).
-- [ ] Start the control-center and sign in:
+- [ ] Start the control-center and sign in. The first-run page requires the
+      setup token printed in the startup log; keep the default loopback listener
+      until the admin account exists.
 
       .\control-center serve -config config.yaml
 
@@ -61,13 +68,15 @@ Placeholders: replace `CC_HOST` (e.g. `http://127.0.0.1:8090`), `DOCKER_HOST`
       curl.exe -i -X POST -H "X-GitHub-Event: push" -H "X-Hub-Signature-256: $sig" --data-binary "@$env:TEMP\push.json" $CC_HOST/webhooks/github/proj-001
 
 - [ ] Expect `HTTP/1.1 202` and `{"status":"accepted","deployment_id":N}`.
+      Resending the same `X-GitHub-Delivery` value should return `202` with
+      `reason=duplicate delivery` and must not start a second deployment.
 - [ ] Open the **Deployment** tab: the attempt goes `queued → running → success`
       with a log showing clone, `docker build`, `docker compose up -d`, health
       check, and proxy registration.
 - [ ] On the Docker host: `docker ps` shows the running container.
 - [ ] Open `https://<docker-domain>` in a browser; it loads over HTTPS with a
       valid certificate.
-- [ ] `curl -s $CC_HOST/api/audit | ConvertFrom-Json | Select -First 5` shows the
+- [ ] `curl -s -H "Authorization: Bearer $API_TOKEN" $CC_HOST/api/v1/audit | ConvertFrom-Json | Select -First 5` shows the
       clone/build/compose commands with `action=deploy` and the deployment id.
 
 ## Part 3 — IIS project (push → validate → backup → deploy → HTTPS)

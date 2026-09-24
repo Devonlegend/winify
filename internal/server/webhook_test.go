@@ -73,6 +73,26 @@ func TestGitHubWebhookValid(t *testing.T) {
 	}
 }
 
+func TestGitHubWebhookRejectsDuplicateDelivery(t *testing.T) {
+	s, store, deployer := newTestServerFull(t)
+	seedWebhookProject(t, store)
+	body := []byte(`{"ref":"refs/heads/main","after":"abc123"}`)
+	headers := githubHeaders(body)
+	headers["X-GitHub-Delivery"] = "delivery-123"
+
+	first := postWebhook(t, s, "/webhooks/github/proj-001", body, headers)
+	second := postWebhook(t, s, "/webhooks/github/proj-001", body, headers)
+	if first.Code != http.StatusAccepted || second.Code != http.StatusAccepted {
+		t.Fatalf("statuses = %d, %d, want 202/202", first.Code, second.Code)
+	}
+	if deployer.triggered != 1 {
+		t.Fatalf("triggered = %d, want 1 for a duplicate delivery", deployer.triggered)
+	}
+	if !bytes.Contains(second.Body.Bytes(), []byte("duplicate delivery")) {
+		t.Fatalf("duplicate response = %s", second.Body.String())
+	}
+}
+
 func TestGitHubWebhookBadSignature(t *testing.T) {
 	s, store, deployer := newTestServerFull(t)
 	seedWebhookProject(t, store)

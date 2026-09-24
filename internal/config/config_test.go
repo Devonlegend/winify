@@ -37,8 +37,8 @@ func TestLoadMergesPartialYAMLOverDefaults(t *testing.T) {
 	if cfg.Server.Addr != ":9090" {
 		t.Errorf("Addr = %q, want %q", cfg.Server.Addr, ":9090")
 	}
-	if cfg.Database.Path != "data/control-center.db" {
-		t.Errorf("DB path = %q, want default", cfg.Database.Path)
+	if want := filepath.Join(filepath.Dir(p), "data/control-center.db"); cfg.Database.Path != want {
+		t.Errorf("DB path = %q, want %q", cfg.Database.Path, want)
 	}
 }
 
@@ -54,6 +54,35 @@ func TestLoadEnvOverridesYAML(t *testing.T) {
 	}
 	if cfg.Database.Path != "from-env.db" {
 		t.Errorf("DB path = %q, want %q", cfg.Database.Path, "from-env.db")
+	}
+}
+
+func TestLoadPreservesWindowsTargetPathsOnAnyController(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(p, []byte("deploy:\n  iis_work_dir: 'C:\\ProgramData\\winify\\work'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Deploy.IISWorkDir != `C:\ProgramData\winify\work` {
+		t.Fatalf("IISWorkDir = %q", cfg.Deploy.IISWorkDir)
+	}
+}
+
+func TestLoadDoesNotResolveBase64MasterKeyAsPath(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	key := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	if err := os.WriteFile(p, []byte("credentials:\n  master_key: '"+key+"'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Credentials.MasterKey != key {
+		t.Fatalf("master key = %q, want unchanged base64", cfg.Credentials.MasterKey)
 	}
 }
 

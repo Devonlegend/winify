@@ -42,6 +42,38 @@ func TestRouteIDDoesNotCollideOnPunctuation(t *testing.T) {
 	}
 }
 
+func TestCaddyRegisterRestoresPreviousRouteOnFailure(t *testing.T) {
+	posts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/config/apps/http/servers/srv0":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/id/"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"@id":"old"}`))
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/routes"):
+			posts++
+			if posts == 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	if err := NewCaddy(srv.URL, "srv0").Register(context.Background(), "app.example.com", "127.0.0.1:8000"); err == nil {
+		t.Fatal("Register succeeded when Caddy rejected the replacement")
+	}
+	if posts != 2 {
+		t.Fatalf("route replacement POSTs = %d, want 2 (new route + restore)", posts)
+	}
+}
+
 func TestCaddyRegisterUpsertsRoute(t *testing.T) {
 	var posted []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

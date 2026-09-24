@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Devonlegend/winify/internal/config"
@@ -21,6 +22,7 @@ type Scheduler struct {
 
 	stop     chan struct{}
 	done     chan struct{}
+	started  atomic.Bool
 	startOne sync.Once
 	stopOne  sync.Once
 }
@@ -55,11 +57,17 @@ func (s *Scheduler) Interval() time.Duration { return s.interval }
 
 // Start launches the polling loop; it polls once immediately, then on a ticker.
 func (s *Scheduler) Start() {
-	s.startOne.Do(func() { go s.loop() })
+	s.startOne.Do(func() {
+		s.started.Store(true)
+		go s.loop()
+	})
 }
 
 // Stop halts the loop and waits for the in-flight poll to finish.
 func (s *Scheduler) Stop() {
+	if !s.started.Load() {
+		return
+	}
 	s.stopOne.Do(func() { close(s.stop) })
 	<-s.done
 }

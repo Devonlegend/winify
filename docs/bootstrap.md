@@ -22,8 +22,8 @@ it is immediately usable, with no manual setup.
 | Trigger | **Automatic on first start**, idempotent and re-runnable |
 | Local target auth | **Prompt once** for an account/password; winify stores it encrypted |
 | Local `winsvc` server | **Created by winify automatically** (not manual) |
-| Install directory | Windows convention: **`%ProgramData%\winify`** |
-| WinRM | **Enabled by default** (logged, configurable) |
+| Install directory | Windows convention: **`%ProgramData%\winify`** (remote bootstrap also uses this when the controller is Linux) |
+| WinRM | **Explicitly enabled** on a trusted management profile (default off) |
 | Binaries (NSSM/Caddy) | Downloaded and verified against **pinned SHA-256** |
 | Scope | winify-as-service, WinRM+firewall, NSSM, Caddy+service, dirs+permissions, local `winsvc` server |
 
@@ -123,9 +123,11 @@ Result: right after install, the box is already a deployable target.
 
 ## Installer entry point
 
-`install.ps1` (one-liner): download the winify release → place in
-`%ProgramData%\winify` → run `winify bootstrap` elevated. This is "install on the
-server and it is ready".
+`install.ps1` installs a local release or an HTTPS download. Remote downloads
+require an explicit `-Sha256` digest; the script verifies the NSSM archive before
+extracting it. For a local payload, pass `-Sha256` as well when distributing it
+through an artifact store. The installer generates and prints a one-time setup
+token for a new configuration. This is "install on the server and it is ready".
 
 ## Remote bootstrap
 

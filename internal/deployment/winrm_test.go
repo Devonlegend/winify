@@ -1,6 +1,17 @@
 package deployment
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Devonlegend/winify/internal/config"
+)
+
+func TestDialWinRMRejectsBasicOverHTTP(t *testing.T) {
+	_, err := DialWinRM(config.Server{WinRMEndpoint: "http://10.0.0.5:5985/wsman", WinRMTransport: "basic", WinRMUser: "u"}, "password")
+	if err == nil {
+		t.Fatal("DialWinRM accepted Basic over HTTP")
+	}
+}
 
 func TestParseWinRMEndpoint(t *testing.T) {
 	cases := []struct {

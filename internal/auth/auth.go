@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -46,12 +47,21 @@ type Service struct {
 	cookieSecure bool
 	ttl          time.Duration
 	now          func() time.Time // injectable clock for tests
+
+	loginMu       sync.Mutex
+	loginFailures map[string]loginAttempt
+}
+
+type loginAttempt struct {
+	count       int
+	first       time.Time
+	lockedUntil time.Time
 }
 
 // NewService builds the auth service. cookieSecure sets the cookie Secure flag
 // (true in production; browsers still accept Secure cookies on localhost).
 func NewService(store *models.Store, cookieSecure bool, ttl time.Duration) *Service {
-	return &Service{store: store, cookieSecure: cookieSecure, ttl: ttl, now: time.Now}
+	return &Service{store: store, cookieSecure: cookieSecure, ttl: ttl, now: time.Now, loginFailures: make(map[string]loginAttempt)}
 }
 
 // HashPassword returns a bcrypt hash suitable for storage or config.
@@ -71,6 +81,47 @@ func (s *Service) HasUsers(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return n > 0, nil
+}
+
+// LoginRetryAfter applies a small in-memory backoff to repeated password
+// failures. It protects the single-admin login without creating a durable
+// account-lockout state that an operator cannot clear.
+func (s *Service) LoginRetryAfter(key string) time.Duration {
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+	now := s.now()
+	attempt, ok := s.loginFailures[key]
+	if !ok {
+		return 0
+	}
+	if now.Before(attempt.lockedUntil) {
+		return attempt.lockedUntil.Sub(now)
+	}
+	if now.Sub(attempt.first) > 15*time.Minute {
+		delete(s.loginFailures, key)
+	}
+	return 0
+}
+
+func (s *Service) RecordLoginFailure(key string) {
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+	now := s.now()
+	attempt := s.loginFailures[key]
+	if attempt.first.IsZero() || now.Sub(attempt.first) > 15*time.Minute {
+		attempt = loginAttempt{first: now}
+	}
+	attempt.count++
+	if attempt.count >= 5 {
+		attempt.lockedUntil = now.Add(5 * time.Minute)
+	}
+	s.loginFailures[key] = attempt
+}
+
+func (s *Service) ClearLoginFailures(key string) {
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+	delete(s.loginFailures, key)
 }
 
 // Register creates the first admin account and returns it. It is only valid

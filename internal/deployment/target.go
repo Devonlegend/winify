@@ -107,12 +107,26 @@ func ResolveRef(ctx context.Context, secrets SecretResolver, ref string) (string
 	return secrets.Get(ctx, name)
 }
 
+const maxCommandOutput = 2 << 20 // 2 MiB retained per remote command
+
+func capCommandOutput(value string) string {
+	if len(value) <= maxCommandOutput {
+		return value
+	}
+	keep := maxCommandOutput / 2
+	return value[:keep] + "\n...[command output truncated]...\n" + value[len(value)-keep:]
+}
+
 // execCmd runs a command, logging a redacted label and the (trimmed) output.
 func execCmd(ctx context.Context, runner Runner, cmd, logCmd string, logf loggerFunc) (string, error) {
 	logf("$ %s", logCmd)
 	out, err := runner.Run(ctx, cmd)
-	if trimmed := strings.TrimSpace(out); trimmed != "" {
-		logf("%s", RedactAuditText(trimmed))
+	if label, sensitive := auditRedaction(ctx); sensitive {
+		if strings.TrimSpace(out) != "" {
+			logf("%s", label)
+		}
+	} else if trimmed := strings.TrimSpace(out); trimmed != "" {
+		logf("%s", RedactAuditText(capCommandOutput(trimmed)))
 	}
 	return out, err
 }
@@ -234,6 +248,33 @@ func sanitize(s string) string {
 // shellQuote wraps s in single quotes for safe use in a POSIX shell command.
 func validateProjectID(id string) error {
 	return config.ValidateResourceID("project id", id)
+}
+
+func validateServiceExecutablePath(executable, workDir string) error {
+	if executable == "" {
+		return nil
+	}
+	if windowsAbsPath(executable) {
+		if _, ok := relUnder(workDir, executable); !ok && !strings.EqualFold(strings.TrimRight(executable, `\\`), strings.TrimRight(workDir, `\\`)) {
+			return fmt.Errorf("service executable %q is outside service_work_dir", executable)
+		}
+		return nil
+	}
+	return config.ValidateRepoRelativePath("service_exe", executable)
+}
+
+func validateTargetProjectPaths(cfg config.Config, p config.Project, srv config.Server) error {
+	if cfg.Deploy.AllowExternalTargetPaths || (srv.Type != config.ServerTypeIIS && srv.Type != config.ServerTypeWindowsService) {
+		return nil
+	}
+	if srv.Type == config.ServerTypeIIS {
+		if err := config.ValidateTargetPath(cfg.Deploy.TargetRoot, p.IISPhysicalPath); err != nil {
+			return fmt.Errorf("iis_physical_path: %w", err)
+		}
+	} else if err := config.ValidateTargetPath(cfg.Deploy.TargetRoot, p.ServiceWorkDir); err != nil {
+		return fmt.Errorf("service_work_dir: %w", err)
+	}
+	return nil
 }
 
 func shellQuote(s string) string {

@@ -49,7 +49,7 @@
 
   <fieldset>
     <legend>IIS</legend>
-    <label>Physical path<input name="iis_physical_path" value="{{if .Form}}{{.Form.IISPhysicalPath}}{{end}}" placeholder="C:\inetpub\wwwroot\app"></label>
+    <label>Physical path<input name="iis_physical_path" value="{{if .Form}}{{.Form.IISPhysicalPath}}{{end}}" placeholder="C:\ProgramData\winify\apps\app"></label>
     <label>Site name<input name="iis_site" value="{{if .Form}}{{.Form.IISSite}}{{end}}" placeholder="(defaults to the project id)"></label>
     <label>App pool<input name="iis_app_pool" value="{{if .Form}}{{.Form.IISAppPool}}{{end}}"></label>
     <label>Service (optional)<input name="iis_service" value="{{if .Form}}{{.Form.IISService}}{{end}}"></label>
@@ -60,12 +60,12 @@
   <fieldset>
     <legend>Windows service (NSSM)</legend>
     <label>Service name<input name="service_name" value="{{if .Form}}{{.Form.ServiceName}}{{end}}" placeholder="MyApp"></label>
-    <label>Executable path (on target)<input name="service_exe" value="{{if .Form}}{{.Form.ServiceExe}}{{end}}" placeholder="C:\control-center\apps\myapp\myapp.exe"></label>
+    <label>Executable path (on target)<input name="service_exe" value="{{if .Form}}{{.Form.ServiceExe}}{{end}}" placeholder="C:\ProgramData\winify\apps\myapp\myapp.exe"></label>
     <label>Arguments (optional)<input name="service_args" value="{{if .Form}}{{.Form.ServiceArgs}}{{end}}" placeholder="--port 8080"></label>
-    <label>Install directory<input name="service_work_dir" value="{{if .Form}}{{.Form.ServiceWorkDir}}{{end}}" placeholder="C:\control-center\apps\myapp"></label>
+    <label>Install directory<input name="service_work_dir" value="{{if .Form}}{{.Form.ServiceWorkDir}}{{end}}" placeholder="C:\ProgramData\winify\apps\myapp"></label>
     <label>Build command (optional)<input name="service_build_command" value="{{if .Form}}{{.Form.ServiceBuildCommand}}{{end}}" placeholder="go build -o myapp.exe ./cmd/myapp"></label>
     <label>Source subdir<input name="service_source_subdir" value="{{if .Form}}{{.Form.ServiceSourceSubdir}}{{end}}" placeholder="."></label>
-    <label>Log directory (optional)<input name="service_log_dir" value="{{if .Form}}{{.Form.ServiceLogDir}}{{end}}" placeholder="C:\control-center\logs\myapp"></label>
+    <label>Log directory (optional)<input name="service_log_dir" value="{{if .Form}}{{.Form.ServiceLogDir}}{{end}}" placeholder="C:\ProgramData\winify\logs\myapp"></label>
     <label>Service account (optional)<input name="service_account" value="{{if .Form}}{{.Form.ServiceAccount}}{{end}}" placeholder="LocalSystem"></label>
     <label>Caddy mode
       <select name="caddy_mode">

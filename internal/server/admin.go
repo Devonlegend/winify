@@ -322,6 +322,10 @@ func (s *Server) handleResourcePage(w http.ResponseWriter, r *http.Request) {
 	}
 	deploys, _ := s.store.ListDeployments(ctx, id, 20)
 	successes, _ := s.store.SuccessfulDeployments(ctx, id, 2)
+	canRollback := len(successes) >= 2
+	if len(successes) >= 1 && len(deploys) > 0 && deploys[0].Status != models.DeploySuccess {
+		canRollback = true
+	}
 	servers, _ := s.store.ListServers(ctx)
 
 	data := resourcePageData{
@@ -330,7 +334,7 @@ func (s *Server) handleResourcePage(w http.ResponseWriter, r *http.Request) {
 		ServerType:   serverType,
 		Tab:          tab,
 		Deployments:  deploys,
-		CanRollback:  len(successes) >= 2,
+		CanRollback:  canRollback,
 		Servers:      servers,
 		Form:         &project,
 		EditEnv:      formatEnv(project.Env),
@@ -351,9 +355,9 @@ func (s *Server) handleProjectEnvSave(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/projects?error="+urlQuery("Unknown resource"), http.StatusSeeOther)
 		return
 	}
-	project.Env = parseEnv(r.FormValue("env"))
+	project.Env = preserveRedactedEnv(parseEnv(r.FormValue("env")), project.Env)
 	if _, ok := r.Form["build_env"]; ok {
-		project.BuildEnv = parseEnv(r.FormValue("build_env"))
+		project.BuildEnv = preserveRedactedEnv(parseEnv(r.FormValue("build_env")), project.BuildEnv)
 	}
 	if err := s.store.UpsertProject(ctx, project); err != nil {
 		log.Printf("projects: env: %v", err)
@@ -448,6 +452,8 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 	oldDomain := ""
 	if existing, err := s.store.GetProject(r.Context(), p.ID); err == nil {
 		oldDomain = existing.Domain
+		p.Env = preserveRedactedEnv(p.Env, existing.Env)
+		p.BuildEnv = preserveRedactedEnv(p.BuildEnv, existing.BuildEnv)
 		if _, present := r.Form["iis_site"]; !present {
 			p.IISSite = existing.IISSite
 		}
@@ -455,6 +461,8 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 			p.Runtime = existing.Runtime
 		}
 	}
+	p.Env = preserveRedactedEnv(p.Env, nil)
+	p.BuildEnv = preserveRedactedEnv(p.BuildEnv, nil)
 	if p.Branch == "" {
 		p.Branch = "main"
 	}
@@ -489,14 +497,18 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 		s.renderProjectForm(w, r, http.StatusBadRequest, &p, err.Error())
 		return
 	}
+	if err := s.validateProjectTargetPaths(p, srv); err != nil {
+		s.renderProjectForm(w, r, http.StatusBadRequest, &p, err.Error())
+		return
+	}
 	if err := s.store.UpsertProject(r.Context(), p); err != nil {
 		log.Printf("projects: save: %v", err)
 		s.renderProjectForm(w, r, http.StatusInternalServerError, &p, "Failed to save project.")
 		return
 	}
-	if oldDomain != "" && oldDomain != p.Domain && s.proxy != nil {
-		if err := s.proxy.Deregister(r.Context(), oldDomain); err != nil {
-			log.Printf("projects: deregister old domain %s: %v", oldDomain, err)
+	if oldDomain != "" && oldDomain != p.Domain {
+		if err := s.store.RetireProxyDomain(r.Context(), p.ID, oldDomain); err != nil {
+			log.Printf("projects: retire old domain %s: %v", oldDomain, err)
 		}
 	}
 	http.Redirect(w, r, "/projects/"+p.ID+"?notice="+urlQuery("Saved"), http.StatusSeeOther)
@@ -526,6 +538,9 @@ func (s *Server) handleProjectDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "error", http.StatusInternalServerError)
 		return
 	}
+	if err := s.store.DeleteRetiredProxyDomains(r.Context(), id); err != nil {
+		log.Printf("projects: clear retired domains: %v", err)
+	}
 	http.Redirect(w, r, "/projects?notice=Project+deleted", http.StatusSeeOther)
 }
 
@@ -542,6 +557,23 @@ func normalizeRuntime(raw string) string {
 
 func validateProject(p config.Project, srv config.Server) error {
 	return config.ValidateProject(p, srv)
+}
+
+func (s *Server) validateProjectTargetPaths(p config.Project, srv config.Server) error {
+	if s.cfg.Deploy.AllowExternalTargetPaths || (srv.Type != config.ServerTypeIIS && srv.Type != config.ServerTypeWindowsService) {
+		return nil
+	}
+	root := s.cfg.Deploy.TargetRoot
+	if srv.Type == config.ServerTypeIIS {
+		if err := config.ValidateTargetPath(root, p.IISPhysicalPath); err != nil {
+			return fmt.Errorf("iis_physical_path: %w", err)
+		}
+	} else if p.ServiceWorkDir != "" {
+		if err := config.ValidateTargetPath(root, p.ServiceWorkDir); err != nil {
+			return fmt.Errorf("service_work_dir: %w", err)
+		}
+	}
+	return nil
 }
 
 // handleManualDeploy starts a deploy without a webhook (first deploy / retry).
@@ -719,7 +751,11 @@ func parseEnv(raw string) map[string]string {
 	return env
 }
 
-// formatEnv renders env as sorted KEY=VALUE lines for the edit form.
+const redactedEnvValue = "[redacted]"
+
+// formatEnv renders env as sorted KEY=VALUE lines for the edit form. Values
+// are write-only: the UI shows a stable marker so an existing secret is not
+// exposed in HTML, a screenshot, or a browser history/autofill artifact.
 func formatEnv(env map[string]string) string {
 	if len(env) == 0 {
 		return ""
@@ -731,9 +767,31 @@ func formatEnv(env map[string]string) string {
 	sort.Strings(keys)
 	var b strings.Builder
 	for _, k := range keys {
-		fmt.Fprintf(&b, "%s=%s\n", k, env[k])
+		fmt.Fprintf(&b, "%s=%s\n", k, redactedEnvValue)
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// preserveRedactedEnv replaces UI markers with the existing values. Removing a
+// line removes the variable; editing a value explicitly stores the new value.
+func preserveRedactedEnv(submitted, existing map[string]string) map[string]string {
+	if len(submitted) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(submitted))
+	for key, value := range submitted {
+		if value == redactedEnvValue {
+			if old, ok := existing[key]; ok {
+				out[key] = old
+			}
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // urlQuery escapes a value for use in a query string.

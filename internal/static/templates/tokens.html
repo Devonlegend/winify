@@ -2,7 +2,7 @@
 {{define "body"}}
 <main>
   <h1>API Tokens</h1>
-  <p class="muted">Bearer tokens for the REST API at <span class="mono">/api/v1</span>. Tokens are shown once and stored only as a hash.</p>
+  <p class="muted">Bearer tokens for the REST API at <span class="mono">/api/v1</span>. Tokens are shown once and stored only as a hash. A <strong>write</strong> token is an administrator-equivalent credential: it can change any project/server and trigger privileged deployments. Issue it only to trusted automation.</p>
 
   {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
   {{if .Error}}<p class="error">{{.Error}}</p>{{end}}

@@ -56,19 +56,29 @@ func (d *Deployer) Stop() {
 			d.cancel()
 		}
 	})
-	d.workers.Wait()
+	done := make(chan struct{})
+	go func() {
+		d.workers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		log.Printf("deploy: timed out waiting for deployment workers to stop")
+	}
 }
 
 // deployJob is one unit of work handed to a Target.
 type deployJob struct {
-	id       int64
-	project  config.Project
-	server   config.Server
-	trigger  string
-	commit   string
-	ref      string
-	artifact string // Docker image tag, or backup path for a rollback
-	rollback bool
+	id               int64
+	project          config.Project
+	server           config.Server
+	trigger          string
+	commit           string
+	ref              string
+	artifact         string // Docker image tag, or backup path for a rollback
+	previousArtifact string // last known-good artifact used for compensation
+	rollback         bool
 }
 
 // Trigger records a queued deployment and runs it asynchronously. It returns
@@ -76,6 +86,10 @@ type deployJob struct {
 func (d *Deployer) Trigger(ctx context.Context, project config.Project, srv config.Server, trigger, commit, ref string) (int64, error) {
 	if _, loaded := d.inFlight.LoadOrStore(project.ID, struct{}{}); loaded {
 		return 0, ErrDeployInProgress
+	}
+	previousArtifact := ""
+	if successes, err := d.store.SuccessfulDeployments(ctx, project.ID, 1); err == nil && len(successes) > 0 {
+		previousArtifact = successes[0].ImageTag
 	}
 	id, err := d.store.CreateDeployment(ctx, models.Deployment{
 		ProjectID:  project.ID,
@@ -98,6 +112,7 @@ func (d *Deployer) Trigger(ctx context.Context, project config.Project, srv conf
 		defer cancel()
 		d.run(runCtx, deployJob{
 			id: id, project: project, server: srv, trigger: trigger, commit: commit, ref: ref,
+			previousArtifact: previousArtifact,
 		})
 	}()
 	return id, nil
@@ -155,16 +170,29 @@ func (d *Deployer) Rollback(ctx context.Context, project config.Project, srv con
 	return id, nil
 }
 
-// previousSuccessful returns the successful deployment before the latest one.
+// rollbackTarget selects the artifact to restore. If the latest attempt failed,
+// the newest successful release is the recovery point (and one success is
+// enough). If the latest attempt succeeded, the caller must explicitly roll
+// back to the prior success.
 func (d *Deployer) previousSuccessful(ctx context.Context, projectID string) (models.Deployment, error) {
+	latest, err := d.store.ListDeployments(ctx, projectID, 1)
+	if err != nil {
+		return models.Deployment{}, err
+	}
 	successes, err := d.store.SuccessfulDeployments(ctx, projectID, 2)
 	if err != nil {
 		return models.Deployment{}, err
 	}
-	if len(successes) < 2 {
+	if len(successes) == 0 {
+		return models.Deployment{}, fmt.Errorf("no successful deployment to roll back to")
+	}
+	if len(successes) >= 2 && len(latest) > 0 && latest[0].Status == models.DeploySuccess {
+		return successes[1], nil
+	}
+	if len(successes) == 1 && len(latest) > 0 && latest[0].Status == models.DeploySuccess {
 		return models.Deployment{}, fmt.Errorf("no previous successful deployment to roll back to")
 	}
-	return successes[1], nil
+	return successes[0], nil
 }
 
 // run executes the pipeline for one job and records status + logs throughout.
@@ -179,11 +207,12 @@ func (d *Deployer) run(ctx context.Context, job deployJob) {
 		}
 	}
 	fail := func(err error) {
-		logf("ERROR: %v", err)
-		if ferr := d.store.FinishDeployment(dbCtx, job.id, models.DeployFailed, err.Error(), time.Now()); ferr != nil {
+		safeErr := RedactAuditText(err.Error())
+		logf("ERROR: %s", safeErr)
+		if ferr := d.store.FinishDeployment(dbCtx, job.id, models.DeployFailed, safeErr, time.Now()); ferr != nil {
 			log.Printf("deploy %d: finish: %v", job.id, ferr)
 		}
-		log.Printf("deploy %d (%s) failed: %v", job.id, job.project.ID, err)
+		log.Printf("deploy %d (%s) failed: %s", job.id, job.project.ID, safeErr)
 	}
 
 	if err := d.store.SetDeploymentStatus(dbCtx, job.id, models.DeployRunning, job.artifact); err != nil {
@@ -241,6 +270,7 @@ func (d *Deployer) run(ctx context.Context, job deployJob) {
 		fail(err)
 		return
 	}
+	d.cleanupRetiredProxy(ctx, job, logf)
 
 	logf("%s %d succeeded: artifact=%s", verb, job.id, job.artifact)
 	if err := d.store.FinishDeployment(dbCtx, job.id, models.DeploySuccess, "", time.Now()); err != nil {
@@ -265,7 +295,36 @@ func (d *Deployer) resolveSharedVars(ctx context.Context, p *config.Project) err
 	if p.BuildEnv, err = expandSharedVars(p.BuildEnv, vars); err != nil {
 		return err
 	}
+	if err := config.ValidateEnvValues("env", p.Env); err != nil {
+		return err
+	}
+	if err := config.ValidateEnvValues("build_env", p.BuildEnv); err != nil {
+		return err
+	}
 	return nil
+}
+
+// cleanupRetiredProxy removes routes for domains replaced by a project. It is
+// called only after the target deployment and the new route (if any) succeed.
+func (d *Deployer) cleanupRetiredProxy(ctx context.Context, job deployJob, logf loggerFunc) {
+	if !d.cfg.Proxy.Enabled {
+		return
+	}
+	cleanupCtx := context.WithoutCancel(ctx)
+	domains, err := d.store.ListRetiredProxyDomains(cleanupCtx, job.project.ID)
+	if err != nil {
+		logf("WARNING: list retired proxy domains: %v", err)
+		return
+	}
+	for _, domain := range domains {
+		if err := d.proxy.Deregister(cleanupCtx, domain); err != nil {
+			logf("WARNING: remove retired proxy domain %s: %v", domain, err)
+			continue
+		}
+		if err := d.store.DeleteRetiredProxyDomain(cleanupCtx, job.project.ID, domain); err != nil {
+			logf("WARNING: clear retired proxy domain %s: %v", domain, err)
+		}
+	}
 }
 
 // registerProxy makes the app live at its domain through the reverse proxy.

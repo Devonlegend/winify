@@ -1,7 +1,6 @@
 package deployment
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -47,18 +46,12 @@ func (LocalRunner) Run(ctx context.Context, script string) (string, error) {
 	}
 
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	var output syncBuffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
 	err = cmd.Run()
 
-	out := strings.TrimSpace(stdout.String())
-	if se := strings.TrimSpace(stderr.String()); se != "" {
-		if out != "" {
-			out += "\n"
-		}
-		out += se
-	}
+	out := strings.TrimSpace(output.String())
 	if err != nil {
 		return out, fmt.Errorf("powershell: %w", err)
 	}

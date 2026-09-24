@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	pathpkg "path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -172,6 +173,9 @@ var (
 	resourceIDPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 	envKeyPattern      = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	domainLabelPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
+	imageRefPattern    = regexp.MustCompile(`^(?:[A-Za-z0-9._-]+(?::[0-9]+)?/)?[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*(?::[A-Za-z0-9_.-]+)?(?:@sha256:[a-fA-F0-9]{64})?$`)
+	serviceNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,127}$`)
+	scpRepoPattern     = regexp.MustCompile(`^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[^\s]+$`)
 )
 
 // ValidateResourceID keeps IDs safe for URLs, log labels, and target paths.
@@ -179,8 +183,26 @@ var (
 // separators or dot segments here would allow a project write outside its
 // configured work root.
 func ValidateResourceID(kind, id string) error {
-	if !resourceIDPattern.MatchString(id) {
+	if !resourceIDPattern.MatchString(id) || strings.Contains(id, "..") || strings.HasSuffix(id, ".") {
 		return fmt.Errorf("%s must contain only letters, numbers, '.', '_' or '-', and must start with a letter or number", kind)
+	}
+	return nil
+}
+
+// ValidateRepoRelativePath keeps source/build selections inside the checked-out
+// repository on both POSIX and Windows targets.
+func ValidateRepoRelativePath(field, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	normalized := strings.ReplaceAll(value, "\\", "/")
+	if strings.HasPrefix(normalized, "/") || strings.HasPrefix(normalized, "../") || normalized == ".." || strings.Contains(normalized, ":") {
+		return fmt.Errorf("%s must be a relative path inside the repository", field)
+	}
+	clean := pathpkg.Clean(normalized)
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return fmt.Errorf("%s must be a relative path inside the repository", field)
 	}
 	return nil
 }
@@ -210,22 +232,92 @@ func ValidateDomain(domain string) error {
 	return nil
 }
 
+// ValidateEnvKey rejects keys that cannot be represented safely in .env files
+// or process environments.
+// ValidateTargetPath ensures destructive Windows copies remain below the
+// configured managed root. Callers may explicitly opt out for a separately
+// governed IIS/site root.
+func ValidateTargetPath(root, candidate string) error {
+	root = strings.TrimRight(strings.ReplaceAll(strings.TrimSpace(root), "/", `\`), `\\`)
+	candidate = strings.TrimRight(strings.ReplaceAll(strings.TrimSpace(candidate), "/", `\`), `\\`)
+	if root == "" || candidate == "" || !looksLikeWindowsAbs(candidate) {
+		return fmt.Errorf("target path must be an absolute Windows path")
+	}
+	if !strings.EqualFold(candidate, root) && !strings.HasPrefix(strings.ToLower(candidate), strings.ToLower(root+`\`)) {
+		return fmt.Errorf("target path %q is outside deploy.target_root %q", candidate, root)
+	}
+	return nil
+}
+
+// ValidateServiceName keeps names safe when interpolated into PowerShell
+// messages and NSSM commands.
+func ValidateServiceName(name string) error {
+	if !serviceNamePattern.MatchString(name) || strings.Contains(name, "..") {
+		return fmt.Errorf("invalid service name %q", name)
+	}
+	return nil
+}
+
+func ValidateEnvKey(key string) error {
+	if !envKeyPattern.MatchString(key) {
+		return fmt.Errorf("invalid environment key %q", key)
+	}
+	return nil
+}
+
+// ValidateEnvValues re-checks values after shared-variable expansion.
+func ValidateEnvValues(field string, env map[string]string) error {
+	return validateEnvMap(field, env)
+}
+
 func validateEnvMap(field string, env map[string]string) error {
-	for key := range env {
-		if !envKeyPattern.MatchString(key) {
-			return fmt.Errorf("%s contains invalid environment key %q", field, key)
+	for key, value := range env {
+		if err := ValidateEnvKey(key); err != nil {
+			return fmt.Errorf("%s contains %w", field, err)
+		}
+		if strings.ContainsAny(value, "\x00\r\n") {
+			return fmt.Errorf("%s value for %q contains a newline or NUL", field, key)
 		}
 	}
 	return nil
 }
 
-func validateRepoURL(repoURL string) error {
+func ValidateRepoURL(repoURL string) error {
+	repoURL = strings.TrimSpace(repoURL)
 	if repoURL == "" {
 		return nil
 	}
+	if strings.ContainsAny(repoURL, "\x00\r\n") {
+		return fmt.Errorf("repo_url contains an invalid control character")
+	}
+	// Local paths are supported for development and air-gapped targets. Do
+	// not allow relative traversal or Git's external-helper/file transports.
+	if strings.HasPrefix(repoURL, "/") || looksLikeWindowsAbs(repoURL) {
+		return nil
+	}
+	if strings.HasPrefix(repoURL, ".") || strings.Contains(repoURL, "..") {
+		return fmt.Errorf("repo_url must be an approved Git URL or absolute local path")
+	}
+	if scpRepoPattern.MatchString(repoURL) {
+		return nil
+	}
 	u, err := url.Parse(repoURL)
-	if err == nil && u.User != nil {
-		return fmt.Errorf("repo_url must not contain embedded credentials")
+	if err != nil || u.Hostname() == "" {
+		return fmt.Errorf("repo_url must be an approved Git URL or absolute local path")
+	}
+	switch u.Scheme {
+	case "https":
+		if u.User != nil {
+			return fmt.Errorf("repo_url must not contain embedded credentials")
+		}
+	case "ssh":
+		if u.User != nil {
+			if _, hasPassword := u.User.Password(); hasPassword {
+				return fmt.Errorf("repo_url must not contain embedded credentials")
+			}
+		}
+	default:
+		return fmt.Errorf("repo_url must use https, ssh, or an absolute local path")
 	}
 	return nil
 }
@@ -240,16 +332,30 @@ func ValidateServer(srv Server) error {
 	if strings.TrimSpace(srv.Name) == "" {
 		return errors.New("name is required")
 	}
+	if strings.ContainsAny(srv.SSHHost+srv.SSHUser+srv.NSSMPath+srv.CaddyPath, "\x00\r\n") {
+		return errors.New("server fields contain an invalid control character")
+	}
 	if srv.SSHPort < 0 || srv.SSHPort > 65535 {
 		return errors.New("ssh_port must be between 1 and 65535")
 	}
 	if srv.WinRMTransport != "" && srv.WinRMTransport != "ntlm" && srv.WinRMTransport != "basic" {
 		return errors.New("winrm_transport must be ntlm or basic")
 	}
+	for _, service := range srv.Services {
+		if err := ValidateServiceName(service); err != nil {
+			return err
+		}
+	}
 	if srv.WinRMEndpoint != "" {
 		u, err := url.Parse(srv.WinRMEndpoint)
 		if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
 			return errors.New("winrm_endpoint must be an http or https URL")
+		}
+		if u.User != nil {
+			return errors.New("winrm_endpoint must not contain embedded credentials")
+		}
+		if u.Scheme == "http" && !srv.WinRMInsecure {
+			return errors.New("winrm_endpoint over HTTP requires winrm_insecure: true")
 		}
 		if srv.WinRMTransport == "basic" && u.Scheme != "https" {
 			return errors.New("winrm_transport=basic requires an https winrm_endpoint")
@@ -298,11 +404,25 @@ func ValidateProject(p Project, srv Server) error {
 	if strings.TrimSpace(p.ServerID) == "" {
 		return errors.New("server is required")
 	}
+	if strings.ContainsAny(p.Branch, "\x00\r\n") {
+		return errors.New("branch contains an invalid control character")
+	}
+	if strings.ContainsAny(p.HealthPath, "\x00\r\n") {
+		return errors.New("health_path contains an invalid control character")
+	}
 	if err := ValidateDomain(p.Domain); err != nil {
 		return err
 	}
-	if err := validateRepoURL(p.RepoURL); err != nil {
+	if err := ValidateRepoURL(p.RepoURL); err != nil {
 		return err
+	}
+	for field, value := range map[string]string{
+		"dockerfile_path": p.DockerfilePath, "compose_path": p.ComposePath,
+		"iis_source_subdir": p.IISSourceSubdir, "service_source_subdir": p.ServiceSourceSubdir,
+	} {
+		if err := ValidateRepoRelativePath(field, value); err != nil {
+			return err
+		}
 	}
 	if err := validateEnvMap("env", p.Env); err != nil {
 		return err
@@ -340,11 +460,24 @@ func ValidateProject(p Project, srv Server) error {
 		if len(p.Env) > 0 {
 			return errors.New("runtime env is not supported for IIS projects; configure the application through web.config or the build")
 		}
+		if strings.ContainsAny(p.IISPhysicalPath+p.IISService+p.IISAppPool, "\x00\r\n") {
+			return errors.New("IIS fields contain an invalid control character")
+		}
+		if p.IISService != "" {
+			if err := ValidateServiceName(p.IISService); err != nil {
+				return err
+			}
+		}
 	case ServerTypeWindowsService:
 		if p.RepoURL == "" {
 			return errors.New("repo_url is required for a Windows service project")
 		}
 		staticOnly := p.ServiceExe == "" && p.CaddyMode == CaddyModeStatic
+		if p.ServiceName != "" {
+			if err := ValidateServiceName(p.ServiceName); err != nil {
+				return err
+			}
+		}
 		if !staticOnly && p.ServiceName == "" {
 			return errors.New("service_name is required for a Windows service project")
 		}
@@ -353,6 +486,18 @@ func ValidateProject(p Project, srv Server) error {
 		}
 		if p.ServiceWorkDir == "" {
 			return errors.New("service_work_dir is required for a Windows service project")
+		}
+		if strings.ContainsAny(p.ServiceName+p.ServiceExe+p.ServiceWorkDir+p.ServiceLogDir, "\x00\r\n") {
+			return errors.New("Windows service fields contain an invalid control character")
+		}
+		if p.ServiceExe != "" {
+			if looksLikeWindowsAbs(p.ServiceExe) {
+				if err := ValidateTargetPath(p.ServiceWorkDir, p.ServiceExe); err != nil {
+					return fmt.Errorf("service_exe: %w", err)
+				}
+			} else if err := ValidateRepoRelativePath("service_exe", p.ServiceExe); err != nil {
+				return err
+			}
 		}
 		switch p.CaddyMode {
 		case "", CaddyModeNone, CaddyModeStatic:
@@ -366,6 +511,9 @@ func ValidateProject(p Project, srv Server) error {
 		case ProjectSourceImage:
 			if strings.TrimSpace(p.Image) == "" {
 				return errors.New("image is required for the image deploy source")
+			}
+			if !imageRefPattern.MatchString(strings.TrimSpace(p.Image)) {
+				return errors.New("image must be a valid Docker image reference")
 			}
 		case ProjectSourceCompose:
 			if p.RepoURL == "" {

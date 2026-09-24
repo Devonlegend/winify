@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/Devonlegend/winify/internal/config"
 	"github.com/Devonlegend/winify/internal/deployment"
 )
 
@@ -54,10 +56,27 @@ func (s caddyStep) Check(ctx context.Context, r deployment.Runner) (bool, error)
 	if err != nil {
 		return false, err
 	}
-	return strings.Contains(out, "done"), nil
+	if !strings.Contains(out, "done") {
+		return false, nil
+	}
+	if pin := strings.TrimSpace(s.sha256); pin != "" {
+		decoded, err := hex.DecodeString(pin)
+		if err != nil || len(decoded) != sha256.Size {
+			return false, fmt.Errorf("invalid caddy sha256 %q", pin)
+		}
+		got, err := deployment.RemoteFileSHA256(ctx, r, s.path)
+		if err != nil {
+			return false, err
+		}
+		return strings.EqualFold(got, pin), nil
+	}
+	return true, nil
 }
 
 func (s caddyStep) Apply(ctx context.Context, r deployment.Runner) error {
+	if err := config.ValidateCaddyAdmin(s.admin); err != nil {
+		return err
+	}
 	data, err := s.fetch(ctx)
 	if err != nil {
 		return err
@@ -127,12 +146,16 @@ func downloadCaddy(ctx context.Context, url string) ([]byte, error) {
 }
 
 // downloadOnce performs a single bounded download.
-func downloadOnce(ctx context.Context, url string) ([]byte, error) {
+func downloadOnce(ctx context.Context, rawURL string) ([]byte, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return nil, fmt.Errorf("caddy download URL must be HTTPS")
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	// #nosec G107 -- the URL is operator-configured, not user input.
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("download caddy: %w", err)
 	}
@@ -141,6 +164,9 @@ func downloadOnce(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("download caddy: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.Request != nil && resp.Request.URL != nil && resp.Request.URL.Scheme != "https" {
+		return nil, fmt.Errorf("caddy download redirected to a non-HTTPS URL")
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download caddy: status %d", resp.StatusCode)
 	}
@@ -186,24 +212,30 @@ func caddyConfigFile(admin string) string {
 // caddyServiceScript installs/updates and starts the Caddy service via NSSM.
 func caddyServiceScript(caddyPath, nssmPath, dir, configFile, logDir string) string {
 	args := fmt.Sprintf("run --config %s --adapter caddyfile", configFile)
+	guard := func(action string) string {
+		return fmt.Sprintf("; if ($LASTEXITCODE -ne 0) { throw %s }", psQuote("nssm "+action+" failed"))
+	}
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'\n")
 	fmt.Fprintf(&b, "$nssm = %s\n", psQuote(nssmPath))
 	fmt.Fprintf(&b, "if (-not (Get-Service -Name %s -ErrorAction SilentlyContinue)) {\n", psQuote(caddyService))
-	fmt.Fprintf(&b, "  & $nssm install %s %s\n", psQuote(caddyService), psQuote(caddyPath))
+	fmt.Fprintf(&b, "  & $nssm install %s %s%s\n", psQuote(caddyService), psQuote(caddyPath), guard("install"))
 	b.WriteString("}\n")
-	fmt.Fprintf(&b, "& $nssm set %s Application %s\n", psQuote(caddyService), psQuote(caddyPath))
-	fmt.Fprintf(&b, "& $nssm set %s AppParameters %s\n", psQuote(caddyService), psQuote(args))
-	fmt.Fprintf(&b, "& $nssm set %s AppDirectory %s\n", psQuote(caddyService), psQuote(dir))
+	fmt.Fprintf(&b, "& $nssm set %s Application %s%s\n", psQuote(caddyService), psQuote(caddyPath), guard("set Application"))
+	fmt.Fprintf(&b, "& $nssm set %s AppParameters %s%s\n", psQuote(caddyService), psQuote(args), guard("set AppParameters"))
+	fmt.Fprintf(&b, "& $nssm set %s AppDirectory %s%s\n", psQuote(caddyService), psQuote(dir), guard("set AppDirectory"))
 	if logDir != "" {
 		fmt.Fprintf(&b, "New-Item -ItemType Directory -Force -Path %s | Out-Null\n", psQuote(logDir))
-		fmt.Fprintf(&b, "& $nssm set %s AppStdout %s\n", psQuote(caddyService), psQuote(filepath.Join(logDir, "caddy.out.log")))
-		fmt.Fprintf(&b, "& $nssm set %s AppStderr %s\n", psQuote(caddyService), psQuote(filepath.Join(logDir, "caddy.err.log")))
+		fmt.Fprintf(&b, "& $nssm set %s AppStdout %s%s\n", psQuote(caddyService), psQuote(filepath.Join(logDir, "caddy.out.log")), guard("set AppStdout"))
+		fmt.Fprintf(&b, "& $nssm set %s AppStderr %s%s\n", psQuote(caddyService), psQuote(filepath.Join(logDir, "caddy.err.log")), guard("set AppStderr"))
+	} else {
+		fmt.Fprintf(&b, "& $nssm reset %s AppStdout%s\n", psQuote(caddyService), guard("reset AppStdout"))
+		fmt.Fprintf(&b, "& $nssm reset %s AppStderr%s\n", psQuote(caddyService), guard("reset AppStderr"))
 	}
-	fmt.Fprintf(&b, "& $nssm set %s AppExit Default Restart\n", psQuote(caddyService))
-	fmt.Fprintf(&b, "& $nssm set %s Start SERVICE_AUTO_START\n", psQuote(caddyService))
-	fmt.Fprintf(&b, "if ((Get-Service -Name %s).Status -ne 'Running') { & $nssm start %s | Out-Null }\n",
-		psQuote(caddyService), psQuote(caddyService))
+	fmt.Fprintf(&b, "& $nssm set %s AppExit Default Restart%s\n", psQuote(caddyService), guard("set AppExit"))
+	fmt.Fprintf(&b, "& $nssm set %s Start SERVICE_AUTO_START%s\n", psQuote(caddyService), guard("set Start"))
+	fmt.Fprintf(&b, "if ((Get-Service -Name %s).Status -ne 'Running') { & $nssm start %s | Out-Null%s }\n",
+		psQuote(caddyService), psQuote(caddyService), guard("start"))
 	return b.String()
 }
 

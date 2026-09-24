@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -32,6 +33,10 @@ func (s *Server) handleProjectDetect(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "repo_url and server_id are required"})
 		return
 	}
+	if err := config.ValidateRepoURL(repoURL); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 	if s.newRunner == nil {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "detection is not available"})
 		return
@@ -60,12 +65,14 @@ func (s *Server) handleProjectDetect(w http.ResponseWriter, r *http.Request) {
 
 	dir := detectWorkDir(s.cfg, serverID)
 	if err := deployment.CloneShallow(ctx, runner, dir, repoURL, branch, nil); err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		log.Printf("project detect: clone: %v", deployment.RedactAuditText(err.Error()))
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "repository detection failed"})
 		return
 	}
 	tree, err := deployment.NewRepoTree(ctx, runner, dir)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		log.Printf("project detect: tree: %v", deployment.RedactAuditText(err.Error()))
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "repository detection failed"})
 		return
 	}
 	// An explicit language overrides auto-detection (the wizard's dropdown).

@@ -107,8 +107,8 @@ the Docker path.
 - add `ServerTypeWindowsService = "winsvc"`.
 
 `internal/config/entities.go` — `Server` (reuse all WinRM fields):
-- `NSSMPath` (default `C:\control-center\tools\nssm.exe`)
-- `CaddyPath` (optional; default `C:\control-center\tools\caddy.exe`)
+- `NSSMPath` (default `C:\ProgramData\winify\tools\nssm.exe`)
+- `CaddyPath` (optional; default `C:\ProgramData\winify\tools\caddy.exe`)
 
 `Project` (native path):
 - `ServiceName`, `ServiceExe` (path within the build output), `ServiceArgs`
@@ -117,9 +117,9 @@ the Docker path.
 - reuse `Env`, `Port`, `HealthPath`, `Domain`, `Branch`, `RepoURL`
 
 Deploy-time directories (config `DeployConfig`, Windows-style defaults):
-- `ServiceWorkDir` root `C:\control-center`
-- `ServiceBackupDir` `C:\control-center\backups`
-- `NSSMToolsDir` `C:\control-center\tools`
+- `ServiceWorkDir` root `C:\ProgramData\winify\work`
+- `ServiceBackupDir` `C:\ProgramData\winify\backups`
+- `NSSMToolsDir` `C:\ProgramData\winify\tools`
 
 ## 5. Deploy pipeline
 

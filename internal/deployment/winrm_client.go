@@ -28,6 +28,9 @@ func DialWinRM(srv config.Server, password string) (*WinRMRunner, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !https && !srv.WinRMInsecure {
+		return nil, fmt.Errorf("winrm HTTP endpoint requires winrm_insecure: true")
+	}
 	endpoint := winrm.NewEndpoint(host, port, https, srv.WinRMInsecure, nil, nil, nil, 0)
 
 	params := winrm.NewParameters("PT120S", "en-US", 153600)
@@ -39,6 +42,9 @@ func DialWinRM(srv config.Server, password string) (*WinRMRunner, error) {
 	case "", "ntlm":
 		params.TransportDecorator = func() winrm.Transporter { return &winrm.ClientNTLM{} }
 	case "basic":
+		if !https {
+			return nil, fmt.Errorf("winrm basic transport requires an HTTPS endpoint")
+		}
 		// The default transporter authenticates with HTTP Basic.
 	default:
 		return nil, fmt.Errorf("unsupported winrm transport %q", srv.WinRMTransport)
@@ -62,6 +68,7 @@ func (r *WinRMRunner) Run(ctx context.Context, script string) (string, error) {
 		}
 		out += strings.TrimSpace(stderr)
 	}
+	out = capCommandOutput(out)
 	if err != nil {
 		return out, err
 	}
@@ -80,6 +87,9 @@ func parseWinRMEndpoint(endpoint string) (host string, port int, https bool, err
 	u, err := url.Parse(endpoint)
 	if err != nil || u.Hostname() == "" {
 		return "", 0, false, fmt.Errorf("invalid winrm_endpoint %q", endpoint)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", 0, false, fmt.Errorf("winrm endpoint %q must use http or https", endpoint)
 	}
 	https = u.Scheme == "https"
 	port = 5985

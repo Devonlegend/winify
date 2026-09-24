@@ -8,6 +8,7 @@
 
 #define AppName "winify"
 #define AppVersion "0.1.0"
+#define ServiceName "winify"
 
 [Setup]
 AppId={{8E2F1C2A-6B7D-4C1E-9A3B-2D5F6A7B8C90}
@@ -31,13 +32,13 @@ Source: "payload\install.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Run]
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install.ps1"" -Source ""{app}\winify.exe"" -Config ""{commonappdata}\winify\config.yaml"""; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install.ps1"" -Source ""{app}\winify.exe"" -Config ""{commonappdata}\winify\config.yaml"" -ServiceName ""{#ServiceName}"""; \
   StatusMsg: "Installing and starting the winify service..."; \
   Flags: runhidden waituntilterminated
 
 [UninstallRun]
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -Command ""Stop-Service winify -Force -ErrorAction SilentlyContinue; sc.exe delete winify"""; \
+  Parameters: "-NoProfile -Command ""Stop-Service {#ServiceName} -Force -ErrorAction SilentlyContinue; sc.exe delete {#ServiceName}"""; \
   Flags: runhidden
 
 [UninstallDelete]

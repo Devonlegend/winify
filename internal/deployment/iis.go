@@ -33,6 +33,9 @@ func (t *iisTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) 
 	if err := validateProjectID(job.project.ID); err != nil {
 		return "", err
 	}
+	if err := validateTargetProjectPaths(t.cfg, job.project, job.server); err != nil {
+		return "", err
+	}
 	p := job.project
 	if p.IISPhysicalPath == "" {
 		return "", fmt.Errorf("project %s has no iis_physical_path", p.ID)
@@ -128,6 +131,9 @@ func (t *iisTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) 
 // it works even if deploy history was pruned.
 func (t *iisTarget) Rollback(ctx context.Context, job deployJob, logf loggerFunc) (string, error) {
 	if err := validateProjectID(job.project.ID); err != nil {
+		return "", err
+	}
+	if err := validateTargetProjectPaths(t.cfg, job.project, job.server); err != nil {
 		return "", err
 	}
 	p := job.project

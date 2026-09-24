@@ -12,6 +12,8 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -177,6 +179,7 @@ func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(requestLogger)
+	r.Use(requireSameOrigin)
 
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/login", s.handleLoginForm)
@@ -244,6 +247,41 @@ func (s *Server) Handler() http.Handler {
 	return r
 }
 
+// requireSameOrigin is a lightweight CSRF boundary for browser mutations.
+// Requests without Origin/Referer are left alone for CLI clients and the
+// existing HMAC/webhook and bearer-token APIs; browser form submissions send
+// one of these headers and must remain same-host.
+func requireSameOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions || r.Method == http.MethodTrace ||
+			strings.HasPrefix(r.URL.Path, "/api/v1/") || strings.HasPrefix(r.URL.Path, "/webhooks/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		if origin == "" {
+			origin = strings.TrimSpace(r.Header.Get("Referer"))
+		}
+		if origin == "" {
+			// A cookie-authenticated browser mutation without same-origin
+			// metadata is rejected. Unauthenticated login/registration and
+			// non-browser API clients can continue to the handler.
+			if _, err := r.Cookie("cc_session"); err == nil {
+				http.Error(w, "same-origin request metadata required", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		u, err := url.Parse(origin)
+		if err != nil || u.Host == "" || !strings.EqualFold(u.Host, r.Host) {
+			http.Error(w, "cross-origin request rejected", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // render executes the shared "layout" template for the named page.
 func (s *Server) render(w http.ResponseWriter, status int, page string, data any) {
 	t, ok := s.pages[page]
@@ -252,6 +290,11 @@ func (s *Server) render(w http.ResponseWriter, status int, page string, data any
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 	w.WriteHeader(status)
 	if err := t.ExecuteTemplate(w, "layout", data); err != nil {
 		// Headers are already sent; the best we can do is log the failure.

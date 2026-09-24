@@ -7,6 +7,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Devonlegend/winify/internal/config"
 )
@@ -77,19 +78,48 @@ func (t *dockerTarget) deployDockerfile(ctx context.Context, job deployJob, logf
 		return "", err
 	}
 	if err := t.composeUp(ctx, workdir, logf); err != nil {
+		t.restorePrevious(ctx, job, logf)
 		return "", err
 	}
 	if err := t.healthCheck(ctx, job, workdir, "docker-compose.yml", logf); err != nil {
+		t.restorePrevious(ctx, job, logf)
 		return "", err
 	}
 	return tag, nil
 }
 
 // deployImage runs a prebuilt registry image with a generated compose file.
+func (t *dockerTarget) restorePrevious(ctx context.Context, job deployJob, logf loggerFunc) {
+	if strings.TrimSpace(job.previousArtifact) == "" {
+		logf("deployment failed and no previous successful artifact is available for automatic recovery")
+		return
+	}
+	restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+	defer cancel()
+	restoreJob := job
+	restoreJob.artifact = job.previousArtifact
+	restoreJob.commit = job.previousArtifact
+	restoreJob.rollback = true
+	var err error
+	if dockerSource(job.project) == config.ProjectSourceCompose {
+		_, err = t.rollbackCompose(restoreCtx, restoreJob, logf)
+	} else {
+		_, err = t.rollbackImage(restoreCtx, restoreJob, logf)
+	}
+	if err != nil {
+		logf("WARNING: failed to restore previous successful release: %v", err)
+		return
+	}
+	logf("restored previous successful release %s", job.previousArtifact)
+}
+
 func (t *dockerTarget) deployImage(ctx context.Context, job deployJob, logf loggerFunc) (string, error) {
 	image := strings.TrimSpace(job.project.Image)
 	if image == "" {
 		return "", fmt.Errorf("project %s has no image configured", job.project.ID)
+	}
+	if strings.ContainsAny(image, "\r\n\"'`") || strings.ContainsAny(image, " \t") {
+		return "", fmt.Errorf("project %s has an invalid image reference", job.project.ID)
 	}
 	workdir := path.Join(t.cfg.Deploy.WorkDir, job.project.ID)
 	logf("docker pipeline: run image %s", image)
@@ -98,9 +128,11 @@ func (t *dockerTarget) deployImage(ctx context.Context, job deployJob, logf logg
 		return "", err
 	}
 	if err := t.composeUp(ctx, workdir, logf); err != nil {
+		t.restorePrevious(ctx, job, logf)
 		return "", err
 	}
 	if err := t.healthCheck(ctx, job, workdir, "docker-compose.yml", logf); err != nil {
+		t.restorePrevious(ctx, job, logf)
 		return "", err
 	}
 	return image, nil
@@ -125,9 +157,11 @@ func (t *dockerTarget) deployCompose(ctx context.Context, job deployJob, logf lo
 		return "", err
 	}
 	if err := t.composeUpRepo(ctx, workdir, composePath, logf); err != nil {
+		t.restorePrevious(ctx, job, logf)
 		return "", err
 	}
 	if err := t.healthCheck(ctx, job, workdir, composePath, logf); err != nil {
+		t.restorePrevious(ctx, job, logf)
 		return "", err
 	}
 	return rev, nil
@@ -217,7 +251,7 @@ func gitCheckoutRef(rev string) string {
 }
 
 func isHexRevision(rev string) bool {
-	if len(rev) != 40 && len(rev) != 64 {
+	if len(rev) < 7 || len(rev) > 64 {
 		return false
 	}
 	for _, r := range rev {
@@ -265,8 +299,8 @@ func (t *dockerTarget) writeGeneratedCompose(ctx context.Context, job deployJob,
 	content := composeFile(job.project, image)
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
 	// mkdir -p covers the image source, which has no repo clone to create the dir.
-	write := fmt.Sprintf("mkdir -p %s && echo %s | base64 -d > %s",
-		shellQuote(workdir), encoded, shellQuote(path.Join(workdir, "docker-compose.yml")))
+	write := fmt.Sprintf("umask 077; mkdir -p %s && echo %s | base64 -d > %s && chmod 600 %s",
+		shellQuote(workdir), encoded, shellQuote(path.Join(workdir, "docker-compose.yml")), shellQuote(path.Join(workdir, "docker-compose.yml")))
 	// The generated file embeds project env values, so mark only this command
 	// sensitive: the audit log records a label, never the payload.
 	writeCtx := withAuditRedaction(ctx, "write docker-compose.yml (contents redacted)")
@@ -291,7 +325,7 @@ func (t *dockerTarget) writeEnvFile(ctx context.Context, job deployJob, workdir 
 	if len(merged) == 0 {
 		// Remove stale values from a previous deployment. Leaving an old .env
 		// in the checkout can silently reintroduce removed secrets.
-		cmd := fmt.Sprintf(": > %s", shellQuote(path.Join(workdir, ".env")))
+		cmd := fmt.Sprintf("umask 077; : > %s && chmod 600 %s", shellQuote(path.Join(workdir, ".env")), shellQuote(path.Join(workdir, ".env")))
 		writeCtx := withAuditRedaction(ctx, "clear .env (contents redacted)")
 		if out, err := execCmd(writeCtx, t.runner, cmd, "clear .env", logf); err != nil {
 			return fmt.Errorf("clear .env: %w\n%s", err, out)
@@ -299,7 +333,7 @@ func (t *dockerTarget) writeEnvFile(ctx context.Context, job deployJob, workdir 
 		return nil
 	}
 	encoded := base64.StdEncoding.EncodeToString([]byte(envFileContent(merged)))
-	cmd := fmt.Sprintf("echo %s | base64 -d > %s", encoded, shellQuote(path.Join(workdir, ".env")))
+	cmd := fmt.Sprintf("umask 077; echo %s | base64 -d > %s && chmod 600 %s", encoded, shellQuote(path.Join(workdir, ".env")), shellQuote(path.Join(workdir, ".env")))
 	writeCtx := withAuditRedaction(ctx, "write .env (contents redacted)")
 	if out, err := execCmd(writeCtx, t.runner, cmd, "write .env", logf); err != nil {
 		return fmt.Errorf("write .env: %w\n%s", err, out)

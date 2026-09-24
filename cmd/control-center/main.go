@@ -41,6 +41,7 @@ import (
 	"github.com/Devonlegend/winify/internal/proxy"
 	"github.com/Devonlegend/winify/internal/server"
 	"github.com/Devonlegend/winify/internal/service"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -123,6 +124,9 @@ func needsProvisioning(cfg config.Config, configPath string) bool {
 // serve runs the control center until ctx is cancelled. It is shared by the
 // interactive and Windows-service entry points.
 func serve(cfg config.Config, configPath string, ctx context.Context) error {
+	if abs, err := filepath.Abs(configPath); err == nil {
+		configPath = abs
+	}
 	store, cleanup := mustStore(cfg)
 	defer cleanup()
 
@@ -134,9 +138,15 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 	} else if n > 0 {
 		log.Printf("marked %d interrupted deployment(s) as failed", n)
 	}
+	cutoff := time.Now().AddDate(0, 0, -cfg.Deploy.RetentionDays)
+	if err := store.PruneDeployments(ctx, cutoff); err != nil {
+		log.Printf("prune deployment history: %v", err)
+	}
+	if err := store.PruneRemoteCommands(ctx, cutoff); err != nil {
+		log.Printf("prune audit history: %v", err)
+	}
 
 	seedAdmin(ctx, store, cfg)
-	seedInventory(ctx, store, cfg)
 
 	key, err := auth.LoadMasterKey(cfg.Credentials.MasterKey, masterKeyPath(cfg))
 	if err != nil {
@@ -146,6 +156,8 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 	if err != nil {
 		log.Fatalf("credential store: %v", err)
 	}
+	store.SetSecretCodec(credStore)
+	seedInventory(ctx, store, cfg)
 
 	var registrar proxy.Registrar = proxy.Noop{}
 	if cfg.Proxy.Enabled {
@@ -159,11 +171,11 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 			log.Printf("WARNING: deploys with a domain will fail until Caddy is running (or set proxy.enabled: false)")
 		}
 	}
-	if cfg.Deploy.KnownHostsFile == "" {
-		log.Printf("WARNING: deploy.known_hosts_file is empty; SSH host keys will NOT be verified")
+	if cfg.Deploy.KnownHostsFile == "" && !cfg.Deploy.AllowInsecureHostKey {
+		log.Printf("WARNING: deploy.known_hosts_file is empty; SSH deployments will fail closed until it is configured")
 	}
 	sshDial := func(ctx context.Context, srv config.Server, key string) (deployment.Runner, error) {
-		return deployment.DialSSH(ctx, srv.SSHHost, srv.SSHPort, srv.SSHUser, key, cfg.Deploy.KnownHostsFile)
+		return deployment.DialSSHVerified(ctx, srv.SSHHost, srv.SSHPort, srv.SSHUser, key, cfg.Deploy.KnownHostsFile, cfg.Deploy.AllowInsecureHostKey)
 	}
 
 	// Audit every remote command (deploy, rollback, monitor): target, action,
@@ -231,7 +243,7 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 	// Bootstrap backs the Setup page and provisions the host on first run.
 	var boot *bootstrap.Bootstrap
 	if cfg.Bootstrap.Enabled {
-		boot = buildBootstrap(cfg, store, configPath)
+		boot = buildBootstrap(cfg, store, configPath, auditRecorder)
 		provisionIfNeeded(ctx, boot)
 	}
 
@@ -273,6 +285,9 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 		Addr:              cfg.Server.Addr,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	listenErr := make(chan error, 1)
@@ -371,6 +386,17 @@ func seedInventory(ctx context.Context, store *models.Store, cfg config.Config) 
 			if err := config.ValidateProject(p, srv); err != nil {
 				log.Fatalf("invalid project %q in %s: %v", p.ID, cfg.Files.Projects, err)
 			}
+			if !cfg.Deploy.AllowExternalTargetPaths {
+				if srv.Type == config.ServerTypeIIS {
+					if err := config.ValidateTargetPath(cfg.Deploy.TargetRoot, p.IISPhysicalPath); err != nil {
+						log.Fatalf("invalid project %q target path: %v", p.ID, err)
+					}
+				} else if srv.Type == config.ServerTypeWindowsService {
+					if err := config.ValidateTargetPath(cfg.Deploy.TargetRoot, p.ServiceWorkDir); err != nil {
+						log.Fatalf("invalid project %q target path: %v", p.ID, err)
+					}
+				}
+			}
 			if err := store.UpsertProject(ctx, p); err != nil {
 				log.Fatalf("seed project: %v", err)
 			}
@@ -432,6 +458,9 @@ func runBootstrap(args []string) {
 	fs.Parse(args)
 
 	cfg := mustConfig(*configPath)
+	if abs, err := filepath.Abs(*configPath); err == nil {
+		*configPath = abs
+	}
 	if !cfg.Bootstrap.Enabled {
 		log.Fatal("bootstrap is disabled (set bootstrap.enabled: true to enable it)")
 	}
@@ -447,7 +476,7 @@ func runBootstrap(args []string) {
 	if root == "" {
 		root = bootstrap.DefaultRoot()
 	}
-	runner := deployment.NewLocalRunner()
+	runner := deployment.WithAuditRecorder(deployment.NewLocalRunner(), bootstrapAuditLogger)
 	ctx := context.Background()
 
 	if !*dryRun {
@@ -463,22 +492,24 @@ func runBootstrap(args []string) {
 	exe := usableExe()
 	paths := bootstrap.DefaultPaths(root)
 	opts := bootstrap.Options{
-		Paths:        paths,
-		NSSMSource:   cfg.Deploy.NSSMSource,
-		NSSMSHA256:   cfg.Deploy.NSSMSHA256,
-		EnableWinRM:  cfg.Bootstrap.EnableWinRM,
-		ServiceName:  cfg.Bootstrap.ServiceName,
-		ExePath:      exe,
-		ConfigPath:   *configPath,
-		CaddyEnabled: cfg.Bootstrap.Caddy.Enabled,
-		CaddySource:  cfg.Bootstrap.Caddy.Source,
-		CaddyURL:     cfg.Bootstrap.Caddy.URL,
-		CaddySHA256:  cfg.Bootstrap.Caddy.SHA256,
-		CaddyAdmin:   cfg.Bootstrap.Caddy.Admin,
-		DryRun:       *dryRun,
-		Meta:         store,
-		Runner:       runner,
-		Logf:         log.Printf,
+		Paths:          paths,
+		NSSMSource:     cfg.Deploy.NSSMSource,
+		NSSMSHA256:     cfg.Deploy.NSSMSHA256,
+		EnableWinRM:    cfg.Bootstrap.EnableWinRM,
+		ServiceName:    cfg.Bootstrap.ServiceName,
+		ExePath:        exe,
+		ConfigPath:     *configPath,
+		CaddyEnabled:   cfg.Bootstrap.Caddy.Enabled,
+		CaddySource:    cfg.Bootstrap.Caddy.Source,
+		CaddyURL:       cfg.Bootstrap.Caddy.URL,
+		CaddySHA256:    cfg.Bootstrap.Caddy.SHA256,
+		CaddyAdmin:     cfg.Bootstrap.Caddy.Admin,
+		DryRun:         *dryRun,
+		Meta:           store,
+		Runner:         runner,
+		AuditMeta:      deployment.AuditMeta{ServerID: "local", ServerType: "local", Action: "bootstrap"},
+		StateNamespace: "local",
+		Logf:           log.Printf,
 	}
 
 	// The local target runs PowerShell in-process, so it needs no credential.
@@ -516,13 +547,17 @@ func usableExe() string {
 }
 
 // buildBootstrap assembles the host-provisioning steps for this configuration.
-func buildBootstrap(cfg config.Config, store *models.Store, configPath string) *bootstrap.Bootstrap {
+func buildBootstrap(cfg config.Config, store *models.Store, configPath string, recorders ...deployment.AuditRecorder) *bootstrap.Bootstrap {
 	root := cfg.Bootstrap.InstallDir
 	if root == "" {
 		root = bootstrap.DefaultRoot()
 	}
 	paths := bootstrap.DefaultPaths(root)
 	exe := usableExe()
+	var runner deployment.Runner = deployment.NewLocalRunner()
+	if len(recorders) > 0 && recorders[0] != nil {
+		runner = deployment.WithAuditRecorder(runner, recorders[0])
+	}
 	opts := bootstrap.Options{
 		Paths:          paths,
 		NSSMSource:     cfg.Deploy.NSSMSource,
@@ -538,11 +573,25 @@ func buildBootstrap(cfg config.Config, store *models.Store, configPath string) *
 		CaddyAdmin:     cfg.Bootstrap.Caddy.Admin,
 		TargetStepName: "local-target",
 		Meta:           store,
-		Runner:         deployment.NewLocalRunner(),
+		Runner:         runner,
+		AuditMeta:      deployment.AuditMeta{ServerID: "local", ServerType: "local", Action: "bootstrap"},
+		StateNamespace: "local",
 		Logf:           log.Printf,
 	}
 	opts.TargetCheck, opts.TargetApply = serverSteps(store, localTargetServer(paths))
 	return bootstrap.New(opts)
+}
+
+func bootstrapAuditLogger(_ context.Context, meta deployment.AuditMeta, command string, runErr error) {
+	command = deployment.RedactAuditText(command)
+	if len(command) > 200 {
+		command = command[:200] + "..."
+	}
+	errText := ""
+	if runErr != nil {
+		errText = deployment.RedactAuditText(runErr.Error())
+	}
+	log.Printf("bootstrap audit: server=%s type=%s action=%s command=%q error=%s", meta.ServerID, meta.ServerType, meta.Action, command, errText)
 }
 
 // provisionIfNeeded runs bootstrap automatically when the host is not yet
@@ -655,7 +704,9 @@ func runRemoteBootstrap(cfg config.Config, store *models.Store, endpoint, user, 
 
 	root := cfg.Bootstrap.InstallDir
 	if root == "" {
-		root = bootstrap.DefaultRoot()
+		// This command provisions a Windows target even when the controller is
+		// running on Linux; do not inherit the controller's POSIX default.
+		root = `C:\ProgramData\winify`
 	}
 	paths := bootstrap.DefaultPaths(root)
 	srv := config.Server{
@@ -699,7 +750,9 @@ func runRemoteBootstrap(cfg config.Config, store *models.Store, endpoint, user, 
 		TargetStepName: "target",
 		DryRun:         dryRun,
 		Meta:           store,
-		Runner:         runner,
+		Runner:         deployment.WithAuditRecorder(runner, bootstrapAuditLogger),
+		AuditMeta:      deployment.AuditMeta{ServerID: id, ServerType: config.ServerTypeWindowsService, Action: "bootstrap"},
+		StateNamespace: id,
 		Logf:           log.Printf,
 	}
 	opts.TargetCheck, opts.TargetApply = targetSteps(store, credStore, srv, refName, password)
@@ -857,13 +910,22 @@ func mustConfig(path string) config.Config {
 
 func mustStore(cfg config.Config) (*models.Store, func()) {
 	if dir := filepath.Dir(cfg.Database.Path); dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			log.Fatalf("create data dir %s: %v", dir, err)
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			log.Fatalf("secure data dir %s: %v", dir, err)
 		}
 	}
 	db, err := models.Open(cfg.Database.Path)
 	if err != nil {
 		log.Fatalf("database: %v", err)
+	}
+	if cfg.Database.Path != ":memory:" {
+		if err := os.Chmod(cfg.Database.Path, 0o600); err != nil {
+			db.Close()
+			log.Fatalf("secure database: %v", err)
+		}
 	}
 	if err := models.Migrate(db); err != nil {
 		db.Close()
@@ -889,6 +951,15 @@ func readSecret(prompt string) (string, error) {
 		return strings.TrimRight(string(data), "\r\n"), nil
 	}
 
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprint(os.Stderr, prompt)
+		line, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimRight(string(line), "\r\n"), nil
+	}
 	fmt.Fprint(os.Stderr, prompt)
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {

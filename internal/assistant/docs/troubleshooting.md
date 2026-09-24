@@ -8,16 +8,19 @@ credential named by `ssh_key_ref` exists and contains a valid private key.
 Errors such as "no key found" mean the stored credential is not a PEM or OpenSSH
 private key; re-add it with `control-center cred add server-002-ssh`.
 
-For production, set `deploy.known_hosts_file` so host keys are verified. When it
-is empty the platform logs a warning and does not verify host keys.
+For production, set `deploy.known_hosts_file` so host keys are verified. SSH
+deploys now fail closed when it is empty; only the explicit
+`deploy.allow_insecure_host_key` escape hatch bypasses verification, and it must
+never be used for production targets.
 
 ## WinRM connection failures (IIS)
 
-Check that `winrm_endpoint` is correct (`https://host:5986/wsman` for HTTPS,
-`http://host:5985/wsman` for HTTP), that `winrm_user` is set, and that the
-credential named by `credential_ref` exists. The platform supports `ntlm`
-(default) and `basic` transports. For self-signed WinRM certificates set
-`winrm_insecure: true`.
+Check that `winrm_endpoint` is correct (`https://host:5986/wsman` is
+recommended), that `winrm_user` is set, and that the credential named by
+`credential_ref` exists. The platform supports `ntlm` (default) and `basic`
+transports. Basic authentication is accepted only over HTTPS. HTTP requires the
+explicit `winrm_insecure: true` opt-in; for self-signed HTTPS certificates set
+the same flag (prefer a trusted certificate in production).
 
 A "connection refused" or timeout means the WinRM listener is unreachable:
 verify the firewall allows 5985/5986 and that `winrm quickconfig` has been run.
@@ -52,8 +55,9 @@ listening (Docker) or the app pool started and the site binding matches `port`
 
 On a successful deploy the app is registered with Caddy, which issues and renews
 the certificate. If registration fails, check that `proxy.admin_url` is
-reachable and that the project's `domain` resolves to the target host. When
-`proxy.enabled` is false, no public URL is registered and that is not an error.
+reachable and that the project's `domain` resolves to the central Caddy host
+(`proxy.public_ip` is the address used for that check). When `proxy.enabled` is
+false, no public URL is registered and that is not an error.
 
 ## Monitoring shows a server as down
 

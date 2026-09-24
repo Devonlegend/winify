@@ -66,9 +66,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	username := r.FormValue("username")
 	password := r.FormValue("password")
+	loginKey := r.RemoteAddr + "|" + strings.ToLower(strings.TrimSpace(username))
+	if retry := s.auth.LoginRetryAfter(loginKey); retry > 0 {
+		w.Header().Set("Retry-After", strconv.FormatInt(int64(retry.Seconds())+1, 10))
+		s.render(w, http.StatusTooManyRequests, "login", loginData{Error: "Too many failed sign-in attempts. Try again later."})
+		return
+	}
 
 	user, err := s.auth.Authenticate(r.Context(), username, password)
 	if errors.Is(err, auth.ErrInvalidCredentials) {
+		s.auth.RecordLoginFailure(loginKey)
 		// Deliberately vague: do not reveal whether the user exists.
 		s.render(w, http.StatusUnauthorized, "login", loginData{Error: "Invalid username or password."})
 		return
@@ -79,6 +86,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.auth.ClearLoginFailures(loginKey)
 	if err := s.auth.StartSession(r.Context(), w, user.ID); err != nil {
 		log.Printf("start session: %v", err)
 		s.render(w, http.StatusInternalServerError, "login", loginData{Error: "Sign-in failed. Try again."})
@@ -116,7 +124,7 @@ func (s *Server) handleRegisterForm(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if hasUsers, err := s.auth.HasUsers(r.Context()); err != nil {
 		log.Printf("register: check users: %v", err)
-		s.render(w, http.StatusInternalServerError, "register", registerData{Error: "Setup failed. Try again."})
+		s.render(w, http.StatusInternalServerError, "register", registerData{Error: "Setup failed. Try again.", SetupRequired: s.setupToken != ""})
 		return
 	} else if hasUsers {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -133,20 +141,20 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := r.ParseForm(); err != nil {
-		s.render(w, http.StatusBadRequest, "register", registerData{Error: "Malformed form submission."})
+		s.render(w, http.StatusBadRequest, "register", registerData{Error: "Malformed form submission.", SetupRequired: s.setupToken != ""})
 		return
 	}
 	username := strings.TrimSpace(r.FormValue("username"))
 	password := r.FormValue("password")
 	switch {
 	case username == "":
-		s.render(w, http.StatusBadRequest, "register", registerData{Error: "Username is required."})
+		s.render(w, http.StatusBadRequest, "register", registerData{Error: "Username is required.", SetupRequired: s.setupToken != ""})
 		return
 	case len(password) < 8:
-		s.render(w, http.StatusBadRequest, "register", registerData{Error: "Password must be at least 8 characters."})
+		s.render(w, http.StatusBadRequest, "register", registerData{Error: "Password must be at least 8 characters.", SetupRequired: s.setupToken != ""})
 		return
 	case password != r.FormValue("confirm"):
-		s.render(w, http.StatusBadRequest, "register", registerData{Error: "Passwords do not match."})
+		s.render(w, http.StatusBadRequest, "register", registerData{Error: "Passwords do not match.", SetupRequired: s.setupToken != ""})
 		return
 	}
 
@@ -158,7 +166,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		log.Printf("register: %v", err) // err has no password
-		s.render(w, http.StatusInternalServerError, "register", registerData{Error: "Setup failed. Try again."})
+		s.render(w, http.StatusInternalServerError, "register", registerData{Error: "Setup failed. Try again.", SetupRequired: s.setupToken != ""})
 		return
 	}
 	if err := s.auth.StartSession(r.Context(), w, user.ID); err != nil {
@@ -253,11 +261,15 @@ func (s *Server) handleDeployment(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "failed to load deployments", http.StatusInternalServerError)
 			return
 		}
+		canRollback := len(successes) >= 2
+		if len(successes) >= 1 && len(deploys) > 0 && deploys[0].Status != models.DeploySuccess {
+			canRollback = true
+		}
 		rows = append(rows, projectDeploys{
 			Project:     p,
 			TargetType:  serverType[p.ServerID],
 			Deployments: deploys,
-			CanRollback: len(successes) >= 2,
+			CanRollback: canRollback,
 		})
 	}
 

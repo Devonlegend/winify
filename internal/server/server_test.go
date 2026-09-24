@@ -110,8 +110,12 @@ func newTestServerOpts(t *testing.T, seedAdmin bool) (*Server, *models.Store, *f
 		Meta:        store,
 		Runner:      noopRunner{},
 	})
+	cfg := config.Default()
+	// Handler tests use illustrative C:\apps paths; production defaults keep
+	// destructive target paths under deploy.target_root.
+	cfg.Deploy.AllowExternalTargetPaths = true
 	srv, err := New(Deps{
-		Cfg:             config.Default(),
+		Cfg:             cfg,
 		Store:           store,
 		Auth:            auth.NewService(store, false, time.Hour),
 		Secrets:         stubSecrets{value: "test-secret"},
@@ -189,6 +193,19 @@ func TestProtectedRoutesRedirectWhenAnonymous(t *testing.T) {
 	}
 }
 
+func TestCrossOriginFormMutationIsRejected(t *testing.T) {
+	s := newTestServer(t)
+	form := url.Values{"username": {"admin"}, "password": {testPassword}}
+	req := httptest.NewRequest(http.MethodPost, "http://control.example/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "https://attacker.example")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin login status = %d, want 403", rec.Code)
+	}
+}
+
 func TestLoginRejectsBadCredentials(t *testing.T) {
 	s := newTestServer(t)
 	form := url.Values{"username": {"admin"}, "password": {"nope"}}
@@ -237,6 +254,7 @@ func TestLogoutRevokesSession(t *testing.T) {
 	cookie := login(t, s)
 
 	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	req.Header.Set("Origin", "http://"+req.Host)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
@@ -276,8 +294,11 @@ func TestProjectFormAndWizardRender(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "8080:3000") {
 		t.Fatalf("settings tab = %d, want 200 with the port mapping", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "TOKEN=x") {
-		t.Fatalf("settings tab did not render build env")
+	if !strings.Contains(rec.Body.String(), "TOKEN=[redacted]") {
+		t.Fatalf("settings tab did not render a redacted build env")
+	}
+	if strings.Contains(rec.Body.String(), "TOKEN=x") {
+		t.Fatal("settings tab exposed build environment value")
 	}
 }
 

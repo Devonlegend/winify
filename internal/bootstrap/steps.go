@@ -87,8 +87,22 @@ func (s nssmStep) resolve() string {
 }
 
 func (s nssmStep) Check(ctx context.Context, r deployment.Runner) (bool, error) {
+	expected := strings.TrimSpace(s.sha256)
+	if expected != "" {
+		decoded, err := hex.DecodeString(expected)
+		if err != nil || len(decoded) != sha256.Size {
+			return false, fmt.Errorf("invalid nssm sha256 %q", expected)
+		}
+	}
 	source := s.resolve()
 	if source == "" {
+		if expected != "" {
+			got, err := deployment.RemoteFileSHA256(ctx, r, s.path)
+			if err != nil {
+				return false, err
+			}
+			return strings.EqualFold(got, expected), nil
+		}
 		out, err := r.Run(ctx, fmt.Sprintf("if (Test-Path -LiteralPath %s) { 'done' } else { 'pending' }", psQuote(s.path)))
 		if err != nil {
 			return false, err
@@ -98,10 +112,18 @@ func (s nssmStep) Check(ctx context.Context, r deployment.Runner) (bool, error) 
 	// Hash-aware: re-upload when the source binary differs from the target's.
 	data, err := os.ReadFile(source)
 	if err != nil {
-		return false, fmt.Errorf("read nssm source %s: %w", source, err)
+		// A service account may legitimately use the copy already installed
+		// on the target even when the controller's source path is unavailable.
+		if got, hashErr := deployment.RemoteFileSHA256(ctx, r, s.path); hashErr == nil && got != "" {
+			return expected == "" || strings.EqualFold(got, expected), nil
+		}
+		return false, nil
 	}
 	sum := sha256.Sum256(data)
 	want := hex.EncodeToString(sum[:])
+	if expected != "" && !strings.EqualFold(expected, want) {
+		return false, fmt.Errorf("nssm source sha256 %s does not match configured pin %s", want, expected)
+	}
 	got, err := deployment.RemoteFileSHA256(ctx, r, s.path)
 	if err != nil {
 		return false, err
@@ -149,11 +171,11 @@ func (s selfServiceStep) Apply(ctx context.Context, r deployment.Runner) error {
 	b.WriteString("$bin = '\"' + $exe + '\" serve -config \"' + $cfg + '\"'\n")
 	fmt.Fprintf(&b, "if (Get-Service -Name %s -ErrorAction SilentlyContinue) {\n", psQuote(s.name))
 	fmt.Fprintf(&b, "  Stop-Service -Name %s -Force -ErrorAction SilentlyContinue\n", psQuote(s.name))
-	fmt.Fprintf(&b, "  & sc.exe delete %s | Out-Null\n", psQuote(s.name))
+	fmt.Fprintf(&b, "  & sc.exe delete %s | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'sc delete failed' }\n", psQuote(s.name))
 	b.WriteString("  Start-Sleep -Seconds 1\n}\n")
-	fmt.Fprintf(&b, "New-Service -Name %s -BinaryPathName $bin -StartupType Automatic -DisplayName %s | Out-Null\n",
+	fmt.Fprintf(&b, "New-Service -Name %s -BinaryPathName $bin -StartupType Automatic -DisplayName %s | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'New-Service failed' }\n",
 		psQuote(s.name), psQuote(s.name))
-	fmt.Fprintf(&b, "& sc.exe failure %s reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null\n",
+	fmt.Fprintf(&b, "& sc.exe failure %s reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'sc failure configuration failed' }\n",
 		psQuote(s.name))
 	_, err := r.Run(ctx, b.String())
 	return err
@@ -177,10 +199,11 @@ func (winrmStep) Check(ctx context.Context, r deployment.Runner) (bool, error) {
 }
 
 func (winrmStep) Apply(ctx context.Context, r deployment.Runner) error {
-	// -SkipNetworkProfileCheck allows enabling on a Public network; fall back to
-	// a plain enable on hosts where the parameter is unavailable.
+	// Do not bypass Windows' public-network protection. Operators must place
+	// the host on a trusted management profile before explicitly enabling this
+	// step.
 	script := "$ErrorActionPreference='Stop'\n" +
-		"try { Enable-PSRemoting -Force -SkipNetworkProfileCheck } catch { Enable-PSRemoting -Force }\n"
+		"Enable-PSRemoting -Force\n"
 	_, err := r.Run(ctx, script)
 	return err
 }

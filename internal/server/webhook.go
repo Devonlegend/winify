@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"log"
@@ -102,17 +104,39 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request, provider 
 		return
 	}
 
+	deliveryID := webhookDeliveryID(body)
+	accepted, err := s.store.RecordWebhookDelivery(ctx, provider, projectID, deliveryID, event.Commit)
+	if err != nil {
+		log.Printf("webhook %s: record delivery: %v", projectID, err)
+		http.Error(w, "failed to record delivery", http.StatusInternalServerError)
+		return
+	}
+	if !accepted {
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "duplicate delivery"})
+		return
+	}
+
 	id, err := s.deployer.Trigger(ctx, project, srv, "webhook", event.Commit, event.Ref)
 	if errors.Is(err, deployment.ErrDeployInProgress) {
+		_ = s.store.DeleteWebhookDelivery(ctx, provider, projectID, deliveryID)
 		http.Error(w, "a deployment is already in progress", http.StatusConflict)
 		return
 	}
 	if err != nil {
+		_ = s.store.DeleteWebhookDelivery(ctx, provider, projectID, deliveryID)
 		log.Printf("webhook %s: trigger: %v", projectID, err)
 		http.Error(w, "failed to start deployment", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "accepted", "deployment_id": id})
+}
+
+func webhookDeliveryID(body []byte) string {
+	// Provider delivery headers are not covered by GitHub's body signature.
+	// Derive the replay key from the authenticated payload instead, so an
+	// attacker cannot replay a valid signed body under a fresh header value.
+	sum := sha256.Sum256(body)
+	return "body:" + hex.EncodeToString(sum[:])
 }
 
 // webhookSecret resolves the project's encrypted webhook secret. The value is

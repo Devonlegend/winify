@@ -128,6 +128,18 @@ func TestDockerHealthCheckFailure(t *testing.T) {
 	}
 }
 
+func TestDockerHealthFailureRestoresPreviousArtifact(t *testing.T) {
+	runner := &fakeRunner{failOn: "curl"}
+	tgt := NewDockerTarget(config.Default(), runner)
+	_, err := tgt.Deploy(context.Background(), deployJob{project: dockerProject(), commit: "abc1234", previousArtifact: "cc/proj-001:old"}, noopLogf)
+	if err == nil {
+		t.Fatal("Deploy succeeded despite a failed health check")
+	}
+	if strings.Count(runner.joined(), "docker compose") < 2 {
+		t.Fatalf("failed deploy did not attempt to restore the previous image:\n%s", runner.joined())
+	}
+}
+
 func TestDockerHealthCheckOptional(t *testing.T) {
 	runner := &fakeRunner{failOn: "curl"}
 	tgt := NewDockerTarget(config.Default(), runner)
