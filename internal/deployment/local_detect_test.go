@@ -33,7 +33,7 @@ func TestLocalCloneAndDetect(t *testing.T) {
 
 	runner := NewLocalRunner()
 	dir := filepath.Join(t.TempDir(), "clone")
-	if err := CloneShallow(ctx, runner, dir, src, "", nil); err != nil {
+	if err := CloneShallow(ctx, runner, dir, src, "", nil, nil); err != nil {
 		t.Fatalf("CloneShallow: %v", err)
 	}
 	tree, err := NewRepoTree(ctx, runner, dir)

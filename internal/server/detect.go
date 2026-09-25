@@ -64,7 +64,15 @@ func (s *Server) handleProjectDetect(w http.ResponseWriter, r *http.Request) {
 	defer runner.Close()
 
 	dir := detectWorkDir(s.cfg, serverID)
-	if err := deployment.CloneShallow(ctx, runner, dir, repoURL, branch, nil); err != nil {
+	gitAuth, err := deployment.PrepareGitAuth(ctx, runner, s.secrets, config.Project{
+		ID:               "detect-" + sanitizeSegment(serverID),
+		GitCredentialRef: strings.TrimSpace(r.FormValue("git_credential_ref")),
+	}, dir+`.gitkey`, true, nil)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := deployment.CloneShallow(ctx, runner, dir, repoURL, branch, gitAuth, nil); err != nil {
 		log.Printf("project detect: clone: %v", deployment.RedactAuditText(err.Error()))
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "repository detection failed"})
 		return

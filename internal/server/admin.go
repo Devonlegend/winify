@@ -441,6 +441,7 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 		HealthPath:               strings.TrimSpace(r.FormValue("health_path")),
 		WebhookSecretRef:         strings.TrimSpace(r.FormValue("webhook_secret_ref")),
 		GitHubRepo:               strings.TrimSpace(r.FormValue("github_repo")),
+		GitCredentialRef:         strings.TrimSpace(r.FormValue("git_credential_ref")),
 		Env:                      parseEnv(r.FormValue("env")),
 		BuildEnv:                 parseEnv(r.FormValue("build_env")),
 		HealthIntervalSeconds:    healthInterval,

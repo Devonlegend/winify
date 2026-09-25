@@ -91,7 +91,20 @@ repoints the site to the other slot — no backup copy needed. A marker file
 Open the **Credentials** tab to add or delete secrets. Values are encrypted at
 rest with AES-256-GCM and are never shown again after saving. Reference a
 credential by name from a server (`ssh_key_ref` / `credential_ref`) or a project
-(`webhook_secret_ref`).
+(`webhook_secret_ref` / `git_credential_ref`).
+
+### Private repositories
+
+Set a project's `git_credential_ref` to a credential holding either:
+
+- an **SSH private key** (a GitHub/GitLab deploy key) — use it with an SSH repo
+  URL (`git@github.com:org/app.git`); winify uploads the key to the target with
+  owner-only permissions and points git at it, or
+- an **HTTPS access token** (a PAT) — use it with an HTTPS repo URL; the token
+  is passed as an `http.extraHeader`, never embedded in the URL or logged.
+
+Either way the secret never appears in `repo_url`, deploy logs or the audit log,
+and repository detection uses it too.
 
 ## Triggering a deploy
 

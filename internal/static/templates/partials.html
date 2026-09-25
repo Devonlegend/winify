@@ -20,6 +20,7 @@
   <label class="check"><input type="checkbox" name="disable_health_check" {{if .Form}}{{if .Form.DisableHealthCheck}}checked{{end}}{{end}}> Skip the post-deploy health check</label>
   <label>Webhook secret ref<input name="webhook_secret_ref" value="{{if .Form}}{{.Form.WebhookSecretRef}}{{end}}" placeholder="vault:app-webhook"></label>
   <label>GitHub repository (owner/repo, for App auto-registration)<input name="github_repo" value="{{if .Form}}{{.Form.GitHubRepo}}{{end}}" placeholder="acme/app"></label>
+  <label>Git credential ref (private repos — deploy key or access token)<input name="git_credential_ref" value="{{if .Form}}{{.Form.GitCredentialRef}}{{end}}" placeholder="vault:app-git"></label>
 
   <fieldset>
     <legend>Docker deploy source</legend>

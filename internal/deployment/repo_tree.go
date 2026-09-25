@@ -11,18 +11,22 @@ import (
 // branch (or the remote default when branch is empty), replacing dir when it
 // already exists. Repository detection only needs the current tree, and the
 // clone runs on the target so private repositories use its own git credentials.
-func CloneShallow(ctx context.Context, runner Runner, dir, repoURL, branch string, logf func(format string, args ...any)) error {
+func CloneShallow(ctx context.Context, runner Runner, dir, repoURL, branch string, auth *GitAuth, logf func(format string, args ...any)) error {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	if _, err := execCmd(ctx, runner, shallowCloneScript(dir, repoURL, branch), "git clone --depth 1", logf); err != nil {
+	cloneCtx := ctx
+	if auth.Sensitive() {
+		cloneCtx = withAuditRedaction(ctx, "git clone --depth 1 (credential redacted)")
+	}
+	if _, err := execCmd(cloneCtx, runner, shallowCloneScript(dir, repoURL, branch, auth), "git clone --depth 1", logf); err != nil {
 		return fmt.Errorf("clone repo: %w", err)
 	}
 	return nil
 }
 
 // shallowCloneScript removes any previous clone and fetches one commit.
-func shallowCloneScript(dir, repoURL, branch string) string {
+func shallowCloneScript(dir, repoURL, branch string, auth *GitAuth) string {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'\n")
 	fmt.Fprintf(&b, "$dir = %s\n", psQuote(dir))
@@ -33,7 +37,11 @@ func shallowCloneScript(dir, repoURL, branch string) string {
 	if strings.TrimSpace(branch) != "" {
 		args += " --branch " + psQuote(branch)
 	}
-	fmt.Fprintf(&b, "git clone %s %s %s\n", args, psQuote(repoURL), psQuote(dir))
+	opt := auth.gitOption(psQuote)
+	if opt != "" {
+		opt = " " + opt
+	}
+	fmt.Fprintf(&b, "git%s clone %s %s %s\n", opt, args, psQuote(repoURL), psQuote(dir))
 	return b.String()
 }
 

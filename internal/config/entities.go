@@ -120,6 +120,10 @@ type Project struct {
 	WebhookSecretRef string `yaml:"webhook_secret_ref" json:"webhook_secret_ref,omitempty"`
 	// GitHubRepo is "owner/repo" for GitHub App-driven webhook auto-registration.
 	GitHubRepo string `yaml:"github_repo" json:"github_repo,omitempty"`
+	// GitCredentialRef names an encrypted credential used to clone private
+	// repositories: an SSH private key (deploy key) or an HTTPS access token.
+	// The secret never appears in repo_url, logs or the audit log.
+	GitCredentialRef string `yaml:"git_credential_ref" json:"git_credential_ref,omitempty"`
 	// Env is passed to the running workload. BuildEnv is passed only to the
 	// image build (Docker build args / build-command environment).
 	Env      map[string]string `yaml:"env" json:"env,omitempty"`
@@ -456,6 +460,12 @@ func ValidateProject(p Project, srv Server) error {
 	}
 	if p.GitHubRepo != "" && !regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`).MatchString(p.GitHubRepo) {
 		return errors.New("github_repo must be owner/repo")
+	}
+	if p.GitCredentialRef != "" {
+		ref := strings.TrimPrefix(p.GitCredentialRef, "vault:")
+		if ref == "" || strings.ContainsAny(ref, "\x00\r\n\"'`") {
+			return errors.New("git_credential_ref must be a credential name (vault:name)")
+		}
 	}
 	if err := ValidateRepoURL(p.RepoURL); err != nil {
 		return err

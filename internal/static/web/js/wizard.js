@@ -273,6 +273,7 @@
       body.set('repo_url', repo);
       body.set('branch', value('branch'));
       body.set('server_id', server);
+      body.set('git_credential_ref', value('git_credential_ref'));
       if (runtimeSelect && runtimeSelect.value) body.set('language', runtimeSelect.value);
 
       detectBtn.disabled = true;

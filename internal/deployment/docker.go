@@ -16,13 +16,20 @@ import (
 // It supports three deploy sources: a Dockerfile build, the repository's own
 // compose file, or a prebuilt registry image.
 type dockerTarget struct {
-	cfg    config.Config
-	runner Runner
+	cfg     config.Config
+	runner  Runner
+	secrets SecretResolver
 }
 
-// NewDockerTarget builds the Docker pipeline over an open Runner.
-func NewDockerTarget(cfg config.Config, runner Runner) Target {
-	return &dockerTarget{cfg: cfg, runner: runner}
+// NewDockerTarget builds the Docker pipeline over an open Runner. secrets
+// resolves credential refs (SSH key at connection time; git credentials at
+// clone time).
+func NewDockerTarget(cfg config.Config, runner Runner, secrets ...SecretResolver) Target {
+	var s SecretResolver
+	if len(secrets) > 0 {
+		s = secrets[0]
+	}
+	return &dockerTarget{cfg: cfg, runner: runner, secrets: s}
 }
 
 func (t *dockerTarget) Close() error { return t.runner.Close() }
@@ -225,13 +232,26 @@ func (t *dockerTarget) cloneRepo(ctx context.Context, job deployJob, workdir, re
 	if job.project.RepoURL == "" {
 		return "", fmt.Errorf("project %s has no repo_url", job.project.ID)
 	}
+	// Stage a private-repo credential (deploy key or token) when configured.
+	gitAuth, err := PrepareGitAuth(ctx, t.runner, t.secrets, job.project, path.Join(t.cfg.Deploy.WorkDir, job.project.ID+".gitkey"), false, logf)
+	if err != nil {
+		return "", err
+	}
+	opt := gitAuth.gitOption(shellQuote)
+	if opt != "" {
+		opt = " " + opt
+	}
 	checkout := gitCheckoutRef(rev)
 	clone := fmt.Sprintf(
-		"mkdir -p %s && if [ -d %s/.git ]; then cd %s && git fetch --all --prune && git checkout --force %s --; "+
-			"else git clone %s %s && cd %s && git checkout --force %s --; fi && git clean -fdx && git rev-parse HEAD",
-		shellQuote(workdir), shellQuote(workdir), shellQuote(workdir), shellQuote(checkout),
-		shellQuote(job.project.RepoURL), shellQuote(workdir), shellQuote(workdir), shellQuote(checkout))
-	out, err := execCmd(ctx, t.runner, clone, "git clone/fetch + checkout "+shortSHA(rev), logf)
+		"mkdir -p %s && if [ -d %s/.git ]; then cd %s && git%s fetch --all --prune && git%s checkout --force %s --; "+
+			"else git%s clone %s %s && cd %s && git%s checkout --force %s --; fi && git clean -fdx && git rev-parse HEAD",
+		shellQuote(workdir), shellQuote(workdir), shellQuote(workdir), opt, opt, shellQuote(checkout),
+		opt, shellQuote(job.project.RepoURL), shellQuote(workdir), shellQuote(workdir), opt, shellQuote(checkout))
+	execCtx := ctx
+	if gitAuth.Sensitive() {
+		execCtx = withAuditRedaction(ctx, "git clone/fetch + checkout (credential redacted)")
+	}
+	out, err := execCmd(execCtx, t.runner, clone, "git clone/fetch + checkout "+shortSHA(rev), logf)
 	if err != nil {
 		return "", fmt.Errorf("clone/checkout: %w\n%s", err, out)
 	}

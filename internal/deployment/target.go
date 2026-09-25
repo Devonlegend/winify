@@ -88,11 +88,11 @@ func NewTargetFactory(cfg config.Config, sshDial SSHDialer, audit AuditRecorder)
 		}
 		switch job.server.Type {
 		case config.ServerTypeIIS:
-			return NewIISTarget(cfg, runner), nil
+			return NewIISTarget(cfg, runner, secrets), nil
 		case config.ServerTypeWindowsService:
-			return NewWindowsServiceTarget(cfg, runner), nil
+			return NewWindowsServiceTarget(cfg, runner, secrets), nil
 		default:
-			return NewDockerTarget(cfg, runner), nil
+			return NewDockerTarget(cfg, runner, secrets), nil
 		}
 	}
 }
