@@ -4,14 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{template "title" .}}</title>
-  <link rel="stylesheet" href="/assets/css/app.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap">
+  <link rel="stylesheet" href="{{asset "/assets/css/app.css"}}">
 </head>
 <body>
 {{if .User}}
 <div class="app" id="app">
+  <div class="sidebar-backdrop" id="sidebar-backdrop" hidden></div>
   <aside class="sidebar">
     <a class="brand" href="/dashboard">
-      <span class="brand-mark" aria-hidden="true">CC</span>
+      <span class="brand-mark" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M2.5 4.5 8 1.5l5.5 3L8 7.5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+          <path d="M2.5 8 8 11l5.5-3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+          <path d="M2.5 11.5 8 14.5l5.5-3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+        </svg>
+      </span>
       <span class="brand-name">Control Center</span>
     </a>
     <nav class="nav" id="primary-nav">
@@ -30,6 +40,7 @@
       <div class="nav-label">Settings</div>
       <a href="/credentials" class="{{if eq .Active "credentials"}}active{{end}}">Credentials</a>
       <a href="/variables" class="{{if eq .Active "variables"}}active{{end}}">Shared variables</a>
+      <a href="/audit" class="{{if eq .Active "audit"}}active{{end}}">Audit log</a>
       <a href="/setup" class="{{if eq .Active "setup"}}active{{end}}">Setup</a>
       <a href="/tokens" class="{{if eq .Active "tokens"}}active{{end}}">API tokens</a>
     </nav>
@@ -61,8 +72,26 @@
   </div>
   <pre class="log" id="drawer-log" aria-live="polite"></pre>
 </div>
-<script src="/assets/js/app.js"></script>
-<script src="/assets/js/deploy.js"></script>
+<button type="button" class="deploy-reopen" id="deploy-reopen" hidden>
+  <span class="status status-running" id="deploy-reopen-status">running</span>
+  <span>Deploy in progress</span>
+</button>
+
+<dialog class="confirm" id="confirm-dialog" aria-labelledby="confirm-title">
+  <h2 class="confirm-title" id="confirm-title">Confirm</h2>
+  <p class="confirm-body" id="confirm-body"></p>
+  <div class="confirm-require" id="confirm-require" hidden>
+    <label for="confirm-require-input">Type <span class="mono" id="confirm-require-word"></span> to confirm</label>
+    <input type="text" id="confirm-require-input" autocomplete="off" spellcheck="false">
+  </div>
+  <div class="confirm-actions">
+    <button type="button" class="btn" id="confirm-cancel">Cancel</button>
+    <button type="button" class="btn btn-danger" id="confirm-ok">Confirm</button>
+  </div>
+</dialog>
+
+<script src="{{asset "/assets/js/app.js"}}"></script>
+<script src="{{asset "/assets/js/deploy.js"}}"></script>
 {{else}}
 {{template "body" .}}
 {{end}}

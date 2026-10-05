@@ -34,6 +34,19 @@ func (s *Server) handleDeployStart(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.deployer.Trigger(ctx, project, srv, "manual", "", "refs/heads/"+branch)
 	if err == deployment.ErrDeployInProgress {
+		// Point the caller at the run already in flight instead of dead-ending,
+		// so the drawer can attach to its live log.
+		if deploys, lerr := s.store.ListDeployments(ctx, project.ID, 1); lerr == nil && len(deploys) > 0 {
+			d := deploys[0]
+			if d.Status == models.DeployQueued || d.Status == models.DeployRunning {
+				writeJSON(w, http.StatusConflict, map[string]any{
+					"error":         "a deployment is already in progress",
+					"deployment_id": d.ID,
+					"status":        d.Status,
+				})
+				return
+			}
+		}
 		apiError(w, http.StatusConflict, "a deployment is already in progress")
 		return
 	}

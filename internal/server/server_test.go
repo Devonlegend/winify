@@ -206,6 +206,33 @@ func TestCrossOriginFormMutationIsRejected(t *testing.T) {
 	}
 }
 
+func TestOpaqueOriginIsAccepted(t *testing.T) {
+	s := newTestServer(t)
+	form := url.Values{"username": {"admin"}, "password": {testPassword}}
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8090/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "null")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code == http.StatusForbidden {
+		t.Fatalf("opaque-origin login was rejected: %d", rec.Code)
+	}
+}
+
+func TestProxyForwardedHostIsSameOrigin(t *testing.T) {
+	s := newTestServer(t)
+	form := url.Values{"username": {"admin"}, "password": {testPassword}}
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8090/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "https://cc.example.ts.net")
+	req.Header.Set("X-Forwarded-Host", "cc.example.ts.net")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code == http.StatusForbidden {
+		t.Fatalf("proxied same-origin login was rejected: %d", rec.Code)
+	}
+}
+
 func TestLoginRejectsBadCredentials(t *testing.T) {
 	s := newTestServer(t)
 	form := url.Values{"username": {"admin"}, "password": {"nope"}}
@@ -281,10 +308,11 @@ func TestProjectFormAndWizardRender(t *testing.T) {
 	}
 
 	rec := getWithCookie(t, s, "/projects/new", cookie)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Ports exposes") {
-		t.Fatalf("wizard = %d, want 200 with ports_exposes field", rec.Code)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.Contains(body, `name="ports_exposes"`) || !strings.Contains(body, "data-label-ports") {
+		t.Fatalf("wizard = %d, want 200 with the ports_exposes field", rec.Code)
 	}
-	for _, marker := range []string{"wz-detect", "wz-runtime", "Detect build"} {
+	for _, marker := range []string{"wz-detect", "wz-runtime", "Detect build", "/assets/js/wizard.js?v="} {
 		if !strings.Contains(rec.Body.String(), marker) {
 			t.Errorf("wizard missing detect control %q", marker)
 		}
@@ -302,6 +330,53 @@ func TestProjectFormAndWizardRender(t *testing.T) {
 	}
 }
 
+func TestProjectSaveErrorRerendersWizardWithInput(t *testing.T) {
+	s, _ := newTestServerWithStore(t)
+	cookie := login(t, s)
+
+	form := url.Values{
+		"id":            {"myapp"},
+		"name":          {"My App"},
+		"server_id":     {"does-not-exist"},
+		"ports_exposes": {"3000"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/projects", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://"+req.Host)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, marker := range []string{`data-prefilled="true"`, "Select a valid server", `value="My App"`, `value="3000"`} {
+		if !strings.Contains(body, marker) {
+			t.Errorf("re-rendered wizard missing %q", marker)
+		}
+	}
+}
+
+func TestDeploymentAndAuditPagesRender(t *testing.T) {
+	s, _ := newTestServerWithStore(t)
+	cookie := login(t, s)
+
+	rec := getWithCookie(t, s, "/deployment?status=failed", cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Deployments") {
+		t.Fatalf("deployment page = %d, want 200", rec.Code)
+	}
+
+	rec = getWithCookie(t, s, "/audit?since=all", cookie)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.Contains(body, "Audit log") {
+		t.Fatalf("audit page = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(body, "No audited commands") {
+		t.Fatalf("audit page missing empty state")
+	}
+}
+
 func TestAssetServed(t *testing.T) {
 	s := newTestServer(t)
 	rec := doRequest(t, s, http.MethodGet, "/assets/css/app.css")
@@ -311,5 +386,11 @@ func TestAssetServed(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "background") {
 		t.Fatalf("body = %q, want css content", rec.Body.String())
+	}
+
+	// The fingerprint query the templates add must not break asset serving.
+	rec = doRequest(t, s, http.MethodGet, "/assets/css/app.css?v=deadbeef")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("versioned asset status = %d, want 200", rec.Code)
 	}
 }

@@ -6,9 +6,12 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -31,7 +34,7 @@ import (
 )
 
 // pageTemplates are the page files parsed alongside layout.html and partials.html.
-var pageTemplates = []string{"login", "register", "dashboard", "deployment", "monitoring", "assistant", "servers", "projects", "project_new", "project_wizard", "resource", "credentials", "variables", "setup", "tokens"}
+var pageTemplates = []string{"login", "register", "dashboard", "deployment", "monitoring", "assistant", "servers", "projects", "project_wizard", "resource", "credentials", "variables", "audit", "setup", "tokens"}
 
 // Deployer is the subset of *deployment.Deployer the HTTP layer uses, so tests
 // can substitute a fake.
@@ -111,8 +114,34 @@ type Server struct {
 	assets            fs.FS
 }
 
-// templateFuncs are available to every page template.
-var templateFuncs = template.FuncMap{"navLabel": navLabel}
+// staticVersion fingerprints the embedded web assets so a rebuilt binary serves
+// new CSS/JS under a new URL. Browsers and embedded webviews then fetch the
+// fresh copy on an ordinary reload, with no hard-refresh needed.
+func staticVersion(fsys fs.FS) string {
+	h := sha256.New()
+	_ = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		io.WriteString(h, p)
+		if b, err := fs.ReadFile(fsys, p); err == nil {
+			h.Write(b)
+		}
+		return nil
+	})
+	return hex.EncodeToString(h.Sum(nil))[:10]
+}
+
+// assetURL returns the template helper that appends the asset fingerprint to an
+// /assets path, so a rebuilt binary busts the browser cache automatically.
+func assetURL(version string) func(string) string {
+	return func(p string) string {
+		if version == "" {
+			return p
+		}
+		return p + "?v=" + version
+	}
+}
 
 // navLabel maps a page's active key to its sidebar/topbar label.
 func navLabel(active string) string {
@@ -133,6 +162,8 @@ func navLabel(active string) string {
 		return "Credentials"
 	case "variables":
 		return "Shared variables"
+	case "audit":
+		return "Audit log"
 	case "setup":
 		return "Setup"
 	case "tokens":
@@ -148,19 +179,23 @@ func navLabel(active string) string {
 // earlier ones. An error here means the embedded templates are malformed, so
 // the process should fail fast at boot.
 func New(deps Deps) (*Server, error) {
+	sub, err := fs.Sub(static.Web, "web")
+	if err != nil {
+		return nil, err
+	}
+	funcs := template.FuncMap{
+		"navLabel": navLabel,
+		"asset":    assetURL(staticVersion(sub)),
+	}
+
 	pages := make(map[string]*template.Template, len(pageTemplates))
 	for _, name := range pageTemplates {
-		t, err := template.New(name).Funcs(templateFuncs).ParseFS(static.Templates,
+		t, err := template.New(name).Funcs(funcs).ParseFS(static.Templates,
 			"templates/layout.html", "templates/partials.html", "templates/"+name+".html")
 		if err != nil {
 			return nil, fmt.Errorf("parse page %q: %w", name, err)
 		}
 		pages[name] = t
-	}
-
-	sub, err := fs.Sub(static.Web, "web")
-	if err != nil {
-		return nil, err
 	}
 
 	return &Server{
@@ -191,7 +226,7 @@ func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(requestLogger)
-	r.Use(requireSameOrigin)
+	r.Use(s.requireSameOrigin)
 
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/login", s.handleLoginForm)
@@ -242,6 +277,7 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/variables", s.handleVariablesPage)
 		r.Post("/variables", s.handleVariableSave)
 		r.Post("/variables/delete", s.handleVariableDelete)
+		r.Get("/audit", s.handleAuditPage)
 		r.Get("/setup", s.handleSetupPage)
 		r.Post("/setup/run", s.handleSetupRun)
 		r.Post("/setup/local-target", s.handleSetupLocalTarget)
@@ -265,7 +301,12 @@ func (s *Server) Handler() http.Handler {
 // Requests without Origin/Referer are left alone for CLI clients and the
 // existing HMAC/webhook and bearer-token APIs; browser form submissions send
 // one of these headers and must remain same-host.
-func requireSameOrigin(next http.Handler) http.Handler {
+//
+// A reverse proxy or port-forwarder (Caddy, a tunnel, an IDE preview) can
+// rewrite the Host header the process sees, so the forwarded host and the
+// configured public URL are also accepted. A cross-site browser attacker cannot
+// forge those headers, so this does not weaken the boundary.
+func (s *Server) requireSameOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions || r.Method == http.MethodTrace ||
 			strings.HasPrefix(r.URL.Path, "/api/v1/") || strings.HasPrefix(r.URL.Path, "/webhooks/") {
@@ -275,6 +316,14 @@ func requireSameOrigin(next http.Handler) http.Handler {
 		origin := strings.TrimSpace(r.Header.Get("Origin"))
 		if origin == "" {
 			origin = strings.TrimSpace(r.Header.Get("Referer"))
+		}
+		// An opaque origin ("null") is what sandboxed webviews, in-app browsers
+		// and file:// pages report. It is not a cross-site signal: the session
+		// cookie is SameSite=Lax, so it is not attached to cross-site requests.
+		// Accept it so the console stays usable inside embedded viewers.
+		if strings.EqualFold(origin, "null") {
+			next.ServeHTTP(w, r)
+			return
 		}
 		if origin == "" {
 			// A cookie-authenticated browser mutation without same-origin
@@ -288,12 +337,40 @@ func requireSameOrigin(next http.Handler) http.Handler {
 			return
 		}
 		u, err := url.Parse(origin)
-		if err != nil || u.Host == "" || !strings.EqualFold(u.Host, r.Host) {
-			http.Error(w, "cross-origin request rejected", http.StatusForbidden)
+		if err != nil || u.Host == "" || !s.originAllowed(u.Host, r) {
+			http.Error(w, fmt.Sprintf("cross-origin request rejected (origin %q, host %q)", origin, r.Host), http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// originAllowed reports whether a browser Origin host is one this process is
+// reachable as: its own Host, the proxy's forwarded host, or the configured
+// public URL host.
+func (s *Server) originAllowed(originHost string, r *http.Request) bool {
+	if sameHost(originHost, r.Host) {
+		return true
+	}
+	if fh := r.Header.Get("X-Forwarded-Host"); fh != "" {
+		// Proxies may append hops; the client-facing host is first.
+		if i := strings.IndexByte(fh, ','); i >= 0 {
+			fh = fh[:i]
+		}
+		if sameHost(originHost, strings.TrimSpace(fh)) {
+			return true
+		}
+	}
+	if base := strings.TrimSpace(s.cfg.Server.PublicURL); base != "" {
+		if pu, err := url.Parse(base); err == nil && sameHost(originHost, pu.Host) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameHost(a, b string) bool {
+	return a != "" && b != "" && strings.EqualFold(a, b)
 }
 
 // render executes the shared "layout" template for the named page.

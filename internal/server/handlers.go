@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -196,86 +197,281 @@ type dashboardData struct {
 	DBStatus     string
 	ServerCount  int
 	ProjectCount int
+	FailedCount  int
+	Recent       []dashboardDeploy
 }
 
+// dashboardDeploy is one row in the dashboard activity feed.
+type dashboardDeploy struct {
+	ID          int64
+	ProjectID   string
+	ProjectName string
+	Status      string
+	Trigger     string
+	StartedAt   time.Time
+}
+
+// dashboardRecent is how many recent deployments the landing page shows.
+const dashboardRecent = 6
+
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	data := dashboardData{pageData: s.page(r), DBStatus: "ok"}
 	data.Active = "dashboard"
 
-	if err := s.store.DB().PingContext(r.Context()); err != nil {
+	if err := s.store.DB().PingContext(ctx); err != nil {
 		data.DBStatus = "unavailable"
 	}
-	if servers, err := s.store.ListServers(r.Context()); err == nil {
+	servers, err := s.store.ListServers(ctx)
+	if err == nil {
 		data.ServerCount = len(servers)
 	}
-	if projects, err := s.store.ListProjects(r.Context()); err == nil {
+	projects, err := s.store.ListProjects(ctx)
+	if err == nil {
 		data.ProjectCount = len(projects)
+		for _, p := range projects {
+			deploys, derr := s.store.ListDeployments(ctx, p.ID, dashboardRecent)
+			if derr != nil {
+				continue
+			}
+			for i, d := range deploys {
+				// Only the latest attempt per resource counts as "needs attention".
+				if i == 0 && d.Status == models.DeployFailed {
+					data.FailedCount++
+				}
+				data.Recent = append(data.Recent, dashboardDeploy{
+					ID:          d.ID,
+					ProjectID:   p.ID,
+					ProjectName: p.Name,
+					Status:      d.Status,
+					Trigger:     d.Trigger,
+					StartedAt:   d.StartedAt,
+				})
+			}
+		}
+	}
+	sort.Slice(data.Recent, func(i, j int) bool { return data.Recent[i].StartedAt.After(data.Recent[j].StartedAt) })
+	if len(data.Recent) > dashboardRecent {
+		data.Recent = data.Recent[:dashboardRecent]
 	}
 	s.render(w, http.StatusOK, "dashboard", data)
 }
 
-// projectDeploys is one project row on the Deployment tab: its recent attempts
-// plus whether a rollback target exists.
-type projectDeploys struct {
-	Project     config.Project
-	TargetType  string
-	Deployments []models.Deployment
+// deploymentRow is one deploy on the history page: the attempt plus the owning
+// resource's name and whether this row carries the rollback action.
+type deploymentRow struct {
+	models.Deployment
+	ProjectName string
 	CanRollback bool
 }
 
 type deploymentPageData struct {
 	pageData
-	Projects []projectDeploys
+	Rows       []deploymentRow
+	Counts     map[string]int
+	Status     string
+	Query      string
+	Page       int
+	PrevPage   int
+	NextPage   int
+	TotalPages int
+	Total      int
+	Error      string
+	Notice     string
 }
+
+// deploymentPageSize is how many attempts the history shows per page.
+const deploymentPageSize = 25
 
 func (s *Server) handleDeployment(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	switch status {
+	case "", models.DeploySuccess, models.DeployFailed, models.DeployRunning, models.DeployQueued:
+	default:
+		status = ""
+	}
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	page := 1
+	if v, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && v > 0 {
+		page = v
+	}
+
+	deploys, total, err := s.store.ListDeploymentsPage(ctx, status, query, deploymentPageSize, (page-1)*deploymentPageSize)
+	if err != nil {
+		log.Printf("deployment: list: %v", err)
+		http.Error(w, "failed to load deployments", http.StatusInternalServerError)
+		return
+	}
+	counts, err := s.store.DeploymentStatusCounts(ctx)
+	if err != nil {
+		log.Printf("deployment: counts: %v", err)
+		counts = map[string]int{}
+	}
+	all := 0
+	for _, n := range counts {
+		all += n
+	}
+	counts["all"] = all
+
 	projects, err := s.store.ListProjects(ctx)
 	if err != nil {
 		log.Printf("deployment: list projects: %v", err)
 		http.Error(w, "failed to load projects", http.StatusInternalServerError)
 		return
 	}
-	servers, err := s.store.ListServers(ctx)
-	if err != nil {
-		log.Printf("deployment: list servers: %v", err)
-		http.Error(w, "failed to load servers", http.StatusInternalServerError)
-		return
-	}
-	serverType := make(map[string]string, len(servers))
-	for _, srv := range servers {
-		serverType[srv.ID] = srv.Type
+	nameByID := make(map[string]string, len(projects))
+	for _, p := range projects {
+		nameByID[p.ID] = p.Name
 	}
 
-	rows := make([]projectDeploys, 0, len(projects))
+	// Rollback is offered only on a project's newest attempt and only when a
+	// recovery point exists. Computed per project so it does not depend on the
+	// page being viewed.
+	rollbackOK := make(map[string]bool, len(projects))
+	latest := make(map[string]int64, len(projects))
 	for _, p := range projects {
-		deploys, err := s.store.ListDeployments(ctx, p.ID, 20)
-		if err != nil {
-			log.Printf("deployment: list %s: %v", p.ID, err)
-			http.Error(w, "failed to load deployments", http.StatusInternalServerError)
-			return
+		recent, _ := s.store.ListDeployments(ctx, p.ID, 1)
+		var latestID int64
+		if len(recent) > 0 {
+			latestID = recent[0].ID
 		}
-		successes, err := s.store.SuccessfulDeployments(ctx, p.ID, 2)
-		if err != nil {
-			log.Printf("deployment: successes %s: %v", p.ID, err)
-			http.Error(w, "failed to load deployments", http.StatusInternalServerError)
-			return
+		successes, _ := s.store.SuccessfulDeployments(ctx, p.ID, 2)
+		ok := len(successes) >= 2
+		if len(successes) >= 1 && len(recent) > 0 && recent[0].Status != models.DeploySuccess {
+			ok = true
 		}
-		canRollback := len(successes) >= 2
-		if len(successes) >= 1 && len(deploys) > 0 && deploys[0].Status != models.DeploySuccess {
-			canRollback = true
-		}
-		rows = append(rows, projectDeploys{
-			Project:     p,
-			TargetType:  serverType[p.ServerID],
-			Deployments: deploys,
-			CanRollback: canRollback,
+		rollbackOK[p.ID] = ok
+		latest[p.ID] = latestID
+	}
+
+	rows := make([]deploymentRow, 0, len(deploys))
+	for _, d := range deploys {
+		rows = append(rows, deploymentRow{
+			Deployment:  d,
+			ProjectName: nameByID[d.ProjectID],
+			CanRollback: rollbackOK[d.ProjectID] && latest[d.ProjectID] == d.ID,
 		})
 	}
 
-	data := deploymentPageData{pageData: s.page(r), Projects: rows}
+	totalPages := 0
+	if total > 0 {
+		totalPages = (total + deploymentPageSize - 1) / deploymentPageSize
+	}
+	data := deploymentPageData{
+		pageData:   s.page(r),
+		Rows:       rows,
+		Counts:     counts,
+		Status:     status,
+		Query:      query,
+		Page:       page,
+		TotalPages: totalPages,
+		Total:      total,
+		Error:      r.URL.Query().Get("error"),
+		Notice:     r.URL.Query().Get("notice"),
+	}
+	if page > 1 {
+		data.PrevPage = page - 1
+	}
+	if page < totalPages {
+		data.NextPage = page + 1
+	}
 	data.Active = "deployment"
 	s.render(w, http.StatusOK, "deployment", data)
+}
+
+// auditPageData backs the Audit log page: a filtered, paginated view of the
+// command-level audit trail (every remote command winify ran).
+type auditPageData struct {
+	pageData
+	Commands   []models.RemoteCommand
+	Servers    []config.Server
+	ServerID   string
+	Action     string
+	Query      string
+	Since      string
+	Page       int
+	PrevPage   int
+	NextPage   int
+	TotalPages int
+	Total      int
+}
+
+const auditPageSize = 50
+
+func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	serverID := strings.TrimSpace(r.URL.Query().Get("server"))
+	action := strings.TrimSpace(r.URL.Query().Get("action"))
+	switch action {
+	case "", "deploy", "rollback", "monitor", "bootstrap", "onboard":
+	default:
+		action = ""
+	}
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+
+	sinceParam := r.URL.Query().Get("since")
+	var since time.Time
+	switch sinceParam {
+	case "all":
+	case "1h":
+		since = time.Now().Add(-time.Hour)
+	case "7d":
+		since = time.Now().Add(-7 * 24 * time.Hour)
+	case "30d":
+		since = time.Now().Add(-30 * 24 * time.Hour)
+	case "", "24h":
+		sinceParam = "24h"
+		since = time.Now().Add(-24 * time.Hour)
+	default:
+		sinceParam = "24h"
+		since = time.Now().Add(-24 * time.Hour)
+	}
+
+	page := 1
+	if v, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && v > 0 {
+		page = v
+	}
+
+	commands, total, err := s.store.ListRemoteCommandsFiltered(ctx, models.RemoteCommandFilter{
+		ServerID: serverID,
+		Action:   action,
+		Query:    query,
+		Since:    since,
+		Limit:    auditPageSize,
+		Offset:   (page - 1) * auditPageSize,
+	})
+	if err != nil {
+		log.Printf("audit: list: %v", err)
+		http.Error(w, "failed to load audit log", http.StatusInternalServerError)
+		return
+	}
+	servers, _ := s.store.ListServers(ctx)
+
+	totalPages := 0
+	if total > 0 {
+		totalPages = (total + auditPageSize - 1) / auditPageSize
+	}
+	data := auditPageData{
+		pageData:   s.page(r),
+		Commands:   commands,
+		Servers:    servers,
+		ServerID:   serverID,
+		Action:     action,
+		Query:      query,
+		Since:      sinceParam,
+		Page:       page,
+		TotalPages: totalPages,
+		Total:      total,
+	}
+	if page > 1 {
+		data.PrevPage = page - 1
+	}
+	if page < totalPages {
+		data.NextPage = page + 1
+	}
+	data.Active = "audit"
+	s.render(w, http.StatusOK, "audit", data)
 }
 
 // handleRollback redeploys the previous successful image tag for a project.
@@ -301,15 +497,16 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := s.deployer.Rollback(ctx, project, srv); err != nil {
+		msg := "Rollback failed."
 		if errors.Is(err, deployment.ErrDeployInProgress) {
-			http.Error(w, "a deployment is already in progress", http.StatusConflict)
-			return
+			msg = "A deployment is already in progress for " + projectID + "."
+		} else {
+			log.Printf("rollback %s: %v", projectID, err)
 		}
-		log.Printf("rollback %s: %v", projectID, err)
-		http.Error(w, "rollback failed", http.StatusBadRequest)
+		http.Redirect(w, r, "/deployment?error="+urlQuery(msg), http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/deployment", http.StatusSeeOther)
+	http.Redirect(w, r, "/deployment?notice="+urlQuery("Rollback started for "+projectID), http.StatusSeeOther)
 }
 
 // handleAPIDeployments returns a project's deploy history as JSON.

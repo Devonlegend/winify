@@ -243,43 +243,39 @@ type projectFormPageData struct {
 	pageData
 	Form         *config.Project
 	Servers      []config.Server
+	Family       string
 	EditEnv      string
 	EditBuildEnv string
 	Error        string
 }
 
 func (s *Server) handleProjectNew(w http.ResponseWriter, r *http.Request) {
-	s.renderWizard(w, r, http.StatusOK, r.URL.Query().Get("error"))
+	s.renderWizard(w, r, http.StatusOK, nil, r.URL.Query().Get("error"))
 }
 
-// renderWizard renders the guided New Resource flow. Validation errors fall
-// back to the full form (renderProjectForm) so nothing stays hidden.
-func (s *Server) renderWizard(w http.ResponseWriter, r *http.Request, status int, errMsg string) {
+// renderWizard renders the guided New/Edit Resource flow. A non-nil form (an
+// edit or a validation error) is re-rendered with every submitted value
+// preserved, so the operator never loses work or gets dropped into a raw form.
+func (s *Server) renderWizard(w http.ResponseWriter, r *http.Request, status int, form *config.Project, errMsg string) {
 	servers, err := s.store.ListServers(r.Context())
 	if err != nil {
 		log.Printf("projects: servers: %v", err)
 		http.Error(w, "failed to load servers", http.StatusInternalServerError)
 		return
 	}
-	data := projectFormPageData{pageData: s.page(r), Servers: servers, Error: errMsg}
-	data.Active = "projects"
-	s.render(w, status, "project_wizard", data)
-}
-
-func (s *Server) renderProjectForm(w http.ResponseWriter, r *http.Request, status int, form *config.Project, errMsg string) {
-	servers, err := s.store.ListServers(r.Context())
-	if err != nil {
-		log.Printf("projects: servers: %v", err)
-		http.Error(w, "failed to load servers", http.StatusInternalServerError)
-		return
+	family := config.ServerTypeWindowsService
+	if form != nil {
+		if srv, err := s.store.GetServer(r.Context(), form.ServerID); err == nil && srv.Type != "" {
+			family = srv.Type
+		}
 	}
-	data := projectFormPageData{pageData: s.page(r), Form: form, Servers: servers, Error: errMsg}
+	data := projectFormPageData{pageData: s.page(r), Form: form, Servers: servers, Family: family, Error: errMsg}
 	if form != nil {
 		data.EditEnv = formatEnv(form.Env)
 		data.EditBuildEnv = formatEnv(form.BuildEnv)
 	}
 	data.Active = "projects"
-	s.render(w, status, "project_new", data)
+	s.render(w, status, "project_wizard", data)
 }
 
 type resourcePageData struct {
@@ -371,12 +367,12 @@ func (s *Server) handleProjectEnvSave(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		s.renderProjectForm(w, r, http.StatusBadRequest, nil, "Malformed form submission.")
+		s.renderWizard(w, r, http.StatusBadRequest, nil, "Malformed form submission.")
 		return
 	}
 	exposes, err := formInt(r, "ports_exposes")
 	if err != nil {
-		s.renderProjectForm(w, r, http.StatusBadRequest, nil, err.Error())
+		s.renderWizard(w, r, http.StatusBadRequest, nil, err.Error())
 		return
 	}
 	if exposes == 0 {
@@ -385,27 +381,27 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 	}
 	mappings, err := parsePortMappings(r.FormValue("ports_mappings"))
 	if err != nil {
-		s.renderProjectForm(w, r, http.StatusBadRequest, nil, err.Error())
+		s.renderWizard(w, r, http.StatusBadRequest, nil, err.Error())
 		return
 	}
 	healthInterval, err := formInt(r, "health_interval_seconds")
 	if err != nil {
-		s.renderProjectForm(w, r, http.StatusBadRequest, nil, err.Error())
+		s.renderWizard(w, r, http.StatusBadRequest, nil, err.Error())
 		return
 	}
 	healthTimeout, err := formInt(r, "health_timeout_seconds")
 	if err != nil {
-		s.renderProjectForm(w, r, http.StatusBadRequest, nil, err.Error())
+		s.renderWizard(w, r, http.StatusBadRequest, nil, err.Error())
 		return
 	}
 	healthRetries, err := formInt(r, "health_retries")
 	if err != nil {
-		s.renderProjectForm(w, r, http.StatusBadRequest, nil, err.Error())
+		s.renderWizard(w, r, http.StatusBadRequest, nil, err.Error())
 		return
 	}
 	healthStart, err := formInt(r, "health_start_period_seconds")
 	if err != nil {
-		s.renderProjectForm(w, r, http.StatusBadRequest, nil, err.Error())
+		s.renderWizard(w, r, http.StatusBadRequest, nil, err.Error())
 		return
 	}
 	p := config.Project{
@@ -479,7 +475,7 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 	// Strategy follows the bound server's type; the deploy pipeline selects on it.
 	srv, err := s.store.GetServer(r.Context(), p.ServerID)
 	if err != nil {
-		s.renderProjectForm(w, r, http.StatusBadRequest, &p, "Select a valid server.")
+		s.renderWizard(w, r, http.StatusBadRequest, &p, "Select a valid server.")
 		return
 	}
 	p.Strategy = srv.Type
@@ -498,16 +494,16 @@ func (s *Server) handleProjectSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := validateProject(p, srv); err != nil {
-		s.renderProjectForm(w, r, http.StatusBadRequest, &p, err.Error())
+		s.renderWizard(w, r, http.StatusBadRequest, &p, err.Error())
 		return
 	}
 	if err := s.validateProjectTargetPaths(p, srv); err != nil {
-		s.renderProjectForm(w, r, http.StatusBadRequest, &p, err.Error())
+		s.renderWizard(w, r, http.StatusBadRequest, &p, err.Error())
 		return
 	}
 	if err := s.store.UpsertProject(r.Context(), p); err != nil {
 		log.Printf("projects: save: %v", err)
-		s.renderProjectForm(w, r, http.StatusInternalServerError, &p, "Failed to save project.")
+		s.renderWizard(w, r, http.StatusInternalServerError, &p, "Failed to save project.")
 		return
 	}
 	if oldDomain != "" && oldDomain != p.Domain {

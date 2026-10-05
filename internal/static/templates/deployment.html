@@ -1,66 +1,88 @@
-{{define "title"}}Deployment &middot; Control Center{{end}}
+{{define "title"}}Deployments &middot; Control Center{{end}}
 {{define "body"}}
 <main>
-  <h1>Deployment</h1>
-  <p class="muted">Every deploy attempt, newest first.</p>
+  <div class="page-head">
+    <div>
+      <h1>Deployments</h1>
+      <p class="muted">Every deploy attempt across all resources, newest first.</p>
+    </div>
+  </div>
 
-  {{if not .Projects}}
-    <div class="placeholder">No projects configured.</div>
-  {{end}}
+  {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 
-  {{range .Projects}}
-  <section class="project">
-    <header class="project-head">
-      <div>
-        <h2>{{.Project.Name}} <span class="badge badge-{{.TargetType}}">{{.TargetType}}</span></h2>
-        <p class="muted">
-          {{.Project.ID}}
-          {{if .Project.RepoURL}}&middot; {{.Project.RepoURL}}{{end}}
-          {{if .Project.Branch}}&middot; {{.Project.Branch}}{{end}}
-          {{if .Project.Domain}}&middot; https://{{.Project.Domain}}{{end}}
-        </p>
-      </div>
-      {{if .CanRollback}}
-      <form method="post" action="/deployment/rollback/{{.Project.ID}}"
-            onsubmit="return confirm('Roll back {{.Project.Name}} to the previous successful image?');">
-        <button type="submit" class="secondary">Roll back</button>
-      </form>
-      {{end}}
-    </header>
+  <nav class="chips" aria-label="Filter by status">
+    <a class="chip {{if eq .Status ""}}active{{end}}" href="/deployment?q={{urlquery .Query}}">All <span class="chip-count">{{index .Counts "all"}}</span></a>
+    <a class="chip {{if eq .Status "success"}}active{{end}}" href="/deployment?status=success&q={{urlquery .Query}}">Success <span class="chip-count">{{index .Counts "success"}}</span></a>
+    <a class="chip {{if eq .Status "failed"}}active{{end}}" href="/deployment?status=failed&q={{urlquery .Query}}">Failed <span class="chip-count">{{index .Counts "failed"}}</span></a>
+    <a class="chip {{if eq .Status "running"}}active{{end}}" href="/deployment?status=running&q={{urlquery .Query}}">Running <span class="chip-count">{{index .Counts "running"}}</span></a>
+    <a class="chip {{if eq .Status "queued"}}active{{end}}" href="/deployment?status=queued&q={{urlquery .Query}}">Queued <span class="chip-count">{{index .Counts "queued"}}</span></a>
+  </nav>
 
-    {{if .Deployments}}
-    <table class="deploys">
-      <thead>
-        <tr>
-          <th>#</th><th>Type</th><th>Commit</th><th>Status</th><th>Trigger</th>
-          <th>Artifact</th><th>Started</th><th>Finished</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Deployments}}
-        <tr>
-          <td>{{.ID}}</td>
-          <td>{{if .TargetType}}<span class="badge badge-{{.TargetType}}">{{.TargetType}}</span>{{end}}</td>
-          <td class="mono">{{.CommitSHA}}</td>
-          <td><span class="status status-{{.Status}}">{{.Status}}</span></td>
-          <td>{{.Trigger}}</td>
-          <td class="mono">{{.ImageTag}}</td>
-          <td class="mono">{{.StartedAt.Format "2006-01-02 15:04:05"}}</td>
-          <td class="mono">{{if .FinishedAt.IsZero}}&mdash;{{else}}{{.FinishedAt.Format "2006-01-02 15:04:05"}}{{end}}</td>
-        </tr>
-        <tr class="logrow">
-          <td colspan="8">
+  <form method="get" action="/deployment" class="filter-form" role="search">
+    {{if .Status}}<input type="hidden" name="status" value="{{.Status}}">{{end}}
+    <input type="search" name="q" value="{{.Query}}" placeholder="Search resource id or name" aria-label="Search deployments">
+    <button type="submit" class="btn btn-sm">Search</button>
+  </form>
+
+  {{if .Rows}}
+  <table class="deploys">
+    <thead>
+      <tr><th>#</th><th>Resource</th><th>Type</th><th>Commit</th><th>Status</th><th>Trigger</th><th>Started</th><th>Log</th><th></th></tr>
+    </thead>
+    <tbody>
+      {{range .Rows}}
+      <tr>
+        <td>{{.ID}}</td>
+        <td>{{if .ProjectName}}<a href="/projects/{{.ProjectID}}">{{.ProjectName}}</a>{{else}}{{.ProjectID}}{{end}}</td>
+        <td>{{if .TargetType}}<span class="badge badge-{{.TargetType}}">{{.TargetType}}</span>{{end}}</td>
+        <td class="mono">{{.CommitSHA}}</td>
+        <td><span class="status status-{{.Status}}">{{.Status}}</span></td>
+        <td>{{.Trigger}}</td>
+        <td class="mono">{{.StartedAt.Format "2006-01-02 15:04:05"}}</td>
+        <td>
+          {{if or .Log .Error}}
+          <details class="log-toggle"><summary>Log</summary>
             {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
-            <details><summary>Log</summary><pre class="log">{{.Log}}</pre></details>
-          </td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
-    {{else}}
-      <div class="placeholder">No deployments yet. Push to the configured branch to trigger one.</div>
-    {{end}}
-  </section>
+            <pre class="log">{{.Log}}</pre>
+          </details>
+          {{else}}&mdash;{{end}}
+        </td>
+        <td>
+          {{if .CanRollback}}
+          {{if or (eq .TargetType "iis") (eq .TargetType "winsvc")}}
+          <form method="post" action="/deployment/rollback/{{.ProjectID}}"
+                data-confirm-title="Roll back {{.ProjectName}}"
+                data-confirm="Restores the most recent timestamped backup on the target server. The live files are replaced and the rollback is recorded in history."
+                data-confirm-ok="Roll back" data-confirm-variant="primary"
+                onsubmit="return confirm('Roll back {{.ProjectName}} by restoring the most recent backup?');">
+            <button type="submit" class="link">Roll back</button>
+          </form>
+          {{else}}
+          <form method="post" action="/deployment/rollback/{{.ProjectID}}"
+                data-confirm-title="Roll back {{.ProjectName}}"
+                data-confirm="Redeploys the previous successful image for this resource. The current version keeps serving if the rollback fails."
+                data-confirm-ok="Roll back" data-confirm-variant="primary"
+                onsubmit="return confirm('Roll back {{.ProjectName}} to the previous successful image?');">
+            <button type="submit" class="link">Roll back</button>
+          </form>
+          {{end}}
+          {{end}}
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+
+  {{if gt .TotalPages 1}}
+  <nav class="pager" aria-label="Pages">
+    {{if .PrevPage}}<a class="btn btn-sm" href="/deployment?status={{.Status}}&q={{urlquery .Query}}&page={{.PrevPage}}">Previous</a>{{end}}
+    <span class="muted">Page {{.Page}} of {{.TotalPages}}</span>
+    {{if .NextPage}}<a class="btn btn-sm" href="/deployment?status={{.Status}}&q={{urlquery .Query}}&page={{.NextPage}}">Next</a>{{end}}
+  </nav>
+  {{end}}
+  {{else}}
+    <div class="placeholder">{{if .Query}}No deployments match &ldquo;{{.Query}}&rdquo;.{{else}}No deployments yet. Push to a configured branch or click Deploy on a resource.{{end}}</div>
   {{end}}
 </main>
 {{end}}

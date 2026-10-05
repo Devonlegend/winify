@@ -862,6 +862,78 @@ func (s *Store) SuccessfulDeployments(ctx context.Context, projectID string, lim
 	return out, rows.Err()
 }
 
+// deploymentColumnsQualified mirrors deploymentColumns with a "d." alias for
+// queries that join projects. The order must match scanDeployment.
+const deploymentColumnsQualified = `d.id, d.project_id, d.target_type, d.commit_sha, d.ref, d.image_tag, d.status, d.trigger, d.log, d.error, d.started_at, d.finished_at`
+
+// ListDeploymentsPage returns a filtered, paginated slice of deployment history
+// across all projects (newest first), plus the total number of matches. status
+// matches exactly; query matches the project id or name (substring).
+func (s *Store) ListDeploymentsPage(ctx context.Context, status, query string, limit, offset int) ([]Deployment, int, error) {
+	where := []string{}
+	args := []any{}
+	if status != "" {
+		where = append(where, "d.status = ?")
+		args = append(args, status)
+	}
+	if query != "" {
+		like := "%" + query + "%"
+		where = append(where, "(d.project_id LIKE ? OR p.name LIKE ?)")
+		args = append(args, like, like)
+	}
+	clause := ""
+	if len(where) > 0 {
+		clause = " WHERE " + strings.Join(where, " AND ")
+	}
+	const from = ` FROM deployments d LEFT JOIN projects p ON p.id = d.project_id`
+
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*)`+from+clause, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count deployments: %w", err)
+	}
+	if limit <= 0 {
+		limit = 25
+	}
+	pageArgs := append(append([]any{}, args...), limit, offset)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+deploymentColumnsQualified+from+clause+` ORDER BY d.id DESC LIMIT ? OFFSET ?`, pageArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list deployments page: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Deployment
+	for rows.Next() {
+		d, err := scanDeployment(rows.Scan)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, d)
+	}
+	return out, total, rows.Err()
+}
+
+// DeploymentStatusCounts returns the number of deployments per status (global,
+// not page-scoped), for the filter chips.
+func (s *Store) DeploymentStatusCounts(ctx context.Context) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM deployments GROUP BY status`)
+	if err != nil {
+		return nil, fmt.Errorf("deployment status counts: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string]int{}
+	for rows.Next() {
+		var status string
+		var n int
+		if err := rows.Scan(&status, &n); err != nil {
+			return nil, err
+		}
+		out[status] = n
+	}
+	return out, rows.Err()
+}
+
 // RecentDeployments returns the newest attempts across all projects.
 func (s *Store) RecentDeployments(ctx context.Context, limit int) ([]Deployment, error) {
 	rows, err := s.db.QueryContext(ctx,
@@ -1165,6 +1237,74 @@ func (s *Store) ListRemoteCommands(ctx context.Context, limit int) ([]RemoteComm
 		out = append(out, rc)
 	}
 	return out, rows.Err()
+}
+
+// RemoteCommandFilter narrows an audit query. Zero values mean "no filter".
+type RemoteCommandFilter struct {
+	ServerID string
+	Action   string
+	Query    string // substring match on command or error
+	Since    time.Time
+	Limit    int
+	Offset   int
+}
+
+// ListRemoteCommandsFiltered returns audited commands newest-first with optional
+// filters, plus the total number of matches.
+func (s *Store) ListRemoteCommandsFiltered(ctx context.Context, f RemoteCommandFilter) ([]RemoteCommand, int, error) {
+	where := []string{}
+	args := []any{}
+	if f.ServerID != "" {
+		where = append(where, "server_id = ?")
+		args = append(args, f.ServerID)
+	}
+	if f.Action != "" {
+		where = append(where, "action = ?")
+		args = append(args, f.Action)
+	}
+	if !f.Since.IsZero() {
+		where = append(where, "executed_at >= ?")
+		args = append(args, f.Since.Unix())
+	}
+	if f.Query != "" {
+		like := "%" + f.Query + "%"
+		where = append(where, "(command LIKE ? OR error LIKE ?)")
+		args = append(args, like, like)
+	}
+	clause := ""
+	if len(where) > 0 {
+		clause = " WHERE " + strings.Join(where, " AND ")
+	}
+
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM remote_commands`+clause, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count remote commands: %w", err)
+	}
+	if f.Limit <= 0 {
+		f.Limit = 50
+	}
+	pageArgs := append(append([]any{}, args...), f.Limit, f.Offset)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+remoteCommandColumns+` FROM remote_commands`+clause+` ORDER BY id DESC LIMIT ? OFFSET ?`, pageArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list remote commands filtered: %w", err)
+	}
+	defer rows.Close()
+
+	var out []RemoteCommand
+	for rows.Next() {
+		var (
+			rc       RemoteCommand
+			executed int64
+		)
+		if err := rows.Scan(&rc.ID, &rc.ServerID, &rc.ServerType, &rc.Action, &rc.DeploymentID,
+			&rc.Command, &rc.Error, &executed); err != nil {
+			return nil, 0, fmt.Errorf("scan remote command: %w", err)
+		}
+		rc.ExecutedAt = time.Unix(executed, 0)
+		out = append(out, rc)
+	}
+	return out, total, rows.Err()
 }
 
 // CountServers returns how many servers exist (used to seed from YAML only on a

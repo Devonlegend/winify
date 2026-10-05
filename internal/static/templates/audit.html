@@ -1,0 +1,72 @@
+{{define "title"}}Audit log &middot; Control Center{{end}}
+{{define "body"}}
+<main>
+  <div class="page-head">
+    <div>
+      <h1>Audit log</h1>
+      <p class="muted">Every remote command winify ran against a target &mdash; deploy, rollback and monitoring &mdash; with the server, action and time. Credentials are never recorded.</p>
+    </div>
+  </div>
+
+  <form method="get" action="/audit" class="filter-form audit-filter" role="search">
+    <label>Server
+      <select name="server">
+        <option value="">All servers</option>
+        {{range .Servers}}<option value="{{.ID}}" {{if eq $.ServerID .ID}}selected{{end}}>{{.ID}}</option>{{end}}
+      </select>
+    </label>
+    <label>Action
+      <select name="action">
+        <option value="" {{if eq .Action ""}}selected{{end}}>All actions</option>
+        <option value="deploy" {{if eq .Action "deploy"}}selected{{end}}>deploy</option>
+        <option value="rollback" {{if eq .Action "rollback"}}selected{{end}}>rollback</option>
+        <option value="monitor" {{if eq .Action "monitor"}}selected{{end}}>monitor</option>
+        <option value="bootstrap" {{if eq .Action "bootstrap"}}selected{{end}}>bootstrap</option>
+        <option value="onboard" {{if eq .Action "onboard"}}selected{{end}}>onboard</option>
+      </select>
+    </label>
+    <label>Since
+      <select name="since">
+        <option value="1h" {{if eq .Since "1h"}}selected{{end}}>last hour</option>
+        <option value="24h" {{if eq .Since "24h"}}selected{{end}}>last 24 hours</option>
+        <option value="7d" {{if eq .Since "7d"}}selected{{end}}>last 7 days</option>
+        <option value="30d" {{if eq .Since "30d"}}selected{{end}}>last 30 days</option>
+        <option value="all" {{if eq .Since "all"}}selected{{end}}>all time</option>
+      </select>
+    </label>
+    <label>Search<input type="search" name="q" value="{{.Query}}" placeholder="command or error"></label>
+    <button type="submit" class="btn btn-sm">Apply</button>
+  </form>
+
+  {{if .Commands}}
+  <table class="deploys">
+    <thead><tr><th>Time</th><th>Server</th><th>Type</th><th>Action</th><th>Deployment</th><th>Command</th><th>Error</th></tr></thead>
+    <tbody>
+      {{range .Commands}}
+      <tr>
+        <td class="mono">{{.ExecutedAt.Format "2006-01-02 15:04:05"}}</td>
+        <td class="mono">{{.ServerID}}</td>
+        <td>{{if .ServerType}}<span class="badge badge-{{.ServerType}}">{{.ServerType}}</span>{{end}}</td>
+        <td>{{.Action}}</td>
+        <td>{{if .DeploymentID}}<span class="mono">#{{.DeploymentID}}</span>{{else}}&mdash;{{end}}</td>
+        <td class="mono audit-cmd">{{.Command}}</td>
+        <td>{{if .Error}}<span class="err">{{.Error}}</span>{{else}}&mdash;{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+
+  {{if gt .TotalPages 1}}
+  <nav class="pager" aria-label="Pages">
+    {{if .PrevPage}}<a class="btn btn-sm" href="/audit?server={{.ServerID}}&action={{.Action}}&since={{.Since}}&q={{urlquery .Query}}&page={{.PrevPage}}">Previous</a>{{end}}
+    <span class="muted">Page {{.Page}} of {{.TotalPages}} &middot; {{.Total}} commands</span>
+    {{if .NextPage}}<a class="btn btn-sm" href="/audit?server={{.ServerID}}&action={{.Action}}&since={{.Since}}&q={{urlquery .Query}}&page={{.NextPage}}">Next</a>{{end}}
+  </nav>
+  {{else}}
+  <p class="muted">{{.Total}} command{{if ne .Total 1}}s{{end}} in this window.</p>
+  {{end}}
+  {{else}}
+    <div class="placeholder">No audited commands in this window. Deploys, rollbacks and monitoring polls are recorded here automatically.</div>
+  {{end}}
+</main>
+{{end}}

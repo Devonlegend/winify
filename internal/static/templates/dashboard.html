@@ -32,7 +32,7 @@
   <dl class="stats">
     <div>
       <dt>Database</dt>
-      <dd class="ok">{{.DBStatus}}</dd>
+      <dd class="{{if eq .DBStatus "ok"}}ok{{else}}err{{end}}">{{.DBStatus}}</dd>
     </div>
     <div>
       <dt>Servers</dt>
@@ -43,5 +43,31 @@
       <dd>{{.ProjectCount}}</dd>
     </div>
   </dl>
+
+  {{if .FailedCount}}
+  <p class="error">{{.FailedCount}} resource{{if ne .FailedCount 1}}s{{end}} failed the last deploy. Open <a href="/deployment">Deployments</a> to see the log.</p>
+  {{end}}
+
+  {{if .Recent}}
+  <section class="dashboard-activity">
+    <h2 class="form-title">Recent deployments</h2>
+    <table class="deploys">
+      <thead>
+        <tr><th>Resource</th><th>Status</th><th>Trigger</th><th>Started</th><th></th></tr>
+      </thead>
+      <tbody>
+        {{range .Recent}}
+        <tr>
+          <td><a href="/projects/{{.ProjectID}}">{{.ProjectName}}</a></td>
+          <td><span class="status status-{{.Status}}">{{.Status}}</span></td>
+          <td>{{.Trigger}}</td>
+          <td class="mono">{{.StartedAt.Format "2006-01-02 15:04"}}</td>
+          <td><a href="/deployment">History</a></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+  {{end}}
 </main>
 {{end}}
