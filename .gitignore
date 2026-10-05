@@ -19,3 +19,6 @@ CLAUDE.md
 # Installer build output
 /packaging/payload/
 /packaging/dist/
+
+# Design-review tooling artifacts
+/.impeccable/
