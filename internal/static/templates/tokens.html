@@ -2,7 +2,7 @@
 {{define "body"}}
 <main>
   <h1>API Tokens</h1>
-  <p class="muted">Bearer tokens for the REST API at <span class="mono">/api/v1</span>. Tokens are shown once and stored only as a hash. A <strong>write</strong> token is an administrator-equivalent credential: it can change any project/server and trigger privileged deployments. Issue it only to trusted automation.</p>
+  <p class="muted">Bearer tokens for the REST API at <span class="mono">/api/v1</span>. Tokens are shown once and stored only as a hash. A <strong>write</strong> token is an administrator-equivalent credential: it can change any         resource/server and trigger      privileged deployments. Issue it only to trusted automation.</p>
 
   {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
   {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
@@ -25,7 +25,11 @@
         <td class="mono">{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
         <td class="mono">{{if .LastUsedAt.IsZero}}never{{else}}{{.LastUsedAt.Format "2006-01-02 15:04"}}{{end}}</td>
         <td class="row-actions">
-          <form method="post" action="/tokens/delete" onsubmit="return confirm('Revoke token {{.Name}}?');">
+          <form method="post" action="/tokens/delete"
+                data-confirm-title="Revoke token {{.Name}}"
+                data-confirm="Revokes the {{.Scope}} token {{.Name}}. Automation using it will receive 401 immediately. This cannot be undone."
+                data-confirm-ok="Revoke"
+                onsubmit="return confirm('Revoke token {{.Name}}?');">
             <input type="hidden" name="id" value="{{.ID}}">
             <button type="submit" class="link danger">Revoke</button>
           </form>

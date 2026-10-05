@@ -1,12 +1,12 @@
 {{define "projectForm"}}
-<form method="post" action="/projects" class="admin-form">
+<form method="post" action="/projects" class="admin-form" data-project-form>
   <label>ID<input name="id" value="{{if .Form}}{{.Form.ID}}{{end}}" required {{if .Form}}readonly{{end}}></label>
   <label>Name<input name="name" value="{{if .Form}}{{.Form.Name}}{{end}}" required></label>
   <label>Server
     <select name="server_id" required>
       <option value="">&mdash; select &mdash;</option>
       {{range .Servers}}
-      <option value="{{.ID}}" data-ip="{{.PublicIP}}" data-local="{{.Local}}" {{if $.Form}}{{if eq $.Form.ServerID .ID}}selected{{end}}{{end}}>{{.ID}} ({{.Type}})</option>
+      <option value="{{.ID}}" data-type="{{.Type}}" data-ip="{{.PublicIP}}" data-local="{{.Local}}" {{if $.Form}}{{if eq $.Form.ServerID .ID}}selected{{end}}{{end}}>{{.ID}} ({{.Type}})</option>
       {{end}}
     </select>
   </label>
@@ -16,84 +16,88 @@
   <label>Branch<input name="branch" value="{{if .Form}}{{.Form.Branch}}{{end}}" placeholder="main"></label>
   <label>Domain<input name="domain" id="project-domain" value="{{if .Form}}{{.Form.Domain}}{{end}}" placeholder="app.example.com"></label>
   <button type="button" class="btn btn-ghost btn-sm" id="generate-domain">Generate sslip.io domain</button>
+  <label>Ports exposes (container or health port)<input name="ports_exposes" value="{{if .Form}}{{.Form.PortsExposes}}{{end}}" placeholder="3000"></label>
   <label>Health path<input name="health_path" value="{{if .Form}}{{.Form.HealthPath}}{{end}}" placeholder="/healthz"></label>
   <label class="check"><input type="checkbox" name="disable_health_check" {{if .Form}}{{if .Form.DisableHealthCheck}}checked{{end}}{{end}}> Skip the post-deploy health check</label>
   <label>Webhook secret ref<input name="webhook_secret_ref" value="{{if .Form}}{{.Form.WebhookSecretRef}}{{end}}" placeholder="vault:app-webhook"></label>
   <label>GitHub repository (owner/repo, for App auto-registration)<input name="github_repo" value="{{if .Form}}{{.Form.GitHubRepo}}{{end}}" placeholder="acme/app"></label>
 
-  <fieldset>
-    <legend>Docker deploy source</legend>
-    <label>Source
-      <select name="source">
-        <option value="dockerfile" {{if .Form}}{{if eq .Form.Source "dockerfile"}}selected{{end}}{{end}}>dockerfile (build from repo)</option>
-        <option value="compose" {{if .Form}}{{if eq .Form.Source "compose"}}selected{{end}}{{end}}>compose (repo docker-compose.yml)</option>
-        <option value="image" {{if .Form}}{{if eq .Form.Source "image"}}selected{{end}}{{end}}>image (prebuilt registry image)</option>
+  <details class="advanced">
+    <summary>Advanced options (deploy source, IIS/service specifics, health timing, environment)</summary>
+
+    <label>Runtime/toolchain
+      <select name="runtime">
+        <option value="" {{if .Form}}{{if eq .Form.Runtime ""}}selected{{end}}{{end}}>none / existing</option>
+        <option value="python" {{if .Form}}{{if eq .Form.Runtime "python"}}selected{{end}}{{end}}>Python</option>
+        <option value="node" {{if .Form}}{{if eq .Form.Runtime "node"}}selected{{end}}{{end}}>Node.js</option>
+        <option value="go" {{if .Form}}{{if eq .Form.Runtime "go"}}selected{{end}}{{end}}>Go</option>
+        <option value="dotnet" {{if .Form}}{{if eq .Form.Runtime "dotnet"}}selected{{end}}{{end}}>.NET</option>
       </select>
     </label>
-    <label>Dockerfile path<input name="dockerfile_path" value="{{if .Form}}{{.Form.DockerfilePath}}{{end}}" placeholder="Dockerfile"></label>
-    <label>Compose path<input name="compose_path" value="{{if .Form}}{{.Form.ComposePath}}{{end}}" placeholder="docker-compose.yml"></label>
-    <label>Image<input name="image" value="{{if .Form}}{{.Form.Image}}{{end}}" placeholder="nginx:1.27"></label>
-    <label>Ports exposes (container port)<input name="ports_exposes" value="{{if .Form}}{{.Form.PortsExposes}}{{end}}" placeholder="3000"></label>
-    <label>Ports mappings (host:container, one per line)
-      <textarea name="ports_mappings" rows="2" placeholder="8080:3000">{{if .Form}}{{range .Form.PortsMappings}}{{.}}
+
+    <fieldset data-field-group="docker">
+      <legend>Docker deploy source</legend>
+      <label>Source
+        <select name="source">
+          <option value="dockerfile" {{if .Form}}{{if eq .Form.Source "dockerfile"}}selected{{end}}{{end}}>dockerfile (build from repo)</option>
+          <option value="compose" {{if .Form}}{{if eq .Form.Source "compose"}}selected{{end}}{{end}}>compose (repo docker-compose.yml)</option>
+          <option value="image" {{if .Form}}{{if eq .Form.Source "image"}}selected{{end}}{{end}}>image (prebuilt registry image)</option>
+        </select>
+      </label>
+      <label>Dockerfile path<input name="dockerfile_path" value="{{if .Form}}{{.Form.DockerfilePath}}{{end}}" placeholder="Dockerfile"></label>
+      <label>Compose path<input name="compose_path" value="{{if .Form}}{{.Form.ComposePath}}{{end}}" placeholder="docker-compose.yml"></label>
+      <label>Image<input name="image" value="{{if .Form}}{{.Form.Image}}{{end}}" placeholder="nginx:1.27"></label>
+      <label>Ports mappings (host:container, one per line)
+        <textarea name="ports_mappings" rows="2" placeholder="8080:3000">{{if .Form}}{{range .Form.PortsMappings}}{{.}}
 {{end}}{{end}}</textarea>
+      </label>
+    </fieldset>
+
+    <fieldset data-field-group="iis">
+      <legend>IIS</legend>
+      <label>Physical path<input name="iis_physical_path" value="{{if .Form}}{{.Form.IISPhysicalPath}}{{end}}" placeholder="C:\ProgramData\winify\apps\app"></label>
+      <label>Site name<input name="iis_site" value="{{if .Form}}{{.Form.IISSite}}{{end}}" placeholder="(defaults to the project id)"></label>
+      <label>App pool<input name="iis_app_pool" value="{{if .Form}}{{.Form.IISAppPool}}{{end}}"></label>
+      <label>Service (optional)<input name="iis_service" value="{{if .Form}}{{.Form.IISService}}{{end}}"></label>
+      <label>Build command (optional)<input name="iis_build_command" value="{{if .Form}}{{.Form.IISBuildCommand}}{{end}}" placeholder="dotnet publish -c Release -o publish"></label>
+      <label>Source subdir<input name="iis_source_subdir" value="{{if .Form}}{{.Form.IISSourceSubdir}}{{end}}" placeholder="publish"></label>
+      <label class="check"><input type="checkbox" name="iis_blue_green" {{if .Form}}{{if .Form.IISBlueGreen}}checked{{end}}{{end}}> Blue-green deploy (slot swap, near-zero downtime; rollback repoints the site)</label>
+    </fieldset>
+
+    <fieldset data-field-group="winsvc">
+      <legend>Windows service (NSSM)</legend>
+      <label>Service name<input name="service_name" value="{{if .Form}}{{.Form.ServiceName}}{{end}}" placeholder="MyApp"></label>
+      <label>Executable path (on target)<input name="service_exe" value="{{if .Form}}{{.Form.ServiceExe}}{{end}}" placeholder="C:\ProgramData\winify\apps\myapp\myapp.exe"></label>
+      <label>Arguments (optional)<input name="service_args" value="{{if .Form}}{{.Form.ServiceArgs}}{{end}}" placeholder="--port 8080"></label>
+      <label>Install directory<input name="service_work_dir" value="{{if .Form}}{{.Form.ServiceWorkDir}}{{end}}" placeholder="C:\ProgramData\winify\apps\myapp"></label>
+      <label>Build command (optional)<input name="service_build_command" value="{{if .Form}}{{.Form.ServiceBuildCommand}}{{end}}" placeholder="go build -o myapp.exe ./cmd/myapp"></label>
+      <label>Source subdir<input name="service_source_subdir" value="{{if .Form}}{{.Form.ServiceSourceSubdir}}{{end}}" placeholder="."></label>
+      <label>Log directory (optional)<input name="service_log_dir" value="{{if .Form}}{{.Form.ServiceLogDir}}{{end}}" placeholder="C:\ProgramData\winify\logs\myapp"></label>
+      <label>Service account (optional)<input name="service_account" value="{{if .Form}}{{.Form.ServiceAccount}}{{end}}" placeholder="LocalSystem"></label>
+      <label>Caddy mode
+        <select name="caddy_mode">
+          <option value="none" {{if .Form}}{{if eq .Form.CaddyMode "none"}}selected{{end}}{{end}}>none (central proxy only)</option>
+          <option value="static" {{if .Form}}{{if eq .Form.CaddyMode "static"}}selected{{end}}{{end}}>static (serve files)</option>
+        </select>
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Health check timing (optional; blank uses the global default)</legend>
+      <label>Interval (s)<input name="health_interval_seconds" value="{{if .Form}}{{.Form.HealthIntervalSeconds}}{{end}}" placeholder="3"></label>
+      <label>Timeout per attempt (s)<input name="health_timeout_seconds" value="{{if .Form}}{{.Form.HealthTimeoutSeconds}}{{end}}" placeholder="5"></label>
+      <label>Retries<input name="health_retries" value="{{if .Form}}{{.Form.HealthRetries}}{{end}}" placeholder="derived from the global timeout"></label>
+      <label>Start period (s)<input name="health_start_period_seconds" value="{{if .Form}}{{.Form.HealthStartPeriodSeconds}}{{end}}" placeholder="0"></label>
+    </fieldset>
+
+    <label>Environment (KEY=VALUE per line, runtime)
+      <textarea name="env" rows="4" placeholder="ASPNETCORE_ENVIRONMENT=Production">{{.EditEnv}}</textarea>
     </label>
-  </fieldset>
-
-  <fieldset>
-    <legend>Health check timing (optional; blank uses the global default)</legend>
-    <label>Interval (s)<input name="health_interval_seconds" value="{{if .Form}}{{.Form.HealthIntervalSeconds}}{{end}}" placeholder="3"></label>
-    <label>Timeout per attempt (s)<input name="health_timeout_seconds" value="{{if .Form}}{{.Form.HealthTimeoutSeconds}}{{end}}" placeholder="5"></label>
-    <label>Retries<input name="health_retries" value="{{if .Form}}{{.Form.HealthRetries}}{{end}}" placeholder="derived from the global timeout"></label>
-    <label>Start period (s)<input name="health_start_period_seconds" value="{{if .Form}}{{.Form.HealthStartPeriodSeconds}}{{end}}" placeholder="0"></label>
-  </fieldset>
-
-  <fieldset>
-    <legend>IIS</legend>
-    <label>Physical path<input name="iis_physical_path" value="{{if .Form}}{{.Form.IISPhysicalPath}}{{end}}" placeholder="C:\ProgramData\winify\apps\app"></label>
-    <label>Site name<input name="iis_site" value="{{if .Form}}{{.Form.IISSite}}{{end}}" placeholder="(defaults to the project id)"></label>
-    <label>App pool<input name="iis_app_pool" value="{{if .Form}}{{.Form.IISAppPool}}{{end}}"></label>
-    <label>Service (optional)<input name="iis_service" value="{{if .Form}}{{.Form.IISService}}{{end}}"></label>
-    <label>Build command (optional)<input name="iis_build_command" value="{{if .Form}}{{.Form.IISBuildCommand}}{{end}}" placeholder="dotnet publish -c Release -o publish"></label>
-    <label>Source subdir<input name="iis_source_subdir" value="{{if .Form}}{{.Form.IISSourceSubdir}}{{end}}" placeholder="publish"></label>
-    <label class="check"><input type="checkbox" name="iis_blue_green" {{if .Form}}{{if .Form.IISBlueGreen}}checked{{end}}{{end}}> Blue-green deploy (slot swap, near-zero downtime; rollback repoints the site)</label>
-  </fieldset>
-
-  <fieldset>
-    <legend>Windows service (NSSM)</legend>
-    <label>Service name<input name="service_name" value="{{if .Form}}{{.Form.ServiceName}}{{end}}" placeholder="MyApp"></label>
-    <label>Executable path (on target)<input name="service_exe" value="{{if .Form}}{{.Form.ServiceExe}}{{end}}" placeholder="C:\ProgramData\winify\apps\myapp\myapp.exe"></label>
-    <label>Arguments (optional)<input name="service_args" value="{{if .Form}}{{.Form.ServiceArgs}}{{end}}" placeholder="--port 8080"></label>
-    <label>Install directory<input name="service_work_dir" value="{{if .Form}}{{.Form.ServiceWorkDir}}{{end}}" placeholder="C:\ProgramData\winify\apps\myapp"></label>
-    <label>Build command (optional)<input name="service_build_command" value="{{if .Form}}{{.Form.ServiceBuildCommand}}{{end}}" placeholder="go build -o myapp.exe ./cmd/myapp"></label>
-    <label>Source subdir<input name="service_source_subdir" value="{{if .Form}}{{.Form.ServiceSourceSubdir}}{{end}}" placeholder="."></label>
-    <label>Log directory (optional)<input name="service_log_dir" value="{{if .Form}}{{.Form.ServiceLogDir}}{{end}}" placeholder="C:\ProgramData\winify\logs\myapp"></label>
-    <label>Service account (optional)<input name="service_account" value="{{if .Form}}{{.Form.ServiceAccount}}{{end}}" placeholder="LocalSystem"></label>
-    <label>Caddy mode
-      <select name="caddy_mode">
-        <option value="none" {{if .Form}}{{if eq .Form.CaddyMode "none"}}selected{{end}}{{end}}>none (central proxy only)</option>
-        <option value="static" {{if .Form}}{{if eq .Form.CaddyMode "static"}}selected{{end}}{{end}}>static (serve files)</option>
-      </select>
+    <label>Build environment (KEY=VALUE per line, build only)
+      <textarea name="build_env" rows="3" placeholder="NPM_TOKEN=...">{{.EditBuildEnv}}</textarea>
     </label>
-  </fieldset>
-
-  <label>Runtime/toolchain
-    <select name="runtime">
-      <option value="" {{if .Form}}{{if eq .Form.Runtime ""}}selected{{end}}{{end}}>none / existing</option>
-      <option value="python" {{if .Form}}{{if eq .Form.Runtime "python"}}selected{{end}}{{end}}>Python</option>
-      <option value="node" {{if .Form}}{{if eq .Form.Runtime "node"}}selected{{end}}{{end}}>Node.js</option>
-      <option value="go" {{if .Form}}{{if eq .Form.Runtime "go"}}selected{{end}}{{end}}>Go</option>
-      <option value="dotnet" {{if .Form}}{{if eq .Form.Runtime "dotnet"}}selected{{end}}{{end}}>.NET</option>
-    </select>
-  </label>
-
-  <label>Environment (KEY=VALUE per line, runtime)
-    <textarea name="env" rows="4" placeholder="ASPNETCORE_ENVIRONMENT=Production">{{.EditEnv}}</textarea>
-  </label>
-  <label>Build environment (KEY=VALUE per line, build only)
-    <textarea name="build_env" rows="3" placeholder="NPM_TOKEN=...">{{.EditBuildEnv}}</textarea>
-  </label>
-  <p class="muted">Reference shared variables as <span class="mono">&#123;&#123;project.KEY&#125;&#125;</span> or <span class="mono">&#123;&#123;environment.KEY&#125;&#125;</span>.</p>
+    <p class="muted">Reference shared variables as <span class="mono">&#123;&#123;project.KEY&#125;&#125;</span> or <span class="mono">&#123;&#123;environment.KEY&#125;&#125;</span>.</p>
+  </details>
 
   <div class="form-actions">
     <button type="submit">Save resource</button>

@@ -22,7 +22,11 @@
         <td class="mono">{{.Key}}</td>
         <td class="mono">{{.Value}}</td>
         <td class="row-actions">
-          <form method="post" action="/variables/delete" onsubmit="return confirm('Delete {{.Key}}?');">
+          <form method="post" action="/variables/delete"
+                data-confirm-title="Delete variable"
+                data-confirm="Deletes the {{.Scope}} variable {{.Key}}. Resources referencing it will lose the value on their next deploy."
+                data-confirm-ok="Delete"
+                onsubmit="return confirm('Delete {{.Key}}?');">
             <input type="hidden" name="scope" value="{{.Scope}}">
             <input type="hidden" name="scope_id" value="{{.ScopeID}}">
             <input type="hidden" name="key" value="{{.Key}}">

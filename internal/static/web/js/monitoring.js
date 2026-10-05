@@ -34,6 +34,29 @@
     return Math.round(s / 3600) + 'h ago';
   }
 
+  // Chart colors come from the palette so the graph never drifts from the theme.
+  function cssVar(name, fallback) {
+    var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  }
+
+  function hexToRgba(hex, alpha) {
+    var h = String(hex || '').replace('#', '');
+    if (h.length === 3) h = h.split('').map(function (c) { return c + c; }).join('');
+    if (h.length !== 6) return 'rgba(0, 0, 0, ' + alpha + ')';
+    var n = parseInt(h, 16);
+    return 'rgba(' + ((n >> 16) & 255) + ', ' + ((n >> 8) & 255) + ', ' + (n & 255) + ', ' + alpha + ')';
+  }
+
+  // The three metric lines are told apart by value, not hue.
+  var theme = {
+    cpu: cssVar('--text', '#ece9e4'),
+    mem: cssVar('--muted', '#a8a49d'),
+    disk: cssVar('--faint', '#85817a'),
+    muted: cssVar('--muted', '#a8a49d'),
+    border: cssVar('--border', '#262522')
+  };
+
   function initChart(card) {
     var canvas = card.querySelector('canvas[data-role=chart]');
     if (!canvas || typeof Chart === 'undefined') return null;
@@ -42,9 +65,9 @@
       data: {
         labels: [],
         datasets: [
-          { label: 'CPU %', data: [], borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.12)', tension: 0.3, pointRadius: 0, borderWidth: 2 },
-          { label: 'Mem %', data: [], borderColor: '#34d399', backgroundColor: 'rgba(52,211,153,0.10)', tension: 0.3, pointRadius: 0, borderWidth: 2 },
-          { label: 'Disk %', data: [], borderColor: '#c4b5fd', backgroundColor: 'rgba(196,181,253,0.10)', tension: 0.3, pointRadius: 0, borderWidth: 2 }
+          { label: 'CPU %', data: [], borderColor: theme.cpu, backgroundColor: hexToRgba(theme.cpu, 0.10), tension: 0.3, pointRadius: 0, borderWidth: 2 },
+          { label: 'Mem %', data: [], borderColor: theme.mem, backgroundColor: hexToRgba(theme.mem, 0.08), tension: 0.3, pointRadius: 0, borderWidth: 2, borderDash: [5, 3] },
+          { label: 'Disk %', data: [], borderColor: theme.disk, backgroundColor: hexToRgba(theme.disk, 0.06), tension: 0.3, pointRadius: 0, borderWidth: 2, borderDash: [2, 3] }
         ]
       },
       options: {
@@ -52,10 +75,10 @@
         maintainAspectRatio: false,
         animation: false,
         scales: {
-          y: { min: 0, max: 100, ticks: { color: '#64748b', callback: function (v) { return v + '%'; } }, grid: { color: '#1e293b' } },
-          x: { ticks: { color: '#64748b', maxTicksLimit: 6 }, grid: { display: false } }
+          y: { min: 0, max: 100, ticks: { color: theme.muted, callback: function (v) { return v + '%'; } }, grid: { color: theme.border } },
+          x: { ticks: { color: theme.muted, maxTicksLimit: 6 }, grid: { display: false } }
         },
-        plugins: { legend: { labels: { color: '#94a3b8', boxWidth: 10, boxHeight: 10 } } }
+        plugins: { legend: { labels: { color: theme.muted, boxWidth: 10, boxHeight: 10 } } }
       }
     });
   }

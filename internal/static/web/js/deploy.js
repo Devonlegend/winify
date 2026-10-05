@@ -8,17 +8,32 @@
   var statusEl = document.getElementById('drawer-status');
   var linkEl = document.getElementById('drawer-link');
   var closeBtn = document.getElementById('drawer-close');
+  var reopenBtn = document.getElementById('deploy-reopen');
+  var reopenStatus = document.getElementById('deploy-reopen-status');
   var source = null;
   var reloadOnFinish = false;
+  var streaming = false;
 
   function setStatus(text, kind) {
+    var cls = 'status' + (kind ? ' status-' + kind : '');
     statusEl.textContent = text;
-    statusEl.className = 'status' + (kind ? ' status-' + kind : '');
+    statusEl.className = cls;
+    if (reopenStatus) {
+      reopenStatus.textContent = text;
+      reopenStatus.className = cls;
+    }
   }
 
+  // close hides the drawer but keeps streaming, so a long deploy stays visible
+  // as a persistent pill the operator can reopen.
   function close() {
-    if (source) source.close();
     drawer.hidden = true;
+    if (streaming && reopenBtn) reopenBtn.hidden = false;
+  }
+
+  function reopen() {
+    drawer.hidden = false;
+    if (reopenBtn) reopenBtn.hidden = true;
   }
 
   function appendLog(chunk) {
@@ -28,6 +43,8 @@
 
   function stream(deploymentId) {
     if (source) source.close();
+    streaming = true;
+    if (reopenBtn) reopenBtn.hidden = true;
     source = new EventSource('/deployments/' + deploymentId + '/stream');
     source.addEventListener('log', function (e) {
       appendLog(JSON.parse(e.data).chunk);
@@ -35,10 +52,12 @@
     source.addEventListener('status', function (e) {
       var d = JSON.parse(e.data);
       setStatus(d.status, d.status);
-      if (d.status === 'success' || d.status === 'failed') {
+      if (d.status === 'success' || d.status === 'failed' || d.status === 'unknown') {
         if (d.error) appendLog('\n' + d.error);
         source.close();
         source = null;
+        streaming = false;
+        if (reopenBtn) reopenBtn.hidden = true;
         if (reloadOnFinish) setTimeout(function () { window.location.reload(); }, 700);
       }
     });
@@ -51,6 +70,7 @@
   function open(projectId, reload) {
     reloadOnFinish = reload !== false;
     drawer.hidden = false;
+    if (reopenBtn) reopenBtn.hidden = true;
     logEl.textContent = '';
     setStatus('starting', 'running');
     linkEl.href = '/projects/' + encodeURIComponent(projectId);
@@ -64,6 +84,12 @@
       })
       .then(function (res) {
         if (!res.ok) {
+          // A deploy is already running: attach to it instead of dead-ending.
+          if (res.data && res.data.deployment_id) {
+            appendLog('A deployment is already running for this project \u2014 showing its live log.\n');
+            stream(res.data.deployment_id);
+            return;
+          }
           setStatus('failed', 'failed');
           appendLog(res.data.error || 'Could not start the deployment.');
           return;
@@ -77,6 +103,7 @@
   }
 
   if (closeBtn) closeBtn.addEventListener('click', close);
+  if (reopenBtn) reopenBtn.addEventListener('click', reopen);
 
   document.querySelectorAll('form[data-deploy]').forEach(function (form) {
     form.addEventListener('submit', function (ev) {
@@ -84,12 +111,4 @@
       open(form.getAttribute('data-deploy'));
     });
   });
-  document.querySelectorAll('[data-deploy-open]').forEach(function (btn) {
-    btn.addEventListener('click', function (ev) {
-      ev.preventDefault();
-      open(btn.getAttribute('data-deploy-open'));
-    });
-  });
-
-  window.deployDrawer = { open: open };
 })();

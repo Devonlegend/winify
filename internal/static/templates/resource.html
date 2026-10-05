@@ -12,9 +12,23 @@
         <button type="submit" class="btn-primary">Deploy</button>
       </form>
       {{if .CanRollback}}
-      <form method="post" action="/deployment/rollback/{{.Project.ID}}">
+      {{if or (eq .ServerType "iis") (eq .ServerType "winsvc")}}
+      <form method="post" action="/deployment/rollback/{{.Project.ID}}"
+            data-confirm-title="Roll back {{.Project.Name}}"
+            data-confirm="Restores the most recent timestamped backup on the {{.ServerType}} target. The live files are replaced and the rollback is recorded in history."
+            data-confirm-ok="Roll back" data-confirm-variant="primary"
+            onsubmit="return confirm('Roll back {{.Project.Name}} by restoring the most recent backup?');">
         <button type="submit" class="btn">Roll back</button>
       </form>
+      {{else}}
+      <form method="post" action="/deployment/rollback/{{.Project.ID}}"
+            data-confirm-title="Roll back {{.Project.Name}}"
+            data-confirm="Redeploys the previous successful image for this project. The current version keeps serving if the rollback fails."
+            data-confirm-ok="Roll back" data-confirm-variant="primary"
+            onsubmit="return confirm('Roll back {{.Project.Name}} to the previous successful image?');">
+        <button type="submit" class="btn">Roll back</button>
+      </form>
+      {{end}}
       {{end}}
     </div>
   </div>
@@ -108,7 +122,11 @@
   {{if eq .Tab "settings"}}
   <div class="tab-panel">
     {{template "projectForm" .}}
-    <form method="post" action="/projects/delete" class="danger-zone" onsubmit="return confirm('Delete {{.Project.Name}}? This cannot be undone.');">
+    <form method="post" action="/projects/delete" class="danger-zone"
+          data-confirm-title="Delete {{.Project.Name}}"
+          data-confirm="Permanently deletes this resource, its deploy history{{if .Project.Domain}}, and its public route for {{.Project.Domain}}{{end}}. This cannot be undone."
+          data-confirm-ok="Delete resource" data-confirm-require="{{.Project.ID}}"
+          onsubmit="return confirm('Delete {{.Project.Name}}? This cannot be undone.');">
       <input type="hidden" name="id" value="{{.Project.ID}}">
       <button type="submit" class="btn btn-danger">Delete resource</button>
     </form>

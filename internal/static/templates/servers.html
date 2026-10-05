@@ -19,7 +19,11 @@
         <td class="mono">{{if .SSHHost}}{{.SSHHost}}{{else}}{{.WinRMEndpoint}}{{end}}</td>
         <td class="row-actions">
           <a href="/servers?edit={{.ID}}">Edit</a>
-          <form method="post" action="/servers/delete" onsubmit="return confirm('Delete server {{.ID}}?');">
+          <form method="post" action="/servers/delete"
+                data-confirm-title="Delete server {{.Name}}"
+                data-confirm="Removes the {{.Type}} target {{.ID}}. Projects that deploy to it will stop working until they are repointed."
+                data-confirm-ok="Delete server"
+                onsubmit="return confirm('Delete server {{.ID}}?');">
             <input type="hidden" name="id" value="{{.ID}}">
             <button type="submit" class="link danger">Delete</button>
           </form>

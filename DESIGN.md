@@ -1,64 +1,83 @@
 # Design
 
-The visual system for the DevOps Control Center dashboard. It is a **dark
-operator console** (Coolify-style): fixed left sidebar, dense but breathable
-panels, hairline borders, one indigo accent, and semantic state colors. Tokens
-live in `internal/static/web/css/app.css` under `:root`.
+The visual system for the DevOps Control Center dashboard. It is a **monochrome
+operator console**: warm-neutral black surfaces, a fixed left sidebar, dense but
+breathable panels, hairline borders, and one source of emphasis — light ink.
+There is no brand hue. State is carried by value, weight, and one inverted chip,
+not by color. Tokens live in `internal/static/web/css/app.css` under `:root`.
 
 ## Palette
 
+Every surface is a shade of warm black.
+
 | Token | Value | Use |
 |---|---|---|
-| `--bg` | `#0a0c11` | page ground |
-| `--panel` | `#10131a` | cards, sidebar, form fieldsets |
-| `--panel-2` | `#151925` | hover fills, secondary buttons |
-| `--elev` | `#1a1f2b` | raised hover |
-| `--border` | `#212734` | hairlines |
-| `--border-strong` | `#2c3444` | control borders |
-| `--text` | `#e7eaf0` | primary text |
-| `--muted` | `#8a93a6` | secondary text |
-| `--faint` | `#5f6878` | labels, placeholders |
-| `--accent` | `#6366f1` | primary action, active nav, focus |
-| `--accent-ink` | `#c7c9ff` | accent text on dark |
-| `--ok` / `--warn` / `--err` / `--info` | `#34d399` / `#fbbf24` / `#f87171` / `#38bdf8` | status |
+| `--bg` | `#0a0a09` | page ground |
+| `--panel` | `#121210` | cards, sidebar, form fieldsets |
+| `--panel-2` | `#191917` | hover fills, secondary buttons |
+| `--elev` | `#211f1c` | raised hover |
+| `--border` | `#262522` | hairlines |
+| `--border-strong` | `#37352f` | control borders |
+| `--text` | `#ece9e4` | primary text (warm off-white, never pure white) |
+| `--muted` | `#a8a49d` | secondary text |
+| `--faint` | `#85817a` | labels, placeholders (dimmer than `--muted`, still ≥4.5:1 on `--bg`) |
 
-Each semantic color ships with a `*-soft` tint (e.g. `--ok-soft`) used as a
-translucent background behind the same hue — status text is tinted from its own
-hue, never neutral gray.
+**Accent = ink.** `--accent: #ece9e4` with `--accent-contrast: #0a0a09`. Primary
+buttons are light ink with black text; active nav, focus rings and selected
+choices reuse the same ink. `--accent-soft` is a faint translucent white fill.
+
+**Status.** `.status-*` / `.pill-*` are grayscale. Success is a restrained
+outline (`--ok-soft` on `--ok`), running is a mid-gray with a pulsing dot,
+queued/waiting is a dim dashed outline. **Failure is the only inverted chip**
+(`--accent` ground, `--accent-contrast` text) so the eye lands on it first
+without a red hue. `--ok` / `--warn` / `--err` / `--info` are gray values; the
+`*-soft` tints are translucent white.
 
 ## Type
 
-- UI: `system-ui, -apple-system, "Segoe UI", Roboto, ...`
-- Data, IDs, logs, `.env`: a monospace stack (`--mono`)
-- Base 15px / 1.55. `h1` 1.5rem, `h2` ~1.1rem, body weight 400, headings 600.
-- Tracking stops at `-0.02em`; tabular numerals on stats.
+- UI: `"IBM Plex Sans"` → system sans fallback.
+- Display headings (`h1`, login title): `"Newsreader"` serif, weight 500, tight
+  tracking (`-0.02em`) and `1.12` line-height. This is the editorial signature;
+  `h2`/`h3` stay sans for dense data.
+- Data, IDs, logs, `.env`: `"IBM Plex Mono"` (`--mono`).
+- All three load from Google Fonts with a full local fallback stack, so an
+  offline host still renders cleanly.
+- Base 15px / 1.6. `h1` 2rem, `h2` 1.05rem, body weight 400, headings 600.
+- Tabular numerals on stats.
 
 ## Space, radius, depth
 
-- Radius: `--r-sm` 6px (controls), `--r` 10px (panels), `--r-lg` 14px (cards).
-- Depth is declared once per element — either a 1px border or the single soft
-  `--shadow`; never both a wide shadow and a border.
+- Radius: `--r-sm` 4px (controls, badges), `--r` 8px (panels), `--r-lg` 10px
+  (cards). Crisp, never pill-shaped for containers or primary buttons.
+- Depth is declared once per element — either a 1px hairline or the single soft
+  `--shadow`; never both.
 - More space above a heading than below it; tight groups, generous separation.
+
+## Background depth
+
+The body carries one fixed radar of warm light (`radial-gradient` at ~3.5%
+opacity, top-right) so wide sections are not flat black. It is a single
+background-image layer, never a scrolling element.
 
 ## Components
 
-- **Sidebar** — brand, nav, a `Settings` group, and account/logout pinned to the
-  bottom. The Projects section lists each project group with its resources.
+- **Sidebar** — brand mark (geometric stack glyph), nav, a `Settings` group, and
+  account/logout pinned to the bottom. Active items use a 2px inset ink rule.
 - **Topbar** — sticky, translucent (`backdrop-filter`), mobile menu toggle, and
   the current section label.
-- **Buttons** — `btn` (secondary), `btn-primary` (accent), `btn-ghost`,
-  `btn-danger`, `btn-sm`. Legacy `button.secondary`, `.link` and form submit
-  buttons are mapped onto the same system.
+- **Buttons** — `btn` (secondary), `btn-primary` (ink), `btn-ghost`,
+  `btn-danger`, `btn-sm`. Buttons depress with `scale(0.98)` on `:active`.
 - **Forms** — `.admin-form` grid of labelled rows, `fieldset` groups, help
-  placeholders. Focus is an accent border plus `--ring`.
+  placeholders. Focus is an ink border plus `--ring`.
 - **Cards** — `.card` / `.metric-card`; resource cards are links with a status
-  pill and a Deploy action.
+  pill and a Deploy action. Hover shifts the hairline, not a shadow.
 - **Tables** — `.deploys`, faint uppercase headers, hairline rows, row hover.
 - **Pills / badges** — `.status`, `.pill`, `.badge`, `.chip`, `.svc` for deploy
   status, target type, token scope, and service state.
 - **Tabs** — in-page `.tabs` (Overview / Deployments / Environment / Settings).
-- **Wizard** — `.wizard` with a step rail, `.choice` cards, a `.review` summary
-  and a collapsed `.advanced` block. Degrades to a plain form without JS.
+- **Wizard** — `.wizard` with a step rail (active step is an ink chip),
+  `.choice` cards, a `.review` summary and a collapsed `.advanced` block.
+  Degrades to a plain form without JS.
 - **Deploy drawer** — fixed bottom console (`#deploy-drawer`) that streams the
   deploy log over SSE and shows live status.
 - **Onboarding** — `.onboard` checklist shown on an empty dashboard.
@@ -68,13 +87,14 @@ hue, never neutral gray.
 Every interactive element has hover, focus-visible (`--ring`), and disabled
 states. Data surfaces have empty (`.placeholder`), loading (status `running` /
 gauges at `--`), success, and error states; errors name the problem and appear
-above the relevant log. The deploy drawer is `aria-live="polite"`.
+above the relevant log. Errors carry a 3px ink left-rule so they read distinctly
+from neutral notices. The deploy drawer is `aria-live="polite"`.
 
 ## Motion
 
 Minimal and purposeful: 0.12–0.2s ease on color/border/background, a 0.4s
-transform on gauge fills (never width), and a 0.2s slide for the mobile sidebar.
-One authored moment — the deploy drawer streaming in. All transitions are
+transform on gauge fills (never width), a 1.6s opacity pulse on the running
+status dot, and a 0.2s slide for the mobile sidebar. All transitions are
 disabled under `prefers-reduced-motion: reduce`.
 
 ## Responsive
@@ -85,10 +105,11 @@ drawer spans the full width. Content is a single column with fluid form grids.
 ## Browser surfaces
 
 Text selection, scrollbars, the caret, focus rings, and tabular numerals are all
-themed from the palette rather than left at browser defaults.
+themed from the black scale rather than left at browser defaults.
 
 ## Accessibility
 
 Keyboard-operable controls with visible focus, semantic landmarks (`nav`,
-`main`), `aria-live` on the streaming log, and status conveyed by text as well
-as color. Body and placeholder text target ≥4.5:1 on the dark ground.
+`main`), `aria-live` on the streaming log, and status conveyed by text and
+border treatment as well as fill. Body and placeholder text target ≥4.5:1 on the
+dark ground.
