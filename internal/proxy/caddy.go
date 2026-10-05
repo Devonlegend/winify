@@ -134,20 +134,44 @@ func (c *Caddy) ensureServer(ctx context.Context) error {
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-		return nil
-	case http.StatusNotFound:
+		// Already exists; still make sure auto-HTTPS is configured below.
+	case http.StatusNotFound, http.StatusBadRequest:
+		// Caddy's admin API returns 400 (not 404) when a GET targets a config
+		// path that does not exist yet, so both codes mean "not created".
 		server := map[string]any{
 			"listen":          []string{":80", ":443"},
 			"routes":          []any{},
-			"automatic_https": map[string]any{},
+			"automatic_https": map[string]any{"skip": []string{sslipIOSkip}},
 		}
 		if err := c.do(ctx, http.MethodPut, path, server, http.StatusOK); err != nil {
 			return fmt.Errorf("caddy create server: %w", err)
 		}
-		return nil
 	default:
 		return fmt.Errorf("caddy get server %q: unexpected status %d", c.server, resp.StatusCode)
 	}
+	return c.ensureAutoHTTPSSkip(ctx)
+}
+
+// sslipIOSkip is the shared sslip.io zone. Let's Encrypt rate-limits it, so
+// certificates for dynamically generated sslip.io hostnames cannot be issued;
+// Caddy skips ACME for the whole zone and serves those hosts over HTTP only.
+// Real domains on the same server still get automatic HTTPS.
+const sslipIOSkip = "*.sslip.io"
+
+// ensureAutoHTTPSSkip makes Caddy skip certificate management for sslip.io
+// hosts. This only touches the automatic_https object, never the routes. A
+// server created elsewhere may lack the key, so a failed PATCH falls back to a
+// PUT that creates it.
+func (c *Caddy) ensureAutoHTTPSSkip(ctx context.Context) error {
+	path := "/config/apps/http/servers/" + c.server + "/automatic_https"
+	body := map[string]any{"skip": []string{sslipIOSkip}}
+	if err := c.do(ctx, http.MethodPatch, path, body, http.StatusOK); err == nil {
+		return nil
+	}
+	if err := c.do(ctx, http.MethodPut, path, body, http.StatusOK); err != nil {
+		return fmt.Errorf("caddy set automatic_https skip: %w", err)
+	}
+	return nil
 }
 
 func (c *Caddy) routeSnapshot(ctx context.Context, id string) ([]byte, bool, error) {

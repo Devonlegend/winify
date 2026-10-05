@@ -397,13 +397,22 @@ func (d *Deployer) registerProxy(ctx context.Context, job deployJob, logf logger
 	if err := d.proxy.Register(ctx, job.project.Domain, upstream); err != nil {
 		return fmt.Errorf("register %s: %w", job.project.Domain, err)
 	}
-	logf("registered https://%s -> %s", job.project.Domain, upstream)
+	logf("registered %s://%s -> %s", proxyScheme(job.project.Domain), job.project.Domain, upstream)
 	proxyIP := d.cfg.Proxy.PublicIP
 	if proxyIP == "" && job.server.Local {
 		proxyIP = job.server.PublicIP
 	}
 	warnIfDomainNotPointedHere(ctx, proxyIP, job.project.Domain, logf)
 	return nil
+}
+
+// proxyScheme reports the scheme Caddy serves for domain. The shared sslip.io
+// zone cannot get ACME certificates, so those hosts are HTTP only.
+func proxyScheme(domain string) string {
+	if strings.HasSuffix(strings.ToLower(domain), ".sslip.io") {
+		return "http"
+	}
+	return "https"
 }
 
 // lookupHost resolves a hostname. It is a variable so a test can stub DNS.

@@ -36,6 +36,29 @@ func TestPublicIPv4Reason(t *testing.T) {
 	}
 }
 
+func TestIsVirtualInterface(t *testing.T) {
+	virtual := []string{
+		"NordLynx",
+		"vEthernet (WSL (Hyper-V firewall))",
+		"vEthernet (Default Switch)",
+		"Tailscale",
+		"OpenVPN Data Channel Offload for NordVPN",
+		"docker0",
+		"tun0",
+	}
+	for _, name := range virtual {
+		if !isVirtualInterface(name) {
+			t.Errorf("isVirtualInterface(%q) = false, want true", name)
+		}
+	}
+	physical := []string{"Wi-Fi", "Ethernet", "Ethernet 2", "en0", "eth0", "Local Area Connection"}
+	for _, name := range physical {
+		if isVirtualInterface(name) {
+			t.Errorf("isVirtualInterface(%q) = true, want false", name)
+		}
+	}
+}
+
 func TestLookupPublicIPv4(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("203.0.113.9\n"))

@@ -51,6 +51,8 @@ func TestCaddyRegisterRestoresPreviousRouteOnFailure(t *testing.T) {
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/id/"):
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"@id":"old"}`))
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/automatic_https"):
+			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/routes"):
@@ -79,8 +81,10 @@ func TestCaddyRegisterUpsertsRoute(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/config/apps/http/servers/srv0":
-			w.WriteHeader(http.StatusNotFound) // force server creation
+			w.WriteHeader(http.StatusBadRequest) // Caddy's "path does not exist" status; force server creation
 		case r.Method == http.MethodPut && r.URL.Path == "/config/apps/http/servers/srv0":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/automatic_https"):
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusOK)
@@ -101,5 +105,34 @@ func TestCaddyRegisterUpsertsRoute(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("route body missing %q: %s", want, body)
 		}
+	}
+}
+
+func TestCaddySkipsAutoHTTPSForSslip(t *testing.T) {
+	var patched []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/config/apps/http/servers/srv0":
+			w.WriteHeader(http.StatusOK) // server already exists
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/automatic_https"):
+			patched, _ = io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/id/"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/routes"):
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	if err := NewCaddy(srv.URL, "srv0").Register(context.Background(), "app.example.com", "127.0.0.1:8000"); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if !strings.Contains(string(patched), "*.sslip.io") {
+		t.Errorf("automatic_https patch missing sslip.io skip: %s", patched)
 	}
 }
