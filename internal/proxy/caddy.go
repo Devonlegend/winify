@@ -21,20 +21,33 @@ import (
 type Caddy struct {
 	adminURL string
 	server   string
+	acmeSkip []string
 	client   *http.Client
 	mu       sync.Mutex
 }
 
 // NewCaddy builds a client for the Caddy admin API (default port 2019).
-func NewCaddy(adminURL, serverName string) *Caddy {
+// acmeSkip lists host patterns Caddy should serve over HTTP without ACME;
+// when empty it defaults to the shared sslip.io zone.
+func NewCaddy(adminURL, serverName string, acmeSkip ...string) *Caddy {
 	if serverName == "" {
 		serverName = "srv0"
 	}
 	return &Caddy{
 		adminURL: strings.TrimRight(adminURL, "/"),
 		server:   serverName,
+		acmeSkip: acmeSkip,
 		client:   &http.Client{Timeout: 10 * time.Second},
 	}
+}
+
+// skipPatterns returns the configured ACME-skip host patterns, defaulting to
+// the sslip.io zone (which cannot obtain certificates) when none are set.
+func (c *Caddy) skipPatterns() []string {
+	if len(c.acmeSkip) == 0 {
+		return []string{sslipIOSkip}
+	}
+	return c.acmeSkip
 }
 
 // Reachable reports whether the Caddy admin API answers. It lets the control
@@ -141,7 +154,7 @@ func (c *Caddy) ensureServer(ctx context.Context) error {
 		server := map[string]any{
 			"listen":          []string{":80", ":443"},
 			"routes":          []any{},
-			"automatic_https": map[string]any{"skip": []string{sslipIOSkip}},
+			"automatic_https": map[string]any{"skip": c.skipPatterns()},
 		}
 		if err := c.do(ctx, http.MethodPut, path, server, http.StatusOK); err != nil {
 			return fmt.Errorf("caddy create server: %w", err)
@@ -158,13 +171,15 @@ func (c *Caddy) ensureServer(ctx context.Context) error {
 // Real domains on the same server still get automatic HTTPS.
 const sslipIOSkip = "*.sslip.io"
 
-// ensureAutoHTTPSSkip makes Caddy skip certificate management for sslip.io
-// hosts. This only touches the automatic_https object, never the routes. A
-// server created elsewhere may lack the key, so a failed PATCH falls back to a
-// PUT that creates it.
+// ensureAutoHTTPSSkip makes Caddy skip certificate management for the
+// configured ACME-skip hosts (sslip.io by default, plus any tunnel-fronted
+// custom domains). Without this, Caddy would redirect :80 to :443 for a host
+// behind an external TLS terminator and loop. This only touches the
+// automatic_https object, never the routes. A server created elsewhere may lack
+// the key, so a failed PATCH falls back to a PUT that creates it.
 func (c *Caddy) ensureAutoHTTPSSkip(ctx context.Context) error {
 	path := "/config/apps/http/servers/" + c.server + "/automatic_https"
-	body := map[string]any{"skip": []string{sslipIOSkip}}
+	body := map[string]any{"skip": c.skipPatterns()}
 	if err := c.do(ctx, http.MethodPatch, path, body, http.StatusOK); err == nil {
 		return nil
 	}

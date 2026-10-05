@@ -42,6 +42,12 @@ proxy:
   server_name: "srv0"
   # Public address of this Caddy host; used only for DNS warnings.
   public_ip: ""
+  # Host patterns Caddy serves over plain HTTP without requesting a certificate.
+  # Defaults to the shared *.sslip.io zone. Add a custom domain here when it is
+  # fronted by a tunnel or external TLS terminator (e.g. Cloudflare Tunnel);
+  # otherwise Caddy redirects :80 to :443 and loops inside the tunnel.
+  acme_skip:
+    - "*.sslip.io"
 
 deploy:
   # Parent directory on Docker/Linux targets for cloned repos.

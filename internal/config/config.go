@@ -178,6 +178,12 @@ type ProxyConfig struct {
 	// separate from a deployment target's PublicIP because remote targets are
 	// usually behind the controller's proxy.
 	PublicIP string `yaml:"public_ip"`
+	// ACMESkip lists host patterns Caddy must serve over plain HTTP without
+	// requesting a certificate. Use it for hosts that cannot pass ACME — the
+	// shared *.sslip.io zone (default) and custom domains fronted by a tunnel
+	// or an external TLS terminator (e.g. Cloudflare Tunnel) that would
+	// otherwise loop when Caddy redirects :80 to :443.
+	ACMESkip []string `yaml:"acme_skip"`
 }
 
 // MonitoringConfig controls the metrics poller.
@@ -273,6 +279,8 @@ func Default() Config {
 			Enabled:    true,
 			AdminURL:   "http://127.0.0.1:2019",
 			ServerName: "srv0",
+			// The shared sslip.io zone cannot obtain ACME certificates.
+			ACMESkip: []string{"*.sslip.io"},
 		},
 		Deploy: DeployConfig{
 			WorkDir:               "/opt/control-center",

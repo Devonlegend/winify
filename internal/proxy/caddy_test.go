@@ -136,3 +136,33 @@ func TestCaddySkipsAutoHTTPSForSslip(t *testing.T) {
 		t.Errorf("automatic_https patch missing sslip.io skip: %s", patched)
 	}
 }
+
+func TestCaddySkipsConfiguredACMEHosts(t *testing.T) {
+	var patched []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/config/apps/http/servers/srv0":
+			w.WriteHeader(http.StatusOK) // server already exists
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/automatic_https"):
+			patched, _ = io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/id/"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/routes"):
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewCaddy(srv.URL, "srv0", "*.sslip.io", "cleaner.example.com")
+	if err := c.Register(context.Background(), "cleaner.example.com", "127.0.0.1:8007"); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if !strings.Contains(string(patched), "cleaner.example.com") {
+		t.Errorf("automatic_https patch missing configured host skip: %s", patched)
+	}
+}

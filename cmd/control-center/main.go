@@ -163,7 +163,7 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 
 	var registrar proxy.Registrar = proxy.Noop{}
 	if cfg.Proxy.Enabled {
-		caddy := proxy.NewCaddy(cfg.Proxy.AdminURL, cfg.Proxy.ServerName)
+		caddy := proxy.NewCaddy(cfg.Proxy.AdminURL, cfg.Proxy.ServerName, cfg.Proxy.ACMESkip...)
 		registrar = caddy
 		// Warn now rather than failing every deploy later: with the proxy on, a
 		// deploy that has a domain fails if the route cannot be registered.
