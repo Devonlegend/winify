@@ -1,6 +1,11 @@
 {{define "title"}}Create admin account &middot; Control Center{{end}}
 {{define "body"}}
 <main class="login">
+  <svg class="auth-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M12 2.75 21.25 7.375 12 12 2.75 7.375Z" fill="currentColor"/>
+    <path d="M2.75 12 12 16.625 21.25 12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
+    <path d="M2.75 16.25 12 20.875 21.25 16.25" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" opacity="0.42"/>
+  </svg>
   <h1>DevOps Control Center</h1>
   <p class="muted">First run: create the admin account. This page closes once an account exists.</p>
   {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}

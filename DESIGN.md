@@ -16,8 +16,10 @@ Every surface is a shade of warm black.
 | `--panel` | `#121210` | cards, sidebar, form fieldsets |
 | `--panel-2` | `#191917` | hover fills, secondary buttons |
 | `--elev` | `#211f1c` | raised hover |
-| `--border` | `#262522` | hairlines |
-| `--border-strong` | `#37352f` | control borders |
+| `--border` | `#262522` | structural hairlines (panels, cards, dividers) |
+| `--border-strong` | `#37352f` | emphasis edges only (dashed empty states, modals) |
+| `--line` | `rgba(236,233,228,0.08)` | embedded control edge (buttons, fields) |
+| `--line-strong` | `rgba(236,233,228,0.15)` | embedded edge on hover, outlined badges |
 | `--text` | `#ece9e4` | primary text (warm off-white, never pure white) |
 | `--muted` | `#a8a49d` | secondary text |
 | `--faint` | `#85817a` | labels, placeholders (dimmer than `--muted`, still ≥4.5:1 on `--bg`) |
@@ -62,13 +64,18 @@ background-image layer, never a scrolling element.
 ## Components
 
 - **Sidebar** — brand mark (geometric stack glyph), nav, a `Settings` group, and
-  account/logout pinned to the bottom. Active items use a 2px inset ink rule.
+  account/logout pinned to the bottom. Active items use a `--panel-2` fill with
+  a short centred ink rule at the leading edge — never a full-height bar, which
+  reads as a bracket artifact inside the pill radius.
 - **Topbar** — sticky, translucent (`backdrop-filter`), mobile menu toggle, and
   the current section label.
 - **Buttons** — `btn` (secondary), `btn-primary` (ink), `btn-ghost`,
-  `btn-danger`, `btn-sm`. Buttons depress with `scale(0.98)` on `:active`.
+  `btn-danger`, `btn-sm`. Secondary and danger buttons are **embedded**: a
+  `--panel-2` fill with a `--line` edge, not an outlined box; only the primary
+  button is a solid ink block. Buttons depress with `scale(0.98)` on `:active`.
 - **Forms** — `.admin-form` grid of labelled rows, `fieldset` groups, help
-  placeholders. Focus is an ink border plus `--ring`.
+  placeholders. Fields use a `--bg` well and a `--line` edge so they read as
+  recessed into the panel; focus is an ink border plus `--ring`.
 - **Cards** — `.card` / `.metric-card`; resource cards are links with a status
   pill and a Deploy action. Hover shifts the hairline, not a shadow.
 - **Tables** — `.deploys`, faint uppercase headers, hairline rows, row hover.
@@ -87,8 +94,9 @@ background-image layer, never a scrolling element.
 Every interactive element has hover, focus-visible (`--ring`), and disabled
 states. Data surfaces have empty (`.placeholder`), loading (status `running` /
 gauges at `--`), success, and error states; errors name the problem and appear
-above the relevant log. Errors carry a 3px ink left-rule so they read distinctly
-from neutral notices. The deploy drawer is `aria-live="polite"`.
+above the relevant log. Errors read distinctly from neutral notices through a
+stronger ink border and heavier text — deliberately not a thick left tab. The
+deploy drawer is `aria-live="polite"`.
 
 ## Motion
 

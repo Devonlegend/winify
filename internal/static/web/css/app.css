@@ -8,6 +8,11 @@
   --elev: #211f1c;
   --border: #262522;
   --border-strong: #37352f;
+  /* Embedded hairline for interactive controls. Almost invisible against the
+     surface, so a control reads as cut into the console rather than outlined
+     with a bright edge. Structural panels keep --border / --border-strong. */
+  --line: rgba(236, 233, 228, 0.08);
+  --line-strong: rgba(236, 233, 228, 0.15);
   --text: #ece9e4;
   --muted: #a8a49d;
   --faint: #85817a;
@@ -209,6 +214,7 @@ p {
 }
 
 .nav a {
+  position: relative;
   display: block;
   padding: 0.5rem 0.6rem;
   border-radius: var(--r-sm);
@@ -227,7 +233,21 @@ p {
 .nav a.active {
   background: var(--panel-2);
   color: var(--text);
-  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Active marker: a short centred ink rule at the item's leading edge. A short
+   bar avoids the rounded-corner "bracket" artifact an inset full-height shadow
+   produced inside the pill radius. */
+.nav a.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2px;
+  height: 58%;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+  transform: translateY(-50%);
 }
 
 .nav-label {
@@ -298,7 +318,7 @@ p {
   justify-content: center;
   width: 34px;
   height: 34px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--line);
   border-radius: var(--r-sm);
   background: var(--panel-2);
   color: var(--text);
@@ -308,6 +328,7 @@ p {
 main {
   width: 100%;
   max-width: 1080px;
+  margin: 0 auto;
   padding: 2rem 1.5rem 4rem;
 }
 
@@ -318,7 +339,7 @@ button.secondary {
   align-items: center;
   gap: 0.45rem;
   padding: 0.5rem 0.85rem;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--line);
   border-radius: var(--r-sm);
   background: var(--panel-2);
   color: var(--text);
@@ -333,6 +354,7 @@ button.secondary {
 .btn:hover,
 button.secondary:hover {
   background: var(--elev);
+  border-color: var(--line-strong);
 }
 
 .btn:focus-visible,
@@ -343,6 +365,7 @@ button.secondary:focus-visible {
 
 .btn-primary,
 .admin-form button[type="submit"],
+.form-actions button[type="submit"],
 .login-form button,
 .chat-form button {
   display: inline-flex;
@@ -364,6 +387,7 @@ button.secondary:focus-visible {
 
 .btn-primary:hover,
 .admin-form button[type="submit"]:hover,
+.form-actions button[type="submit"]:hover,
 .login-form button:hover,
 .chat-form button:hover {
   background: var(--accent-hover);
@@ -372,6 +396,7 @@ button.secondary:focus-visible {
 
 .btn-primary:focus-visible,
 .admin-form button[type="submit"]:focus-visible,
+.form-actions button[type="submit"]:focus-visible,
 .login-form button:focus-visible,
 .chat-form button:focus-visible {
   outline: none;
@@ -382,6 +407,7 @@ button.secondary:focus-visible {
 button.secondary:active,
 .btn-primary:active,
 .admin-form button[type="submit"]:active,
+.form-actions button[type="submit"]:active,
 .login-form button:active,
 .chat-form button:active {
   transform: scale(0.98);
@@ -400,7 +426,7 @@ button.secondary:active,
 
 .btn-danger {
   color: var(--text);
-  border-color: var(--border-strong);
+  border-color: var(--line);
 }
 
 .btn-danger:hover {
@@ -463,13 +489,19 @@ select,
 textarea {
   width: 100%;
   padding: 0.55rem 0.65rem;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--line);
   border-radius: var(--r-sm);
   background: var(--bg);
   color: var(--text);
   font: inherit;
   font-size: 0.9rem;
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--line-strong);
 }
 
 textarea {
@@ -632,6 +664,13 @@ input[readonly] {
 }
 
 /* Tables */
+/* Wide data tables scroll inside this wrapper on narrow screens instead of
+   forcing the whole page to overflow sideways. */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .deploys {
   width: 100%;
   border-collapse: collapse;
@@ -741,7 +780,7 @@ input[readonly] {
 .pill-waiting {
   background: transparent;
   color: var(--faint);
-  border: 1px dashed var(--border-strong);
+  border: 1px dashed var(--line-strong);
 }
 
 .pill-stale {
@@ -853,7 +892,7 @@ input[readonly] {
 .badge-iis {
   background: transparent;
   color: var(--muted);
-  border-color: var(--border-strong);
+  border-color: var(--line-strong);
 }
 
 .badge-write {
@@ -881,7 +920,7 @@ input[readonly] {
 .error {
   margin: 0.75rem 0;
   padding: 0.65rem 0.85rem;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
   font-size: 0.88rem;
   color: var(--text);
@@ -891,9 +930,12 @@ input[readonly] {
   background: rgba(236, 233, 228, 0.05);
 }
 
+/* An error is told apart by a stronger ink border and brighter text, not a
+   thick left tab (a side-tab is the classic generated-UI tell). */
 .error {
-  background: rgba(236, 233, 228, 0.03);
-  border-left: 3px solid var(--text);
+  background: rgba(236, 233, 228, 0.035);
+  border-color: rgba(236, 233, 228, 0.24);
+  font-weight: 500;
 }
 
 .placeholder {
@@ -1040,7 +1082,7 @@ details summary:hover {
 .svc-bad {
   background: transparent;
   color: var(--muted);
-  border-color: var(--border-strong);
+  border-color: var(--line-strong);
 }
 
 .chart-wrap {
@@ -1093,13 +1135,12 @@ details summary:hover {
 
 .msg-user .bubble {
   background: var(--accent-soft);
-  border-color: var(--border-strong);
+  border-color: var(--line-strong);
 }
 
 .bubble-error {
-  background: rgba(236, 233, 228, 0.03);
-  border-color: var(--border-strong);
-  border-left: 3px solid var(--text);
+  background: rgba(236, 233, 228, 0.035);
+  border-color: rgba(236, 233, 228, 0.24);
   color: var(--text);
 }
 
@@ -1141,6 +1182,14 @@ details summary:hover {
   padding: 0 1.5rem;
 }
 
+.auth-mark {
+  display: block;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 1.15rem;
+  color: var(--text);
+}
+
 .login h1 {
   font-size: 1.7rem;
 }
@@ -1156,7 +1205,7 @@ details summary:hover {
   margin-top: 1rem;
   padding: 1rem;
   background: var(--panel);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r);
   color: var(--text);
   font-size: 0.9rem;
@@ -1721,5 +1770,9 @@ details summary:hover {
 
   main {
     padding: 1.5rem 1rem 3rem;
+  }
+
+  .table-scroll .deploys {
+    min-width: 34rem;
   }
 }
