@@ -128,7 +128,7 @@ func (s caddyStep) fetch(ctx context.Context) ([]byte, error) {
 func downloadCaddy(ctx context.Context, url string) ([]byte, error) {
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
-		data, err := downloadOnce(ctx, url)
+		data, err := downloadOnce(ctx, url, "caddy")
 		if err == nil {
 			return data, nil
 		}
@@ -145,11 +145,12 @@ func downloadCaddy(ctx context.Context, url string) ([]byte, error) {
 	return nil, lastErr
 }
 
-// downloadOnce performs a single bounded download.
-func downloadOnce(ctx context.Context, rawURL string) ([]byte, error) {
+// downloadOnce performs a single bounded download of a binary. label names the
+// artifact in errors ("caddy", "cloudflared").
+func downloadOnce(ctx context.Context, rawURL, label string) ([]byte, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" {
-		return nil, fmt.Errorf("caddy download URL must be HTTPS")
+		return nil, fmt.Errorf("%s download URL must be HTTPS", label)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -157,22 +158,22 @@ func downloadOnce(ctx context.Context, rawURL string) ([]byte, error) {
 	// #nosec G107 -- the URL is operator-configured, not user input.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("download caddy: %w", err)
+		return nil, fmt.Errorf("download %s: %w", label, err)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("download caddy: %w", err)
+		return nil, fmt.Errorf("download %s: %w", label, err)
 	}
 	defer resp.Body.Close()
 	if resp.Request != nil && resp.Request.URL != nil && resp.Request.URL.Scheme != "https" {
-		return nil, fmt.Errorf("caddy download redirected to a non-HTTPS URL")
+		return nil, fmt.Errorf("%s download redirected to a non-HTTPS URL", label)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download caddy: status %d", resp.StatusCode)
+		return nil, fmt.Errorf("download %s: status %d", label, resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 100<<20))
 	if err != nil {
-		return nil, fmt.Errorf("download caddy: %w", err)
+		return nil, fmt.Errorf("download %s: %w", label, err)
 	}
 	if len(data) >= 4 && bytes.Equal(data[:4], []byte("PK\x03\x04")) {
 		return extractExe(data)

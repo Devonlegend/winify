@@ -49,6 +49,33 @@ proxy:
   acme_skip:
     - "*.sslip.io"
 
+# Public ingress tunnel for hosts that cannot accept inbound connections
+# (CGNAT, a private ISP link, a laptop). It creates a tunnel, routes the
+# wildcard host *.domain to the local Caddy, and creates the proxied DNS record
+# once at setup; per-deploy winify still only registers routes in Caddy.
+# The provider API token lives in the credential store:
+#   .\control-center cred add cloudflare-api
+tunnel:
+  enabled: false
+  provider: "cloudflare"
+  # Apex domain on the provider; *.domain is routed to the reverse proxy.
+  domain: ""
+  # Provider account that owns the tunnel.
+  account_id: ""
+  # Optional; resolved from domain when empty.
+  zone_id: ""
+  tunnel_name: "winify"
+  # Encrypted credential holding the provider API token (Account: Cloudflare
+  # Tunnel:Edit + Zone: DNS:Edit on the domain above).
+  api_token_ref: "vault:cloudflare-api"
+  # Upstream the tunnel forwards to (the local Caddy listener).
+  origin: "http://localhost:80"
+  # Place the connector binary (cloudflared.exe) on this host; source wins.
+  connector_source: ""
+  connector_url: ""
+  connector_sha256: ""
+  service_name: "winify-tunnel"
+
 deploy:
   # Parent directory on Docker/Linux targets for cloned repos.
   work_dir: "/opt/control-center"

@@ -52,6 +52,7 @@ type Config struct {
 	Credentials CredentialsConfig `yaml:"credentials"`
 	Files       FilesConfig       `yaml:"files"`
 	Proxy       ProxyConfig       `yaml:"proxy"`
+	Tunnel      TunnelConfig      `yaml:"tunnel"`
 	Deploy      DeployConfig      `yaml:"deploy"`
 	Bootstrap   BootstrapConfig   `yaml:"bootstrap"`
 	Monitoring  MonitoringConfig  `yaml:"monitoring"`
@@ -186,6 +187,64 @@ type ProxyConfig struct {
 	ACMESkip []string `yaml:"acme_skip"`
 }
 
+// Tunnel provider identifiers.
+const (
+	TunnelProviderCloudflare = "cloudflare"
+	TunnelProviderNone       = "none"
+)
+
+// TunnelConfig provisions a public ingress tunnel for a host that cannot accept
+// inbound connections (CGNAT, a private ISP link, a laptop). The wildcard
+// ingress and DNS record are created once at setup; per-deploy winify still only
+// registers routes in Caddy, so no provider call happens on each deployment.
+//
+// SECURITY: the API token (api_token_ref) can create tunnels and DNS records for
+// its account and zone. It lives in the encrypted credential store and is only
+// resolved in memory at setup time.
+type TunnelConfig struct {
+	// Enabled turns tunnel provisioning on. Requires provider, domain,
+	// account_id and api_token_ref.
+	Enabled bool `yaml:"enabled"`
+	// Provider selects the tunnel backend. Only "cloudflare" is supported.
+	Provider string `yaml:"provider"`
+	// Domain is the apex domain on the provider (e.g. example.com). The wildcard
+	// host *.domain is routed to the reverse proxy.
+	Domain string `yaml:"domain"`
+	// AccountID is the provider account that owns the tunnel.
+	AccountID string `yaml:"account_id"`
+	// ZoneID optionally pins the DNS zone; resolved from Domain when empty.
+	ZoneID string `yaml:"zone_id"`
+	// TunnelName is the stable tunnel name, reused on re-runs.
+	TunnelName string `yaml:"tunnel_name"`
+	// APITokenRef names the encrypted credential holding the provider API token.
+	APITokenRef string `yaml:"api_token_ref"`
+	// Origin is the upstream the tunnel forwards to; defaults to the local Caddy.
+	Origin string `yaml:"origin"`
+	// ConnectorSource/URL/SHA256 place the connector binary (cloudflared.exe) on
+	// this host, mirroring bootstrap.caddy. ConnectorSource wins over URL.
+	ConnectorSource string `yaml:"connector_source"`
+	ConnectorURL    string `yaml:"connector_url"`
+	ConnectorSHA256 string `yaml:"connector_sha256"`
+	// ServiceName is the NSSM-managed service that keeps the connector running.
+	ServiceName string `yaml:"service_name"`
+}
+
+// Connector returns the configured connector service name or the default.
+func (t TunnelConfig) Connector() string {
+	if strings.TrimSpace(t.ServiceName) == "" {
+		return "winify-tunnel"
+	}
+	return t.ServiceName
+}
+
+// EffectiveOrigin returns the configured origin or the local Caddy default.
+func (t TunnelConfig) EffectiveOrigin() string {
+	if strings.TrimSpace(t.Origin) == "" {
+		return "http://localhost:80"
+	}
+	return t.Origin
+}
+
 // MonitoringConfig controls the metrics poller.
 type MonitoringConfig struct {
 	// Enabled turns the background metrics scheduler on or off.
@@ -281,6 +340,16 @@ func Default() Config {
 			ServerName: "srv0",
 			// The shared sslip.io zone cannot obtain ACME certificates.
 			ACMESkip: []string{"*.sslip.io"},
+		},
+		Tunnel: TunnelConfig{
+			// Off by default: most hosts accept inbound connections and use the
+			// proxy directly. Enable it behind CGNAT or a private ISP link.
+			Enabled:     false,
+			Provider:    TunnelProviderCloudflare,
+			TunnelName:  "winify",
+			APITokenRef: "vault:cloudflare-api",
+			Origin:      "http://localhost:80",
+			ServiceName: "winify-tunnel",
 		},
 		Deploy: DeployConfig{
 			WorkDir:               "/opt/control-center",
@@ -447,6 +516,34 @@ func (cfg Config) Validate() error {
 			return fmt.Errorf("%s must be an http or https URL", name)
 		}
 	}
+	if cfg.Tunnel.Enabled {
+		switch strings.TrimSpace(cfg.Tunnel.Provider) {
+		case "", TunnelProviderCloudflare:
+		default:
+			return fmt.Errorf("tunnel.provider %q is not supported (want %q)", cfg.Tunnel.Provider, TunnelProviderCloudflare)
+		}
+		if strings.TrimSpace(cfg.Tunnel.Domain) == "" {
+			return errors.New("tunnel.domain is required when tunnel.enabled is true")
+		}
+		if strings.TrimSpace(cfg.Tunnel.AccountID) == "" {
+			return errors.New("tunnel.account_id is required when tunnel.enabled is true")
+		}
+		if strings.TrimSpace(cfg.Tunnel.APITokenRef) == "" {
+			return errors.New("tunnel.api_token_ref is required when tunnel.enabled is true")
+		}
+		if o := strings.TrimSpace(cfg.Tunnel.Origin); o != "" {
+			u, err := url.Parse(o)
+			if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+				return errors.New("tunnel.origin must be an http or https URL")
+			}
+		}
+		if u := strings.TrimSpace(cfg.Tunnel.ConnectorURL); u != "" {
+			parsed, err := url.Parse(u)
+			if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+				return errors.New("tunnel.connector_url must be an HTTPS URL")
+			}
+		}
+	}
 	return nil
 }
 
@@ -558,6 +655,22 @@ func (cfg *Config) applyEnv() error {
 	}
 	if v := os.Getenv("CC_PROXY_PUBLIC_IP"); v != "" {
 		cfg.Proxy.PublicIP = v
+	}
+	if v := os.Getenv("CC_TUNNEL_ENABLED"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("CC_TUNNEL_ENABLED: %w", err)
+		}
+		cfg.Tunnel.Enabled = b
+	}
+	if v := os.Getenv("CC_TUNNEL_DOMAIN"); v != "" {
+		cfg.Tunnel.Domain = v
+	}
+	if v := os.Getenv("CC_TUNNEL_ACCOUNT_ID"); v != "" {
+		cfg.Tunnel.AccountID = v
+	}
+	if v := os.Getenv("CC_TUNNEL_API_TOKEN_REF"); v != "" {
+		cfg.Tunnel.APITokenRef = v
 	}
 	if v := os.Getenv("CC_DEPLOY_WORKDIR"); v != "" {
 		cfg.Deploy.WorkDir = v

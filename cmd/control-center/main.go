@@ -43,6 +43,7 @@ import (
 	"github.com/Devonlegend/winify/internal/proxy"
 	"github.com/Devonlegend/winify/internal/server"
 	"github.com/Devonlegend/winify/internal/service"
+	"github.com/Devonlegend/winify/internal/tunnel"
 	"golang.org/x/term"
 )
 
@@ -118,7 +119,7 @@ func runServe(args []string) {
 func needsProvisioning(cfg config.Config, configPath string) bool {
 	store, cleanup := mustStore(cfg)
 	defer cleanup()
-	boot := buildBootstrap(cfg, store, configPath)
+	boot := buildBootstrap(cfg, store, configPath, nil)
 	complete, err := boot.Complete(context.Background())
 	return err != nil || !complete
 }
@@ -163,7 +164,13 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 
 	var registrar proxy.Registrar = proxy.Noop{}
 	if cfg.Proxy.Enabled {
-		caddy := proxy.NewCaddy(cfg.Proxy.AdminURL, cfg.Proxy.ServerName, cfg.Proxy.ACMESkip...)
+		// A tunnel terminates TLS at its edge, so Caddy must serve the tunnel's
+		// wildcard host over plain HTTP rather than redirect :80 to :443.
+		acmeSkip := cfg.Proxy.ACMESkip
+		if cfg.Tunnel.Enabled && cfg.Tunnel.Domain != "" {
+			acmeSkip = append(append([]string{}, acmeSkip...), "*."+cfg.Tunnel.Domain)
+		}
+		caddy := proxy.NewCaddy(cfg.Proxy.AdminURL, cfg.Proxy.ServerName, acmeSkip...)
 		registrar = caddy
 		// Warn now rather than failing every deploy later: with the proxy on, a
 		// deploy that has a domain fails if the route cannot be registered.
@@ -245,7 +252,7 @@ func serve(cfg config.Config, configPath string, ctx context.Context) error {
 	// Bootstrap backs the Setup page and provisions the host on first run.
 	var boot *bootstrap.Bootstrap
 	if cfg.Bootstrap.Enabled {
-		boot = buildBootstrap(cfg, store, configPath, auditRecorder)
+		boot = buildBootstrap(cfg, store, configPath, tunnelOptions(ctx, cfg, credStore), auditRecorder)
 		provisionIfNeeded(ctx, boot)
 	}
 
@@ -493,6 +500,15 @@ func runBootstrap(args []string) {
 		}
 	}
 
+	key, err := auth.LoadMasterKey(cfg.Credentials.MasterKey, masterKeyPath(cfg))
+	if err != nil {
+		log.Fatalf("master key: %v", err)
+	}
+	credStore, err := auth.NewCredentialStore(store, key)
+	if err != nil {
+		log.Fatalf("credential store: %v", err)
+	}
+
 	exe := usableExe()
 	paths := bootstrap.DefaultPaths(root)
 	opts := bootstrap.Options{
@@ -513,6 +529,7 @@ func runBootstrap(args []string) {
 		Runner:         runner,
 		AuditMeta:      deployment.AuditMeta{ServerID: "local", ServerType: "local", Action: "bootstrap"},
 		StateNamespace: "local",
+		Tunnel:         tunnelOptions(ctx, cfg, credStore),
 		Logf:           log.Printf,
 	}
 
@@ -551,7 +568,7 @@ func usableExe() string {
 }
 
 // buildBootstrap assembles the host-provisioning steps for this configuration.
-func buildBootstrap(cfg config.Config, store *models.Store, configPath string, recorders ...deployment.AuditRecorder) *bootstrap.Bootstrap {
+func buildBootstrap(cfg config.Config, store *models.Store, configPath string, tunnelOpts *bootstrap.TunnelOptions, recorders ...deployment.AuditRecorder) *bootstrap.Bootstrap {
 	root := cfg.Bootstrap.InstallDir
 	if root == "" {
 		root = bootstrap.DefaultRoot()
@@ -580,10 +597,43 @@ func buildBootstrap(cfg config.Config, store *models.Store, configPath string, r
 		Runner:         runner,
 		AuditMeta:      deployment.AuditMeta{ServerID: "local", ServerType: "local", Action: "bootstrap"},
 		StateNamespace: "local",
+		Tunnel:         tunnelOpts,
 		Logf:           log.Printf,
 	}
 	opts.TargetCheck, opts.TargetApply = serverSteps(store, localTargetServer(paths))
 	return bootstrap.New(opts)
+}
+
+// tunnelOptions resolves the tunnel configuration and its API token from the
+// encrypted credential store. It returns nil when the tunnel is disabled. The
+// resolved token is a secret and is never logged.
+func tunnelOptions(ctx context.Context, cfg config.Config, credStore *auth.CredentialStore) *bootstrap.TunnelOptions {
+	if !cfg.Tunnel.Enabled {
+		return nil
+	}
+	var token string
+	if ref := strings.TrimSpace(cfg.Tunnel.APITokenRef); ref != "" {
+		v, err := deployment.ResolveRef(ctx, credStore, ref)
+		if err != nil {
+			log.Printf("WARNING: tunnel: resolve api token %q: %v", ref, err)
+		} else {
+			token = v
+		}
+	}
+	return &bootstrap.TunnelOptions{
+		Config: tunnel.Config{
+			Domain:     cfg.Tunnel.Domain,
+			AccountID:  cfg.Tunnel.AccountID,
+			ZoneID:     cfg.Tunnel.ZoneID,
+			TunnelName: cfg.Tunnel.TunnelName,
+			APIToken:   token,
+			Origin:     cfg.Tunnel.EffectiveOrigin(),
+		},
+		Source:  cfg.Tunnel.ConnectorSource,
+		URL:     cfg.Tunnel.ConnectorURL,
+		SHA256:  cfg.Tunnel.ConnectorSHA256,
+		Service: cfg.Tunnel.Connector(),
+	}
 }
 
 func bootstrapAuditLogger(_ context.Context, meta deployment.AuditMeta, command string, runErr error) {

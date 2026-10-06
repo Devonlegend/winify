@@ -57,15 +57,16 @@ func (s funcStep) Apply(ctx context.Context, _ deployment.Runner) error {
 
 // Paths is the on-host layout bootstrap creates and later phases use.
 type Paths struct {
-	Root    string
-	Tools   string
-	NSSM    string
-	Caddy   string
-	Work    string
-	Apps    string
-	Backups string
-	Logs    string
-	Data    string
+	Root      string
+	Tools     string
+	NSSM      string
+	Caddy     string
+	Connector string // cloudflared.exe, when a tunnel is configured
+	Work      string
+	Apps      string
+	Backups   string
+	Logs      string
+	Data      string
 }
 
 // DefaultRoot returns the platform install root: %ProgramData%\winify on
@@ -83,15 +84,16 @@ func DefaultRoot() string {
 // DefaultPaths derives the full layout from a root directory.
 func DefaultPaths(root string) Paths {
 	return Paths{
-		Root:    root,
-		Tools:   filepath.Join(root, "tools"),
-		NSSM:    filepath.Join(root, "tools", "nssm.exe"),
-		Caddy:   filepath.Join(root, "tools", "caddy.exe"),
-		Work:    filepath.Join(root, "work"),
-		Apps:    filepath.Join(root, "apps"),
-		Backups: filepath.Join(root, "backups"),
-		Logs:    filepath.Join(root, "logs"),
-		Data:    filepath.Join(root, "data"),
+		Root:      root,
+		Tools:     filepath.Join(root, "tools"),
+		NSSM:      filepath.Join(root, "tools", "nssm.exe"),
+		Caddy:     filepath.Join(root, "tools", "caddy.exe"),
+		Connector: filepath.Join(root, "tools", "cloudflared.exe"),
+		Work:      filepath.Join(root, "work"),
+		Apps:      filepath.Join(root, "apps"),
+		Backups:   filepath.Join(root, "backups"),
+		Logs:      filepath.Join(root, "logs"),
+		Data:      filepath.Join(root, "data"),
 	}
 }
 
@@ -112,6 +114,9 @@ type Options struct {
 	CaddyURL     string
 	CaddySHA256  string
 	CaddyAdmin   string
+	// Tunnel, when non-nil, adds a step that installs the connector binary as a
+	// service and provisions a public ingress tunnel (for hosts behind CGNAT).
+	Tunnel *TunnelOptions
 	// TargetCheck/Apply add a step that stores a WinRM credential and creates
 	// the winsvc server entry. Both must be set for the step to appear.
 	// TargetStepName names the step (default "local-target").
@@ -154,6 +159,9 @@ func New(opts Options) *Bootstrap {
 	}
 	if opts.Paths.Caddy == "" {
 		opts.Paths.Caddy = defaults.Caddy
+	}
+	if opts.Paths.Connector == "" {
+		opts.Paths.Connector = defaults.Connector
 	}
 	if opts.Paths.Work == "" {
 		opts.Paths.Work = defaults.Work
@@ -208,6 +216,19 @@ func New(opts Options) *Bootstrap {
 			},
 			firewallStep{ports: []int{80, 443}},
 		)
+	}
+	if opts.Tunnel != nil {
+		t := *opts.Tunnel
+		if t.Path == "" {
+			t.Path = opts.Paths.Connector
+		}
+		if t.Dir == "" {
+			t.Dir = filepath.Join(opts.Paths.Root, "tunnel")
+		}
+		t.NSSMPath = opts.Paths.NSSM
+		t.LogDir = opts.Paths.Logs
+		t.Logf = opts.Logf
+		steps = append(steps, tunnelStep{t})
 	}
 	return &Bootstrap{steps: steps, meta: opts.Meta, runner: opts.Runner, dryRun: opts.DryRun, logf: opts.Logf, auditMeta: opts.AuditMeta, stateNamespace: opts.StateNamespace}
 }
