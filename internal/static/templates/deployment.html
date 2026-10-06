@@ -26,7 +26,7 @@
   </form>
 
   {{if .Rows}}
-  <table class="deploys">
+  <div class="table-scroll"><table class="deploys">
     <thead>
       <tr><th>#</th><th>Resource</th><th>Type</th><th>Commit</th><th>Status</th><th>Trigger</th><th>Started</th><th>Log</th><th></th></tr>
     </thead>
@@ -72,7 +72,7 @@
       </tr>
       {{end}}
     </tbody>
-  </table>
+  </table></div>
 
   {{if gt .TotalPages 1}}
   <nav class="pager" aria-label="Pages">

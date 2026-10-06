@@ -8,7 +8,7 @@
   {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 
   {{if .Servers}}
-  <table class="deploys">
+  <div class="table-scroll"><table class="deploys">
     <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Endpoint</th><th></th></tr></thead>
     <tbody>
       {{range .Servers}}
@@ -31,7 +31,7 @@
       </tr>
       {{end}}
     </tbody>
-  </table>
+  </table></div>
   {{else}}
     <div class="placeholder">No servers yet. Add one below.</div>
   {{end}}

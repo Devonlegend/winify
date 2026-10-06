@@ -74,7 +74,7 @@
   {{if eq .Tab "deployments"}}
   <div class="tab-panel">
     {{if .Deployments}}
-    <table class="deploys">
+    <div class="table-scroll"><table class="deploys">
       <thead>
         <tr><th>#</th><th>Commit</th><th>Status</th><th>Trigger</th><th>Artifact</th><th>Finished</th></tr>
       </thead>
@@ -96,7 +96,7 @@
         </tr>
         {{end}}
       </tbody>
-    </table>
+    </table></div>
     {{else}}
       <div class="placeholder">No deployments yet. Push to the branch or click Deploy.</div>
     {{end}}

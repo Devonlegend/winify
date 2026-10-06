@@ -14,7 +14,7 @@
   {{if not .Available}}
     <div class="placeholder">Bootstrap is not enabled in this configuration.</div>
   {{else}}
-    <table class="deploys">
+    <div class="table-scroll"><table class="deploys">
       <thead><tr><th>Step</th><th>Status</th></tr></thead>
       <tbody>
         {{range .Steps}}
@@ -28,7 +28,7 @@
         </tr>
         {{end}}
       </tbody>
-    </table>
+    </table></div>
     <form method="post" action="/setup/run" class="form-actions">
       <button type="submit">Run bootstrap</button>
     </form>

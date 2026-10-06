@@ -39,7 +39,7 @@
   </form>
 
   {{if .Commands}}
-  <table class="deploys">
+  <div class="table-scroll"><table class="deploys">
     <thead><tr><th>Time</th><th>Server</th><th>Type</th><th>Action</th><th>Deployment</th><th>Command</th><th>Error</th></tr></thead>
     <tbody>
       {{range .Commands}}
@@ -54,7 +54,7 @@
       </tr>
       {{end}}
     </tbody>
-  </table>
+  </table></div>
 
   {{if gt .TotalPages 1}}
   <nav class="pager" aria-label="Pages">

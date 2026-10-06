@@ -2,7 +2,7 @@
 {{define "body"}}
 <main>
   <h1>API Tokens</h1>
-  <p class="muted">Bearer tokens for the REST API at <span class="mono">/api/v1</span>. Tokens are shown once and stored only as a hash. A <strong>write</strong> token is an administrator-equivalent credential: it can change any         resource/server and trigger      privileged deployments. Issue it only to trusted automation.</p>
+  <p class="muted">Bearer tokens for the REST API at <span class="mono">/api/v1</span>. Tokens are shown once and stored only as a hash. A <strong>write</strong> token is an administrator-equivalent credential: it can change any resource/server and trigger privileged deployments. Issue it only to trusted automation.</p>
 
   {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
   {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
@@ -15,7 +15,7 @@
   {{end}}
 
   {{if .Tokens}}
-  <table class="deploys">
+  <div class="table-scroll"><table class="deploys">
     <thead><tr><th>Name</th><th>Scope</th><th>Created</th><th>Last used</th><th></th></tr></thead>
     <tbody>
       {{range .Tokens}}
@@ -37,7 +37,7 @@
       </tr>
       {{end}}
     </tbody>
-  </table>
+  </table></div>
   {{else}}
     <div class="placeholder">No API tokens yet.</div>
   {{end}}

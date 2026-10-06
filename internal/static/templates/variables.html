@@ -12,7 +12,7 @@
   {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 
   {{if .Variables}}
-  <table class="deploys">
+  <div class="table-scroll"><table class="deploys">
     <thead><tr><th>Scope</th><th>Scope ID</th><th>Key</th><th>Value</th><th></th></tr></thead>
     <tbody>
       {{range .Variables}}
@@ -36,7 +36,7 @@
       </tr>
       {{end}}
     </tbody>
-  </table>
+  </table></div>
   {{else}}
     <div class="placeholder">No shared variables yet.</div>
   {{end}}
