@@ -1,76 +1,50 @@
+<!-- GENERATED from website/docs — do not edit by hand. Edit the source and run scripts/sync-assistant-docs.sh. -->
+
 # Troubleshooting
+
+
+
+Failures explain themselves: error banner above the relevant log, `down` pills with the connection error, never stale data.
 
 ## SSH connection failures (Docker)
 
-If a deploy fails immediately, the SSH connection is the problem. Check that
-`ssh_host`, `ssh_port` (default 22) and `ssh_user` are correct and that the
-credential named by `ssh_key_ref` exists and contains a valid private key.
-Errors such as "no key found" mean the stored credential is not a PEM or OpenSSH
-private key; re-add it with `control-center cred add server-002-ssh`.
+Deploy fails immediately → SSH is the problem. Check `ssh_host`, `ssh_port` (22), `ssh_user`, and that `ssh_key_ref` exists and holds a valid PEM/OpenSSH key. `no key found` = re-add via `control-center cred add server-002-ssh`.
 
-For production, set `deploy.known_hosts_file` so host keys are verified. SSH
-deploys now fail closed when it is empty; only the explicit
-`deploy.allow_insecure_host_key` escape hatch bypasses verification, and it must
-never be used for production targets.
+Production: `deploy.known_hosts_file` must be set (fail-closed). `allow_insecure_host_key` is dev-only.
 
-## WinRM connection failures (IIS)
+## WinRM connection failures (Windows)
 
-Check that `winrm_endpoint` is correct (`https://host:5986/wsman` is
-recommended), that `winrm_user` is set, and that the credential named by
-`credential_ref` exists. The platform supports `ntlm` (default) and `basic`
-transports. Basic authentication is accepted only over HTTPS. HTTP requires the
-explicit `winrm_insecure: true` opt-in; for self-signed HTTPS certificates set
-the same flag (prefer a trusted certificate in production).
+Check `winrm_endpoint` (`https://host:5986/wsman` recommended), `winrm_user`, and `credential_ref`. `ntlm` default; `basic` only over HTTPS. HTTP needs `winrm_insecure: true`.
 
-A "connection refused" or timeout means the WinRM listener is unreachable:
-verify the firewall allows 5985/5986 and that `winrm quickconfig` has been run.
-If monitoring reports the server as down, the same connection is failing.
+`connection refused`/timeout = listener unreachable: firewall 5985/5986, `winrm quickconfig`. Monitoring `down` with the same error confirms it.
 
 ## Docker build and compose failures
 
-The build runs `docker build` on the target using `dockerfile_path` relative to
-the repo root. Confirm the Dockerfile exists there and that the target can fetch
-base images. If `docker compose` is unavailable, install the Compose plugin.
-Port conflicts usually mean another container already uses the project's `port`.
+- `dockerfile_path` is relative to the repo root; target must fetch base images.
+- `docker compose` missing → install the Compose plugin.
+- Port conflict → another container uses the project's `port` / mapping.
 
-## IIS validation, app pool and service failures
+## IIS validation, app pool, service failures
 
-Validation runs before anything live is changed, so these failures are safe:
+Validation runs before live is touched, so these are safe:
 
-- "source directory not found": check `iis_source_subdir` and the build command.
-- "web.config is valid XML" failure: the build produced malformed XML.
-- "IIS app pool not found": correct `iis_app_pool`; confirm with
-  `Get-ChildItem IIS:\AppPools`.
-- "service not found": correct or remove `iis_service`.
+- `source directory not found` → `iis_source_subdir` / build command.
+- `web.config` XML failure → build produced malformed XML.
+- `app pool not found` → correct `iis_app_pool` (`Get-ChildItem IIS:\AppPools`).
+- `service not found` → correct or remove `iis_service`.
 
 ## Health check and smoke test failures
 
-After starting the app the platform requests
-`http://127.0.0.1:<port><health_path>` on the target. A failure usually means the
-app did not start or listens on a different port. Confirm the container is
-listening (Docker) or the app pool started and the site binding matches `port`
-(IIS). The full output is in the deploy log.
+Post-start GET to `http://127.0.0.1:<port><health_path>` failed → app did not start or listens elsewhere. Confirm container listening (Docker) or pool started + binding matches `port` (IIS). Full output is in the deploy log. Workers with no HTTP endpoint should set `disable_health_check: true`.
 
 ## Reverse proxy and TLS
 
-On a successful deploy the app is registered with Caddy, which issues and renews
-the certificate. If registration fails, check that `proxy.admin_url` is
-reachable and that the project's `domain` resolves to the central Caddy host
-(`proxy.public_ip` is the address used for that check). When `proxy.enabled` is
-false, no public URL is registered and that is not an error.
+Registration failure → `proxy.admin_url` unreachable, or `domain` does not resolve to `proxy.public_ip`. `proxy.enabled: false` = no URL by design, not an error. Tunnel-fronted / `sslip.io` hosts are intentionally HTTP (in `acme_skip`).
 
-## Monitoring shows a server as down
+## Monitoring shows down
 
-The platform could not open its SSH or WinRM connection, or the remote metrics
-command failed. The card shows the specific error. Metrics use the same
-connection as deploys, so if deploys work but monitoring is down, read the error
-text on the card. A "collection timed out" message means the target did not
-respond within `monitoring.timeout_seconds`.
+SSH/WinRM open failed or the metrics command failed/timed out (`monitoring.timeout_seconds`). Same connection as deploys — if deploys work, read the card error for the metrics-specific cause.
 
-## The assistant is unavailable
+## Assistant is unavailable
 
-The assistant needs Ollama for generated answers and optionally ChromaDB for
-retrieval. If ChromaDB is unreachable it falls back to an in-process store and
-still answers. If Ollama is unreachable it returns the retrieved documentation
-or live data verbatim instead of a generated answer. Check `assistant.ollama_url`
-and that the model named by `assistant.model` has been pulled.
+Needs Ollama for generation, optionally ChromaDB for retrieval. ChromaDB down → in-process fallback, still answers. Ollama down → verbatim grounded answer from docs/live data. Check `assistant.ollama_url` and that `assistant.model` is pulled.

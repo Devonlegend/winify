@@ -1,145 +1,127 @@
+<!-- GENERATED from website/docs — do not edit by hand. Edit the source and run scripts/sync-assistant-docs.sh. -->
+
 # Adding a Project or Server
 
-You can add and edit servers, projects and credentials entirely from the
-dashboard (the **Servers**, **Projects** and **Credentials** tabs). The database
-is the source of truth; `servers.yaml` and `projects.yaml` are imported only
-once, when the tables are empty (a fresh install). After that, manage everything
-in the UI.
 
-## Adding a server
 
-Open the **Servers** tab. The fastest path is **Onboard a Windows server**: give
-the WinRM endpoint, user and password, and the platform provisions directories,
-NSSM and Caddy on the target and creates the server record for you.
+The database is the source of truth; `servers.yaml` is imported only once, when the tables are empty (fresh install). After that, manage everything in the UI (**Servers** tab) or the [REST API](../reference/api.md).
 
-For a manual entry, choose the type and fill in the form:
+## Fastest path: onboard a Windows server
 
-- **winsvc — Windows native service (recommended)**. The default for Windows
-  servers: your app runs as a Windows service via NSSM and Caddy provides HTTPS
-  and static files. Set `winrm_endpoint`, `winrm_user`, `winrm_insecure` and the
-  WinRM credential ref; NSSM/Caddy paths default to `C:\ProgramData\winify\tools`.
-- **docker — Linux/Docker over SSH**. Set `ssh_host`, `ssh_port`, `ssh_user` and
-  the SSH key credential ref (for example `vault:server-002-ssh`).
-- **iis — IIS (advanced/legacy)**. Only for apps that need ASP.NET Framework,
-  Windows authentication, classic ASP, or an existing IIS site.
+**Servers → Onboard a Windows server**: give the WinRM endpoint, user, and password. winify provisions directories, NSSM, and Caddy on the target over WinRM and creates the server record for you.
 
-The `type` selects the deploy pipeline.
+The remote must already accept WinRM. One-time snippet on the remote (elevated):
 
-Optionally set `services` (systemd units or Windows service names to report in
-Monitoring) and `disk_path` (the volume to report).
+```powershell
+Enable-PSRemoting -Force
+```
 
-## Adding a Docker project
+## Manual entry
 
-Open the **Projects** tab, fill in the form and pick the Docker server. A Docker
-project has a **deploy source**:
+Choose the type — it selects the deploy pipeline:
 
-- **dockerfile** — build the image from the repo. Set `repo_url`, `branch` and
-  `dockerfile_path` (default `Dockerfile`).
-- **compose** — deploy the repository's own compose file. Set `repo_url`,
-  `branch` and `compose_path` (default `docker-compose.yml`). Project `env`
-  values are written to a `.env` file next to the compose file.
-- **image** — run a prebuilt registry image. Set `image` (for example
-  `nginx:1.27`) and `container_port` if the image listens on a different port
-  than `port`.
+- **winsvc — Windows native service (recommended)**. Default for Windows: app runs as a Windows service via NSSM, Caddy provides HTTPS/static. Set `winrm_endpoint`, `winrm_user`, `winrm_insecure`, and the WinRM credential ref; NSSM/Caddy paths default to `C:\ProgramData\winify\tools`.
+- **docker — Linux/Docker over SSH**. Set `ssh_host`, `ssh_port` (default 22), `ssh_user`, and the SSH key credential ref (e.g. `vault:server-002-ssh`).
+- **iis — IIS (advanced/legacy)**. Only for ASP.NET Framework, Windows auth, classic ASP, or an existing IIS site.
 
-All sources also use:
+Field reference (YAML keys match API `snake_case`):
 
-- `id` and `name`
-- `domain` — the public hostname Caddy will serve over HTTPS
-- `port` — the published host port (also used for the health check and proxy)
-- `container_port` — the port inside the container; defaults to `port`
-- `health_path` — a path that returns 2xx/3xx (for example `/healthz`)
-- `disable_health_check` — set to `true` to skip the post-deploy health check
-  entirely (workers or cron jobs with no HTTP endpoint)
-- `webhook_secret_ref` — the name of an encrypted credential used to verify the
-  push webhook (dockerfile and compose sources)
-- `env` — optional `KEY=VALUE` lines
+| Field | Used by | Notes |
+| ----- | ------- | ----- |
+| `id`, `name` | all | `id` must not contain path separators or `..` |
+| `type` | all | `winsvc` \| `iis` \| `docker` |
+| `ssh_host`, `ssh_port`, `ssh_user`, `ssh_key_ref` | `docker` | Key is a `vault:` ref to a PEM/OpenSSH private key |
+| `winrm_endpoint`, `winrm_user`, `winrm_transport`, `winrm_insecure`, `credential_ref` | `winsvc`, `iis` (remote) | `ntlm` default; `basic` requires HTTPS; HTTP requires `winrm_insecure: true` |
+| `local` | `winsvc` | `true` for the host winify runs on — in-process PowerShell, no credential |
+| `host` | all | Proxy upstream override; falls back to `ssh_host`, then WinRM endpoint host |
+| `nssm_path`, `caddy_path` | `winsvc` | Permanent tool paths; must not change once services are installed |
+| `public_ip` | all | Generates `<name>.<ip>.sslip.io` when you have no DNS yet |
+| `services` | all | Service names for Monitoring (systemd units / Windows service names) |
+| `disk_path` | all | Volume to report (`/` Linux, `C:` Windows) |
 
-For dockerfile and compose sources the pipeline clones the repo on the target.
-The dockerfile source builds the image, then runs it with Docker Compose on
-`port` and health-checks `health_path`. The compose source runs
-`docker compose up -d --build`. The image source pulls the image and runs it
-with a generated compose file. In all cases the deploy is only successful if
-the health check passes.
+## SSH trust (Docker)
 
-## Adding a Windows native-service project
+Populate `deploy.known_hosts_file` from a trusted provisioning source before registering Docker targets. Verification is fail-closed. Only the explicit `deploy.allow_insecure_host_key: true` bypasses it — **never in production**.
 
-Pick the winsvc server and fill in `service_name`, `service_exe` and
-`service_work_dir` (plus optional build command, source subdir, log directory
-and Caddy mode). The pipeline syncs the repo, builds if configured, validates
-before touching the live install, backs up the current directory, copies files,
-installs/updates the NSSM service, starts it and smoke-tests the port. A static
-site (`caddy_mode: static`) needs no service name or executable — the per-target
-Caddy serves the files.
+## WinRM trust
 
-## Adding an IIS project (advanced/legacy)
+- `winrm_transport: ntlm` (default) or `basic` (`basic` requires HTTPS).
+- HTTP endpoints require explicit `winrm_insecure: true`.
+- For self-signed HTTPS certificates set the same flag; prefer a trusted certificate in production.
+- The WinRM account can install services and write the filesystem — treat it as highly privileged.
 
-Same form, but pick the IIS server and fill in `iis_physical_path` and
-`iis_app_pool` (plus optional `iis_service`, `iis_build_command` and
-`iis_source_subdir`). The pipeline validates the build and `web.config`, stops
-the service and app pool, backs up the live directory, copies the new files,
-restarts the service and recycles the app pool, then smoke-tests the site.
+## Verify
 
-Enable **Blue-green deploy** (`iis_blue_green: true`) for near-zero downtime:
-the build is copied to the inactive slot (`<physical_path>.blue`), validated
-there, and the site is repointed without stopping the app pool. Rollback
-repoints the site to the other slot — no backup copy needed. A marker file
-(`<physical_path>.active`) records the live slot.
+After saving, open **Monitoring**. Within `monitoring.interval_seconds` the server reports CPU/memory/disk, or a red `down` pill with the exact connection error. If deploys work but monitoring is down, read the error text on the card — same connection, different command.
+
+
+
+Projects are deployable units bound to one server. Push to `branch` triggers a deploy; `webhook_secret_ref` names the encrypted secret verifying the webhook; `domain` is registered with Caddy on success.
+
+Use **Projects → New** (guided wizard with smart defaults) or `POST /api/v1/projects`.
+
+## Common fields
+
+| Field | Notes |
+| ----- | ----- |
+| `id`, `name` | `id` validated (no separators / `..`) |
+| `server_id` | Must reference an existing server |
+| `branch` | Push branch; other branches are ignored (`202 branch mismatch`) |
+| `domain` | Validated hostname (no scheme/path/port); registered in Caddy |
+| `port` / `ports_exposes` / `ports_mappings` | `ports_exposes` is in-container port; `ports_mappings` are `host:container`; proxy dials `EffectiveHostPort()` |
+| `health_path` | Must return 2xx/3xx, e.g. `/healthz` |
+| `disable_health_check` | `true` for workers/cron with no HTTP endpoint |
+| `webhook_secret_ref` | `vault:<name>` of the HMAC secret |
+| `env`, `build_env` | Runtime env vs build-time args; write-only in UI/API (`[redacted]`) |
+| `project_group`, `environment` | Coolify-style grouping; default when empty |
+| `github_repo` | `owner/repo` for GitHub App auto-registration |
+
+## Docker project
+
+Pick the Docker server, then the **deploy source**:
+
+- **dockerfile** — build from repo. `repo_url`, `branch`, `dockerfile_path` (default `Dockerfile`).
+- **compose** — deploy the repo's own compose file. `repo_url`, `branch`, `compose_path` (default `docker-compose.yml`). Project `env` is written to `.env` next to the compose file.
+- **image** — run a prebuilt registry image. `image` (e.g. `nginx:1.27`), optional `ports_exposes`/`ports_mappings`; `repo_url` not needed.
+
+Health timing overrides: `health_interval_seconds`, `health_timeout_seconds`, `health_retries`, `health_start_period_seconds` (fall back to global `deploy.*`).
+
+## Windows native-service project
+
+Pick the `winsvc` server. Fill in:
+
+- `service_name`, `service_exe`, `service_work_dir` (required except static sites)
+- `service_build_command`, `service_source_subdir` (default `.`), `service_args`, `service_log_dir`, `service_account`
+- `runtime`: `python` | `node` | `go` | `dotnet` (empty = none provisioned; winify installs a missing runtime)
+- `caddy_mode`: `none` | `proxy` | `static` — `static` needs no service name/exe; per-target Caddy serves files
+
+Pipeline validates before touching live, backs up, copies, installs/updates NSSM service, starts, smoke-tests, and compensates (restore + restart) on failure.
+
+## IIS project (advanced/legacy)
+
+Pick the IIS server. Fill in `iis_site` (created if missing), `iis_physical_path`, `iis_app_pool` (created if missing), plus optional `iis_service`, `iis_build_command`, `iis_source_subdir`.
+
+Enable **Blue-green** (`iis_blue_green: true`) for near-zero downtime: build goes to the inactive slot (`<path>.blue`), is validated there, then the site is repointed without stopping the pool. Rollback repoints — no copy.
+
+## Repo auto-detection
+
+**Projects → New → Detect** (or `POST /projects/detect`) inspects the repo and proposes a build/run plan with confidence and evidence:
+
+| Stack | Evidence | Proposal |
+| ----- | -------- | -------- |
+| Go | `go.mod` | `go build -o app.exe`, reads `go 1.x` |
+| .NET | `.csproj`/`.sln` | `dotnet publish -c Release -o out`; `web.config` → IIS else service |
+| Python | `requirements.txt`/`pyproject.toml`/entry | venv + pip; Django/FastAPI/Flask ports |
+| Node | `package.json` | `npm ci` (+ build); Next/Vite/Express |
+| Static | `index.html` | Per-target Caddy static on 8080 |
 
 ## Credentials
 
-Open the **Credentials** tab to add or delete secrets. Values are encrypted at
-rest with AES-256-GCM and are never shown again after saving. Reference a
-credential by name from a server (`ssh_key_ref` / `credential_ref`) or a project
-(`webhook_secret_ref`).
+**Credentials** tab or CLI:
 
-## Triggering a deploy
+```bash
+./control-center cred add server-002-ssh
+./control-center cred add proj-001-webhook
+```
 
-A push to the project's `branch` triggers a deploy through the signed webhook:
-
-    POST /webhooks/github/{projectID}
-    POST /webhooks/gitlab/{projectID}
-
-Requests with a missing or invalid signature are rejected with HTTP 401, and
-pushes to other branches are ignored. You can also start a deploy directly from
-the **Projects** tab with the **Deploy** button — useful for the first deploy or
-a retry.
-
-### Automatic GitHub webhook registration
-
-Instead of registering the webhook manually, configure the GitHub App in
-`config.yaml`:
-
-    github:
-      app_id: "123456"
-      installation_id: 98765432
-      private_key_ref: "vault:github-app-key"
-
-The App needs **Administration: read/write** on the repositories it manages and
-must be installed on them. Store the App's private key with
-`control-center cred add github-app-key < app-key.pem`, and set
-`server.public_url` to the externally reachable control-center URL. Then open a
-project, enter `owner/repo` under **Connect webhook**, and winify generates the
-secret, stores it encrypted and creates (or updates) the push hook. The manual
-flow (`webhook_secret_ref` + registering the URL yourself) still works for
-GitLab or unmanaged repos.
-
-### Deployment notifications and commit statuses
-
-Configure outbound notifications in `config.yaml`:
-
-    notifications:
-      webhook_url: "https://hooks.example.com/deploys"       # DeployEvent JSON
-      slack_webhook_url: "https://hooks.slack.com/..."       # Slack text
-
-Every deployment posts `pending`, `success` or `failed`. Notifications never
-block or fail the deployment. For projects connected via the GitHub App
-(`github_repo` set), winify also posts commit statuses (`winify/deploy`), so
-GitHub shows the deploy check on commits and PRs.
-
-## Verifying a deployment
-
-Watch the **Deployment** tab: each attempt shows its status, commit, artifact
-and full log. A successful deploy records the live URL. If the target is a
-Docker host, `docker ps` on the target shows the running container; for IIS, the
-site should respond on its port.
+Reference by name (`ssh_key_ref` / `credential_ref` / `webhook_secret_ref`). Values are AES-256-GCM encrypted, decrypted only in memory at connection time.
