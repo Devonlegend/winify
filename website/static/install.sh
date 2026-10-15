@@ -1,8 +1,8 @@
 #!/bin/sh
 # winify quick installer for Linux (systemd).
 #
-#   curl -fsSL https://devonlegend.github.io/winify/install.sh | sh
-#   curl -fsSL https://devonlegend.github.io/winify/install.sh | sh -s -- --port 8080 --version v0.1.0
+#   curl -fsSL https://winify.space/install.sh | sh
+#   curl -fsSL https://winify.space/install.sh | sh -s -- --port 8080 --version v0.1.0
 #
 # What it does:
 #   1. Resolves version (explicit --version, $WINIFY_VERSION, or latest GitHub release).

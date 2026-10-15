@@ -20,14 +20,14 @@ Quick install from an **elevated** PowerShell (downloads the latest GitHub
 Release, verifies SHA-256, installs + starts the `winify` service):
 
 ```powershell
-irm https://devonlegend.github.io/winify/install.ps1 | iex
+irm https://winify.space/install.ps1 | iex
 ```
 
 Pin a version or change the port:
 
 ```powershell
 $env:WINIFY_VERSION = "v0.1.0"
-irm https://devonlegend.github.io/winify/install.ps1 | iex
+irm https://winify.space/install.ps1 | iex
 ```
 
 Manual path — from an **elevated** PowerShell with a local binary:

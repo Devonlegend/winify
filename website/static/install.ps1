@@ -14,7 +14,7 @@
 
 .EXAMPLE
   # Quick install (elevated PowerShell):
-  irm https://devonlegend.github.io/winify/install.ps1 | iex
+  irm https://winify.space/install.ps1 | iex
 .EXAMPLE
   .\install.ps1
 .EXAMPLE
@@ -49,7 +49,7 @@ if (-not $admin) {
         # Piped via iex: persist this script to TEMP so the elevated child runs the same code.
         $tmp = Join-Path $env:TEMP ("winify-install-" + [Guid]::NewGuid().ToString("N") + ".ps1")
         try {
-            Invoke-WebRequest -Uri "https://devonlegend.github.io/winify/install.ps1" -OutFile $tmp -UseBasicParsing
+            Invoke-WebRequest -Uri "https://winify.space/install.ps1" -OutFile $tmp -UseBasicParsing
             Start-Process powershell -Verb RunAs -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$tmp`"") + $argList)
         } catch {
             throw "Elevation required: open PowerShell as Administrator, then run the installer. ($($_.Exception.Message))"

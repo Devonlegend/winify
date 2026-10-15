@@ -12,7 +12,7 @@ Use this when your workload runs on a Linux host with Docker. winify reaches it 
 On the Linux controller host (systemd, amd64/arm64):
 
 ```bash
-curl -fsSL https://devonlegend.github.io/winify/install.sh | sh
+curl -fsSL https://winify.space/install.sh | sh
 ```
 
 Options: `curl -fsSL ... | sh -s -- --port 8080 --version v0.1.0`.

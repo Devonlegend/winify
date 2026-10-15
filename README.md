@@ -34,13 +34,13 @@ dashboard that watches an external CI system.
 Windows (elevated PowerShell):
 
 ```powershell
-irm https://devonlegend.github.io/winify/install.ps1 | iex
+irm https://winify.space/install.ps1 | iex
 ```
 
 Linux (systemd):
 
 ```sh
-curl -fsSL https://devonlegend.github.io/winify/install.sh | sh
+curl -fsSL https://winify.space/install.sh | sh
 ```
 
 Installers pull the latest GitHub Release asset, verify its SHA-256, and
