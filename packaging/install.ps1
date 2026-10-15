@@ -9,14 +9,24 @@
   WinRM, NSSM, Caddy, firewall and the local target. Then open the URL and
   create the admin account.
 
+  Zero-arg mode (the irm | iex one-liner) downloads the latest GitHub Release
+  asset and its .sha256 file and verifies it automatically. Pin with -Version.
+
+.EXAMPLE
+  # Quick install (elevated PowerShell):
+  irm https://devonlegend.github.io/winify/install.ps1 | iex
 .EXAMPLE
   .\install.ps1
+.EXAMPLE
+  .\install.ps1 -Version v0.1.0 -Port 8080
 .EXAMPLE
   .\install.ps1 -Source .\winify.exe -Port 8080
 #>
 param(
-    [string]$Source = "",                                    # winify.exe path or HTTPS URL
-    [string]$Sha256 = "",                                    # required when Source is a URL
+    [string]$Source = "",                                    # winify.exe path or HTTPS URL ("" = GitHub Release)
+    [string]$Version = "latest",                             # release tag, e.g. v0.1.0 ("latest" resolves via API)
+    [string]$Repo = "Devonlegend/winify",                    # owner/repo for release downloads
+    [string]$Sha256 = "",                                    # optional pinned digest; auto-fetched for release URLs
     [string]$SetupToken = "",                                # optional; generated for a new config
     [string]$Config = (Join-Path $env:ProgramData "winify\config.yaml"),
     [string]$ServiceName = "winify",
@@ -24,14 +34,27 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
-# --- self-elevate ---
+# --- self-elevate (works for -File and for irm | iex, where $PSCommandPath is empty) ---
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) {
-    $a = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-Config', "`"$Config`"", '-ServiceName', "`"$ServiceName`"", '-Port', $Port)
-    if ($Source) { $a += @('-Source', "`"$Source`"") }
-    if ($Sha256) { $a += @('-Sha256', "`"$Sha256`"") }
-    if ($SetupToken) { $a += @('-SetupToken', "`"$SetupToken`"") }
-    Start-Process powershell -Verb RunAs -ArgumentList $a
+    $scriptPath = $PSCommandPath
+    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Config', "`"$Config`"", '-ServiceName', "`"$ServiceName`"", '-Port', $Port, '-Version', "`"$Version`"", '-Repo', "`"$Repo`"")
+    if ($Source) { $argList += @('-Source', "`"$Source`"") }
+    if ($Sha256) { $argList += @('-Sha256', "`"$Sha256`"") }
+    if ($SetupToken) { $argList += @('-SetupToken', "`"$SetupToken`"") }
+    if ($scriptPath) {
+        $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$scriptPath`"") + $argList
+        Start-Process powershell -Verb RunAs -ArgumentList $argList
+    } else {
+        # Piped via iex: persist this script to TEMP so the elevated child runs the same code.
+        $tmp = Join-Path $env:TEMP ("winify-install-" + [Guid]::NewGuid().ToString("N") + ".ps1")
+        try {
+            Invoke-WebRequest -Uri "https://devonlegend.github.io/winify/install.ps1" -OutFile $tmp -UseBasicParsing
+            Start-Process powershell -Verb RunAs -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$tmp`"") + $argList)
+        } catch {
+            throw "Elevation required: open PowerShell as Administrator, then run the installer. ($($_.Exception.Message))"
+        }
+    }
     Write-Host "Elevation requested. Approve the UAC prompt to continue."
     return
 }
@@ -42,6 +65,25 @@ function Assert-Hash([string]$Value, [string]$Name) {
     if ($Value -and $Value -notmatch '^[0-9a-fA-F]{64}$') { throw "$Name must be a 64-character SHA-256 hex digest." }
 }
 Assert-Hash $Sha256 "Sha256"
+
+function Resolve-WinifyRelease([string]$Repo, [string]$Version) {
+    if ($Version -and $Version -ne "latest") { return $Version }
+    Write-Host "Resolving latest winify release..."
+    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -UseBasicParsing
+    if (-not $rel.tag_name) { throw "Could not resolve latest release for $Repo." }
+    return $rel.tag_name
+}
+
+function Get-ExpectedHash([string]$Url, [string]$Pinned) {
+    if ($Pinned) { return $Pinned }
+    foreach ($candidate in @("$Url.sha256", "$Url.SHA256")) {
+        try {
+            $text = (Invoke-WebRequest -Uri $candidate -UseBasicParsing).Content.Trim()
+            if ($text -match '^[0-9a-fA-F]{64}') { return $Matches[0] }
+        } catch { }
+    }
+    return ""
+}
 
 $root   = Join-Path $env:ProgramData "winify"
 $binDir = Join-Path $root "bin"
@@ -63,22 +105,31 @@ if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
     Start-Sleep -Seconds 1
 }
 
-# --- resolve winify.exe ---
+# --- resolve winify.exe (local file, explicit URL, or GitHub Release default) ---
 if (-not $Source) {
-    $local = Join-Path $PSScriptRoot "winify.exe"
-    if (Test-Path $local) { $Source = $local }
+    $here = ""
+    if ($PSScriptRoot) { $here = Join-Path $PSScriptRoot "winify.exe" }
+    elseif ($PSCommandPath) { $here = Join-Path (Split-Path $PSCommandPath) "winify.exe" }
+    if ($here -and (Test-Path $here)) {
+        $Source = $here
+    } else {
+        $tag = Resolve-WinifyRelease $Repo $Version
+        $Source = "https://github.com/$Repo/releases/download/$tag/winify-$tag-windows-amd64.exe"
+        Write-Host "Using winify $tag"
+    }
 }
-if (-not $Source) { throw "winify.exe not found. Pass -Source <path-or-url>." }
+if (-not $Source) { throw "winify.exe not found. Pass -Source <path-or-url> or -Version <tag>." }
 if ($Source -match '^https?://') {
     $uri = [Uri]$Source
     if ($uri.Scheme -ne "https") { throw "Remote winify.exe downloads must use HTTPS." }
-    if (-not $Sha256) { throw "A -Sha256 digest is required when downloading winify.exe from a URL." }
+    $expected = Get-ExpectedHash $uri.AbsoluteUri $Sha256
+    if (-not $expected) { throw "No SHA-256 available for $($uri.AbsoluteUri): pass -Sha256, or publish a <$([IO.Path]::GetFileName($uri.AbsolutePath)).sha256> asset alongside the release." }
     $download = Join-Path $env:TEMP ("winify-" + [Guid]::NewGuid().ToString("N") + ".exe")
     try {
         Write-Host "Downloading winify.exe..."
         Invoke-WebRequest -Uri $uri.AbsoluteUri -OutFile $download -UseBasicParsing
         $actual = (Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash
-        if ($actual -ine $Sha256) { throw "winify.exe SHA-256 mismatch: expected $Sha256, got $actual" }
+        if ($actual -ine $expected) { throw "winify.exe SHA-256 mismatch: expected $expected, got $actual" }
         Move-Item -LiteralPath $download -Destination $exe -Force
     } finally {
         Remove-Item -LiteralPath $download -Force -ErrorAction SilentlyContinue
