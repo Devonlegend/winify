@@ -1,0 +1,97 @@
+/**
+ * Monochrome operator console theme for docs.
+ * Ports DESIGN.md tokens: warm black surfaces, light-ink accent, hairline borders.
+ * Docs must feel like the product. No brand hue.
+ */
+
+:root {
+  --bg: #0a0a09;
+  --panel: #121210;
+  --panel-2: #191917;
+  --border: #262522;
+  --text: #ece9e4;
+  --muted: #a8a49d;
+  --faint: #85817a;
+
+  --ifm-color-scheme: dark;
+  --ifm-background-color: var(--bg);
+  --ifm-background-surface-color: var(--panel);
+  --ifm-font-color-base: var(--text);
+  --ifm-font-color-secondary: var(--muted);
+  --ifm-heading-font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --ifm-font-family-base: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --ifm-font-family-monospace: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --ifm-color-primary: #ece9e4;
+  --ifm-color-primary-dark: #d6d2cb;
+  --ifm-color-primary-darker: #c4c0b9;
+  --ifm-color-primary-darkest: #a8a49d;
+  --ifm-color-primary-light: #ffffff;
+  --ifm-color-primary-lighter: #ffffff;
+  --ifm-color-primary-lightest: #ffffff;
+  --ifm-link-color: #ece9e4;
+  --ifm-code-background: var(--panel-2);
+  --ifm-card-background-color: var(--panel);
+  --docusaurus-highlighted-code-line-bg: rgba(236, 233, 228, 0.08);
+}
+
+html[data-theme='dark'] {
+  --ifm-background-color: var(--bg);
+  --ifm-navbar-background-color: rgba(18, 18, 16, 0.92);
+}
+
+html[data-theme='light'] {
+  --ifm-background-color: #faf9f7;
+  --ifm-background-surface-color: #ffffff;
+  --ifm-font-color-base: #1a1917;
+  --ifm-font-color-secondary: #57534c;
+  --ifm-color-primary: #1a1917;
+  --ifm-link-color: #1a1917;
+  --ifm-code-background: #f0eeeb;
+}
+
+/* Display headings use the editorial serif, matching the product login title. */
+.markdown h1 {
+  font-family: 'Newsreader', Georgia, serif;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
+}
+
+.navbar {
+  border-bottom: 1px solid var(--border);
+}
+
+.footer {
+  border-top: 1px solid var(--border);
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* Status vocabulary: failure is the only inverted chip. */
+.badge--danger {
+  background: #ece9e4;
+  color: #0a0a09;
+  border: 1px solid #ece9e4;
+}
+
+code {
+  border: 1px solid rgba(236, 233, 228, 0.08);
+  border-radius: 4px;
+}
+
+/* Visible focus for keyboard operators. */
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid #ece9e4;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
