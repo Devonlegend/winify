@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="internal/static/web/img/logo-dark.svg" alt="DevOps Control Center" width="72" height="72">
+</p>
+
 # DevOps Control Center
 
 A self-hosted deployment platform for environments that mix Windows IIS and
@@ -25,7 +29,25 @@ dashboard that watches an external CI system.
 - **Encrypted credentials** (AES-256-GCM), never logged or returned by the API.
 - **Audit log** of every remote command (target, action, deployment, timestamp).
 
-## Quick start
+## Quick install
+
+Windows (elevated PowerShell):
+
+```powershell
+irm https://devonlegend.github.io/winify/install.ps1 | iex
+```
+
+Linux (systemd):
+
+```sh
+curl -fsSL https://devonlegend.github.io/winify/install.sh | sh
+```
+
+Installers pull the latest GitHub Release asset, verify its SHA-256, and
+start winify. Then open `http://localhost:8080` and create the admin account
+with the one-time setup token from the log.
+
+## Quick start (from source)
 
     go build -o control-center ./cmd/control-center
     Copy-Item config.example.yaml config.yaml

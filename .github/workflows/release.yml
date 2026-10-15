@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: true
+
+      - name: Build all targets
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Windows controller/service binary (this is what install.ps1 fetches).
+          GOOS=windows GOARCH=amd64 go build -o "dist/winify-${{ github.ref_name }}-windows-amd64.exe" ./cmd/control-center
+          # Linux controller binaries (this is what install.sh fetches).
+          GOOS=linux GOARCH=amd64 go build -o dist/winify ./cmd/control-center
+          tar -czf "dist/winify-${{ github.ref_name }}-linux-amd64.tar.gz" -C dist winify
+          rm dist/winify
+          GOOS=linux GOARCH=arm64 go build -o dist/winify ./cmd/control-center
+          tar -czf "dist/winify-${{ github.ref_name }}-linux-arm64.tar.gz" -C dist winify
+          rm dist/winify
+          cp packaging/install.sh "dist/install-${{ github.ref_name }}.sh"
+          cp packaging/install.ps1 "dist/install-${{ github.ref_name }}.ps1"
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum "winify-${{ github.ref_name }}-windows-amd64.exe" > "winify-${{ github.ref_name }}-windows-amd64.exe.sha256"
+          sha256sum "winify-${{ github.ref_name }}-linux-amd64.tar.gz" > "winify-${{ github.ref_name }}-linux-amd64.tar.gz.sha256"
+          sha256sum "winify-${{ github.ref_name }}-linux-arm64.tar.gz" > "winify-${{ github.ref_name }}-linux-arm64.tar.gz.sha256"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/winify-*-windows-amd64.exe
+            dist/winify-*-windows-amd64.exe.sha256
+            dist/winify-*-linux-*.tar.gz
+            dist/winify-*-linux-*.tar.gz.sha256
+          generate_release_notes: true
