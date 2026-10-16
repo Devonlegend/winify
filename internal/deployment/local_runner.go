@@ -53,6 +53,11 @@ func (LocalRunner) Run(ctx context.Context, script string) (string, error) {
 
 	out := strings.TrimSpace(output.String())
 	if err != nil {
+		// Surface the captured output: with only "exit status 1" a failing
+		// cmdlet is undiagnosable. capCommandOutput keeps it bounded.
+		if out != "" {
+			return out, fmt.Errorf("powershell: %w: %s", err, capCommandOutput(out))
+		}
 		return out, fmt.Errorf("powershell: %w", err)
 	}
 	return out, nil

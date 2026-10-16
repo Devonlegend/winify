@@ -68,11 +68,29 @@ func NewRepoTree(ctx context.Context, runner Runner, dir string) (*RepoTree, err
 		return nil, fmt.Errorf("list repository files: %w", err)
 	}
 	for _, line := range strings.Split(out, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			t.files = append(t.files, line)
+		if p := normalizeRepoPath(line); p != "" {
+			t.files = append(t.files, p)
 		}
 	}
 	return t, nil
+}
+
+// normalizeRepoPath turns one line of the listing into a repository-relative,
+// slash-separated path. The PowerShell script already strips the root and
+// converts separators, but normalizing here keeps detection correct even if a
+// target emits "./" or backslash-prefixed paths.
+func normalizeRepoPath(p string) string {
+	p = strings.ReplaceAll(strings.TrimSpace(p), `\`, "/")
+	for {
+		switch {
+		case strings.HasPrefix(p, "./"):
+			p = p[2:]
+		case strings.HasPrefix(p, "/"):
+			p = p[1:]
+		default:
+			return p
+		}
+	}
 }
 
 // List returns every file path under the root, relative and slash-separated.
@@ -98,7 +116,11 @@ func (t *RepoTree) Read(p string) ([]byte, error) {
 func listFilesScript(root string) string {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'\n")
-	fmt.Fprintf(&b, "$root = %s\n", psQuote(root))
+	// Canonicalize the root: [System.IO.Path]::GetFullPath expands 8.3 short
+	// names to their long form, which matches the FullName Get-ChildItem
+	// reports below. Without this, a caller whose temp directory is a short
+	// path (e.g. C:\Users\RUNNER~1\...) would produce a garbled relative path.
+	fmt.Fprintf(&b, "$root = [System.IO.Path]::GetFullPath(%s)\n", psQuote(root))
 	b.WriteString("if (-not (Test-Path -LiteralPath $root)) { throw \"repository directory not found: $root\" }\n")
 	b.WriteString("$skip = '(^|/)(\\.git|node_modules|\\.venv|venv|__pycache__|\\.mypy_cache|\\.pytest_cache|bin|obj|\\.next|\\.nuxt|dist|build|\\.idea|\\.vscode|target)(/|$)'\n")
 	// Kept to a single pipeline line: a multi-line script block is not reliably
@@ -112,7 +134,8 @@ func listFilesScript(root string) string {
 func readFileScript(root, rel string) string {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'\n")
-	fmt.Fprintf(&b, "$p = Join-Path %s %s\n", psQuote(root), psQuote(rel))
+	fmt.Fprintf(&b, "$root = [System.IO.Path]::GetFullPath(%s)\n", psQuote(root))
+	fmt.Fprintf(&b, "$p = Join-Path $root %s\n", psQuote(rel))
 	b.WriteString("if (-not (Test-Path -LiteralPath $p)) { throw \"file not found: $p\" }\n")
 	b.WriteString("[Convert]::ToBase64String([IO.File]::ReadAllBytes($p))\n")
 	return b.String()
