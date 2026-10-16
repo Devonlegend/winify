@@ -10,6 +10,19 @@ This file is maintained by
 [release-please](https://github.com/googleapis/release-please); see
 [RELEASING.md](RELEASING.md).
 
+## [0.1.1](https://github.com/Devonlegend/winify/compare/v0.1.0...v0.1.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **packaging:** parse byte-array checksum asset in install.ps1 ([0305cfb](https://github.com/Devonlegend/winify/commit/0305cfb0f6c998a5068ddfdfe653a49145b1b5b3))
+
+
+### Documentation
+
+* date v0.1.0 in the changelog and add the release badge ([bbcfc7b](https://github.com/Devonlegend/winify/commit/bbcfc7bfbd82cc7787abe38d4aa10e9042e5c34d))
+* refresh the docs theme and rename the product to Winify ([1a9894a](https://github.com/Devonlegend/winify/commit/1a9894aec0fb80d7b18a34de0cc709b81103c607))
+
 ## [0.1.0](https://github.com/Devonlegend/winify/releases/tag/v0.1.0) (2026-10-16)
 
 ### Added
