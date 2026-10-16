@@ -1,4 +1,4 @@
-# System Design — DevOps Control Center (winify)
+# System Design — Winify
 
 A self-hosted deployment platform that owns the deployment lifecycle for
 environments that mix **Windows/IIS** and **Linux/Docker**. One operator, one Go
@@ -57,7 +57,7 @@ flowchart TB
     GIT["GitHub / GitLab<br/>push webhook"]
   end
 
-  subgraph cc["DevOps Control Center — single Go binary"]
+  subgraph cc["Winify — single Go binary"]
     HTTP["HTTP server (chi)<br/>session + bearer auth"]
     DEP["Deployer<br/>pipeline + history"]
     MON["Monitoring scheduler"]
@@ -116,7 +116,7 @@ flowchart TB
   TUN -->|"forward to origin"| CADDY
 ```
 
-The control center is the only component that holds credentials. Targets receive
+Winify is the only component that holds credentials. Targets receive
 commands, never secrets; the reverse proxy receives only `host → upstream` route
 registrations.
 

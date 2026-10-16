@@ -21,7 +21,7 @@ Placeholders: replace `CC_HOST` (e.g. `http://127.0.0.1:8090`), `DOCKER_HOST`
 - [ ] A DNS name for each app pointing at the Caddy host, and ports 80/443
       reachable from the internet (required for Let's Encrypt).
 
-## Part 1 — Control center setup
+## Part 1 — Winify setup
 
 - [ ] Build and configure:
 

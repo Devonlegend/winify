@@ -100,7 +100,7 @@ fi
 if [ "$NO_SERVICE" -eq 0 ] && [ -d /run/systemd/system ]; then
   $SUDO sh -c "cat > /etc/systemd/system/$SERVICE.service <<EOF
 [Unit]
-Description=winify (DevOps Control Center)
+Description=Winify
 After=network-online.target
 Wants=network-online.target
 

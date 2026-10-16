@@ -24,7 +24,7 @@ impatient, not to browse. Secondary: the same person acting as admin
 
 ## Product Purpose
 
-A self-hosted DevOps control center that owns the deployment lifecycle: it
+A self-hosted deployment platform that owns the deployment lifecycle: it
 connects directly to target servers (SSH for Docker/Linux, WinRM for
 Windows/IIS), builds and deploys applications on a signed webhook or a manual
 action, fronts each deployment with a reverse proxy and automatic TLS, and polls
@@ -66,7 +66,7 @@ remote action.
 
 ## Brand Commitments
 
-Name: "DevOps Control Center" (repo: winify). The user has made **Coolify the
+Name: "Winify". The user has made **Coolify the
 binding UX reference**: sidebar IA (Project → Environment → Resource), a guided
 "New Resource" flow, and a dense dark console aesthetic. No logo or brand assets
 exist.

@@ -12,7 +12,7 @@ and this project adheres to
 
 ### Added
 
-- Initial public release of the DevOps Control Center (`winify`): a self-hosted
+- Initial public release of Winify: a self-hosted
   deployment platform that owns the deployment lifecycle for Windows
   IIS/services and Docker targets.
 - In-dashboard management of servers, projects, and AES-256-GCM encrypted

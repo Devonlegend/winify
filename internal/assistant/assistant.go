@@ -260,7 +260,7 @@ func (s *Service) serverContext(ctx context.Context, servers []config.Server, en
 // told not to enumerate every source (which small models tend to loop on).
 func buildPrompt(question string, docs []Doc, liveBlock string) string {
 	var b strings.Builder
-	b.WriteString("You are the DevOps Control Center assistant. Answer the question using ONLY the context below.\n")
+	b.WriteString("You are the Winify assistant. Answer the question using ONLY the context below.\n")
 	b.WriteString("Answer in at most 4 sentences. Do not repeat yourself and do not list more than one or two sources. ")
 	b.WriteString("If you used live data, say so. If the context does not contain the answer, say you don't know.\n\n")
 

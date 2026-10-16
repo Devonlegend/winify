@@ -1,11 +1,11 @@
 ---
 slug: /
-title: DevOps Control Center docs
+title: Winify docs
 description: Install winify, ship Windows and Docker apps to HTTPS, and operate the platform.
 sidebar_position: 0
 ---
 
-# DevOps Control Center docs
+# Winify docs
 
 Self-hosted deployments for environments that mix Windows and Docker.
 Git push → build → deploy → live HTTPS URL → audit. One Go binary, no agent,

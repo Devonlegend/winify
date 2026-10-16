@@ -2,7 +2,7 @@
 
 // Package service lets winify run as a native Windows service (no NSSM for
 // itself). The SCM starts the process; svc.Run drives the lifecycle and the
-// callback runs the control center until the SCM asks it to stop.
+// callback runs Winify until the SCM asks it to stop.
 package service
 
 import (

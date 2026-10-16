@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="internal/static/web/img/logo-dark.svg" alt="DevOps Control Center" width="72" height="72">
+  <img src="internal/static/web/img/logo-dark.svg" alt="Winify" width="72" height="72">
 </p>
 
-# DevOps Control Center
+# Winify
 
 <p align="center">
   Self-hosted deployments for environments that mix Windows IIS/services and

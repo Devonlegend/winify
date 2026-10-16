@@ -1,4 +1,4 @@
-# Contributing to DevOps Control Center
+# Contributing to Winify
 
 Thanks for your interest in `winify`. This is a small, single-maintainer,
 self-hosted project, so please **open an issue to discuss anything non-trivial

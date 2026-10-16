@@ -14,7 +14,7 @@ flowchart TB
     AUTO["CI / automation<br/>bearer token"]
     GIT["GitHub / GitLab<br/>push webhook"]
   end
-  subgraph cc["DevOps Control Center — single Go binary"]
+  subgraph cc["Winify — single Go binary"]
     HTTP["HTTP server (chi)<br/>session + bearer auth"]
     DEP["Deployer<br/>pipeline + history"]
     MON["Monitoring scheduler"]
@@ -65,7 +65,7 @@ flowchart TB
   TUN -->|"forward to origin"| CADDY
 ```
 
-The control center is the only component that holds credentials. Targets receive commands, never secrets; the reverse proxy receives only `host → upstream` route registrations.
+Winify is the only component that holds credentials. Targets receive commands, never secrets; the reverse proxy receives only `host → upstream` route registrations.
 
 ## Runtime components
 

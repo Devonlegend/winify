@@ -2,7 +2,7 @@
   "name": "winify-docs",
   "version": "1.0.0",
   "private": true,
-  "description": "DevOps Control Center (winify) documentation",
+  "description": "Winify documentation",
   "scripts": {
     "docusaurus": "docusaurus",
     "start": "docusaurus start",

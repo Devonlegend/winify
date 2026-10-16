@@ -1,6 +1,6 @@
 # Design
 
-The visual system for the DevOps Control Center dashboard. It is a **monochrome
+The visual system for the Winify dashboard. It is a **monochrome
 operator console**: warm-neutral black surfaces, a fixed left sidebar, dense but
 breathable panels, hairline borders, and one source of emphasis — light ink.
 There is no brand hue. State is carried by value, weight, and one inverted chip,

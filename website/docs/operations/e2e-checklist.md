@@ -17,7 +17,7 @@ Placeholders: `CC_HOST` (e.g. `http://127.0.0.1:8090`), `DOCKER_HOST` (e.g. `10.
 - [ ] Repo with a Dockerfile (Docker) or publishable web app (IIS).
 - [ ] DNS name per app pointing at the Caddy host; ports 80/443 reachable for Let's Encrypt.
 
-## Part 1 — Control center setup
+## Part 1 — Winify setup
 
 - [ ] Build and configure:
 

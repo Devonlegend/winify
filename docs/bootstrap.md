@@ -10,7 +10,7 @@ local-target form); remote provisioning over WinRM; local/remote target
 auto-creation. Binaries are supplied via `deploy.nssm_source` and
 `bootstrap.caddy.{source,url}` with optional SHA-256 pins.
 
-**winify is the name of the entire control center** (server, UI, deploy engine,
+**Winify is the name of the entire product** (server, UI, deploy engine,
 targets). This document plans how winify provisions a Windows host on install so
 it is immediately usable, with no manual setup.
 

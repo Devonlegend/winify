@@ -1,96 +1,1373 @@
 /**
- * Monochrome operator console theme for docs.
- * Ports DESIGN.md tokens: warm black surfaces, light-ink accent, hairline borders.
- * Docs must feel like the product. No brand hue.
+ * Winify — documentation theme.
+ *
+ * The docs are a Read surface inside the product's world: the monochrome
+ * operator console from DESIGN.md (warm-black surfaces, hairline borders,
+ * light-ink emphasis, no brand hue). This file ports those tokens into
+ * Docusaurus/Infima and adds the reading layer on top.
+ *
+ * Read-mode adaptations, all deliberate:
+ *  - prose runs at 16px / 1.68 with a shorter measure than the product's
+ *    dense 15px UI, because this is long-form reading;
+ *  - headings get a fixed rem scale (no fluid clamp) and a serif h1;
+ *  - code blocks, diagrams and tables become panels of the same black scale.
  */
 
+/* ---------------------------------------------------------------------------
+   1. Tokens — the warm-black scale, dark as canonical.
+   --------------------------------------------------------------------------- */
+
 :root {
+  /* Warm-neutral black scale (mirrors internal/static/web/css/app.css). */
   --bg: #0a0a09;
   --panel: #121210;
   --panel-2: #191917;
+  --elev: #211f1c;
   --border: #262522;
+  --border-strong: #37352f;
+  --line: rgba(236, 233, 228, 0.08);
+  --line-strong: rgba(236, 233, 228, 0.15);
   --text: #ece9e4;
   --muted: #a8a49d;
   --faint: #85817a;
 
-  --ifm-color-scheme: dark;
-  --ifm-background-color: var(--bg);
-  --ifm-background-surface-color: var(--panel);
-  --ifm-font-color-base: var(--text);
-  --ifm-font-color-secondary: var(--muted);
-  --ifm-heading-font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --ifm-font-family-base: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --ifm-font-family-monospace: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  --ifm-color-primary: #ece9e4;
-  --ifm-color-primary-dark: #d6d2cb;
-  --ifm-color-primary-darker: #c4c0b9;
-  --ifm-color-primary-darkest: #a8a49d;
-  --ifm-color-primary-light: #ffffff;
-  --ifm-color-primary-lighter: #ffffff;
-  --ifm-color-primary-lightest: #ffffff;
-  --ifm-link-color: #ece9e4;
-  --ifm-code-background: var(--panel-2);
-  --ifm-card-background-color: var(--panel);
-  --docusaurus-highlighted-code-line-bg: rgba(236, 233, 228, 0.08);
-}
+  /* Emphasis is light ink. There is no brand hue. */
+  --accent: #ece9e4;
+  --accent-contrast: #0a0a09;
+  --accent-soft: rgba(236, 233, 228, 0.07);
 
-html[data-theme='dark'] {
-  --ifm-background-color: var(--bg);
-  --ifm-navbar-background-color: rgba(18, 18, 16, 0.92);
+  /* Grayscale status vocabulary; failure is the only inverted chip. */
+  --ok: #d6d3cd;
+  --ok-soft: rgba(236, 233, 228, 0.06);
+  --warn: #b3afa7;
+  --warn-soft: rgba(236, 233, 228, 0.045);
+  --err: #f2efe9;
+  --err-soft: rgba(236, 233, 228, 0.07);
+  --info: #c4c0b8;
+  --info-soft: rgba(236, 233, 228, 0.05);
+
+  --r-sm: 4px;
+  --r: 8px;
+  --r-lg: 10px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 16px 40px -24px rgba(0, 0, 0, 0.9);
+  --ring: 0 0 0 3px rgba(236, 233, 228, 0.22);
+
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --serif: "Newsreader", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Code well: one step off the ground so it reads as a cut-in slab. */
+  --code-bg: #0f0f0e;
+
+  color-scheme: dark;
 }
 
 html[data-theme='light'] {
-  --ifm-background-color: #faf9f7;
-  --ifm-background-surface-color: #ffffff;
-  --ifm-font-color-base: #1a1917;
-  --ifm-font-color-secondary: #57534c;
-  --ifm-color-primary: #1a1917;
-  --ifm-link-color: #1a1917;
-  --ifm-code-background: #f0eeeb;
+  --bg: #faf9f7;
+  --panel: #ffffff;
+  --panel-2: #f2f0ec;
+  --elev: #ffffff;
+  --border: #e5e2db;
+  --border-strong: #d3cfc6;
+  --line: rgba(26, 25, 23, 0.1);
+  --line-strong: rgba(26, 25, 23, 0.2);
+  --text: #1a1917;
+  --muted: #57534c;
+  --faint: #6f6b64;
+
+  --accent: #1a1917;
+  --accent-contrast: #faf9f7;
+  --accent-soft: rgba(26, 25, 23, 0.05);
+
+  --ok: #3f3d38;
+  --ok-soft: rgba(26, 25, 23, 0.04);
+  --warn: #5a564e;
+  --warn-soft: rgba(26, 25, 23, 0.04);
+  --err: #141311;
+  --err-soft: rgba(26, 25, 23, 0.06);
+  --info: #4a4740;
+  --info-soft: rgba(26, 25, 23, 0.035);
+
+  --shadow: 0 1px 2px rgba(26, 25, 23, 0.06), 0 16px 40px -28px rgba(26, 25, 23, 0.22);
+  --ring: 0 0 0 3px rgba(26, 25, 23, 0.18);
+  --code-bg: #f4f2ee;
+
+  color-scheme: light;
 }
 
-/* Display headings use the editorial serif, matching the product login title. */
-.markdown h1 {
-  font-family: 'Newsreader', Georgia, serif;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  line-height: 1.12;
+/* ---------------------------------------------------------------------------
+   2. Infima mapping.
+   The `html[data-theme='dark']` half of the selector exists so these values
+   beat Infima's own dark block, which ships cool blue-grays.
+   --------------------------------------------------------------------------- */
+
+:root,
+html[data-theme='dark'] {
+  --ifm-color-scheme: dark;
+
+  --ifm-background-color: var(--bg);
+  --ifm-background-surface-color: var(--panel);
+  --ifm-color-content: var(--text);
+  --ifm-color-content-secondary: var(--muted);
+  --ifm-font-color-base: var(--text);
+  --ifm-font-color-secondary: var(--muted);
+  --ifm-heading-color: var(--text);
+
+  /* Warm remap of Infima's gray ladder. Infima's dark ladder runs
+     100 ≈ near-ground → 900 ≈ content, and flips in light mode; these keep
+     that semantic direction while dropping the cool blue-grays. */
+  --ifm-color-white: #ffffff;
+  --ifm-color-black: #000000;
+  --ifm-color-emphasis-0: #ffffff;
+  --ifm-color-emphasis-100: #171614;
+  --ifm-color-emphasis-200: #201e1b;
+  --ifm-color-emphasis-300: var(--border-strong);
+  --ifm-color-emphasis-400: #4b4842;
+  --ifm-color-emphasis-500: #6f6c65;
+  --ifm-color-emphasis-600: var(--faint);
+  --ifm-color-emphasis-700: var(--muted);
+  --ifm-color-emphasis-800: #c4c0b8;
+  --ifm-color-emphasis-900: var(--text);
+  --ifm-color-emphasis-1000: #000000;
+  --ifm-hover-overlay: var(--panel-2);
+
+  /* Inverse text sits on ink, so it is the ink contrast, not white. */
+  --ifm-color-content-inverse: var(--accent-contrast);
+  --ifm-font-color-base-inverse: var(--accent-contrast);
+  --ifm-button-color: var(--accent-contrast);
+  --ifm-button-font-weight: 500;
+
+  /* Warm secondary-button scale (used by --outline and --secondary). */
+  --ifm-color-secondary: #201e1b;
+  --ifm-color-secondary-dark: #191816;
+  --ifm-color-secondary-darker: #141312;
+  --ifm-color-secondary-darkest: #0f0e0d;
+  --ifm-color-secondary-light: #292724;
+  --ifm-color-secondary-lighter: #33302c;
+  --ifm-color-secondary-lightest: #3d3934;
+
+  /* Primary is ink: buttons, active nav, focus, selections. */
+  --ifm-color-primary: var(--accent);
+  --ifm-color-primary-dark: #d6d2cb;
+  --ifm-color-primary-darker: #c4c0b9;
+  --ifm-color-primary-darkest: var(--muted);
+  --ifm-color-primary-light: #ffffff;
+  --ifm-color-primary-lighter: #ffffff;
+  --ifm-color-primary-lightest: #ffffff;
+  --ifm-color-primary-contrast-background: var(--accent);
+  --ifm-color-primary-contrast-foreground: var(--accent-contrast);
+
+  /* Status semantics are the grayscale vocabulary above. */
+  --ifm-color-success: var(--ok);
+  --ifm-color-success-dark: var(--border-strong);
+  --ifm-color-success-darker: var(--border-strong);
+  --ifm-color-success-darkest: var(--border);
+  --ifm-color-success-contrast-background: var(--ok-soft);
+  --ifm-color-success-contrast-foreground: var(--text);
+  --ifm-color-info: var(--info);
+  --ifm-color-info-dark: var(--border-strong);
+  --ifm-color-info-darker: var(--border-strong);
+  --ifm-color-info-darkest: var(--border);
+  --ifm-color-info-contrast-background: var(--info-soft);
+  --ifm-color-info-contrast-foreground: var(--text);
+  --ifm-color-warning: var(--warn);
+  --ifm-color-warning-dark: var(--border-strong);
+  --ifm-color-warning-darker: var(--border-strong);
+  --ifm-color-warning-darkest: var(--border);
+  --ifm-color-warning-contrast-background: var(--warn-soft);
+  --ifm-color-warning-contrast-foreground: var(--text);
+  --ifm-color-danger: var(--err);
+  --ifm-color-danger-dark: var(--border-strong);
+  --ifm-color-danger-darker: var(--border-strong);
+  --ifm-color-danger-darkest: var(--border);
+  --ifm-color-danger-contrast-background: var(--err-soft);
+  --ifm-color-danger-contrast-foreground: var(--text);
+
+  /* Type */
+  --ifm-font-family-base: var(--sans);
+  --ifm-font-family-monospace: var(--mono);
+  --ifm-heading-font-family: var(--sans);
+  --ifm-font-size-base: 100%;
+  --ifm-line-height-base: 1.68;
+  --ifm-leading-desktop: 1.55;
+  --ifm-leading: calc(var(--ifm-leading-desktop) * 1rem);
+  --ifm-heading-font-weight: 600;
+  --ifm-heading-line-height: 1.25;
+  --ifm-code-font-size: 0.875em;
+
+  /* Shape: crisp controls, panel-scale containers. */
+  --ifm-global-radius: var(--r-sm);
+  --ifm-global-border-width: 1px;
+  --ifm-code-border-radius: var(--r-sm);
+  --ifm-pre-border-radius: var(--r);
+  --ifm-card-border-radius: var(--r-lg);
+  --ifm-badge-border-radius: var(--r-sm);
+  --ifm-breadcrumb-border-radius: var(--r-sm);
+  --ifm-pagination-border-radius: var(--r-sm);
+  --ifm-pagination-nav-border-radius: var(--r);
+  --ifm-alert-border-radius: var(--r);
+  --ifm-alert-border-width: 1px;
+  --ifm-alert-border-left-width: 1px; /* DESIGN.md: no thick left tab */
+  --ifm-alert-shadow: none; /* elevation declared once: the border */
+  --ifm-alert-background-color: var(--panel-2);
+  --ifm-alert-border-color: var(--line-strong);
+  --ifm-alert-foreground-color: var(--text);
+  --ifm-alert-color: var(--text);
+
+  --ifm-global-shadow-lw: none;
+  --ifm-global-shadow-md: var(--shadow);
+  --ifm-global-shadow-tl: var(--shadow);
+
+  /* Structure */
+  --ifm-container-width: 1180px;
+  --ifm-navbar-height: 3.5rem;
+  --ifm-navbar-background-color: rgba(10, 10, 9, 0.72);
+  --ifm-navbar-shadow: none;
+  --ifm-navbar-link-color: var(--muted);
+  --ifm-navbar-link-hover-color: var(--text);
+  --ifm-navbar-link-active-color: var(--text);
+  --ifm-navbar-search-input-background-color: var(--panel-2);
+  --ifm-navbar-search-input-color: var(--text);
+  --ifm-navbar-search-input-placeholder-color: var(--faint);
+  --ifm-navbar-sidebar-width: 88vw;
+
+  --ifm-menu-color: var(--muted);
+  --ifm-menu-color-active: var(--text);
+  --ifm-menu-color-background-hover: var(--panel-2);
+  --ifm-menu-color-background-active: var(--panel-2);
+  --ifm-menu-link-padding-vertical: 0.4rem;
+  --ifm-menu-link-padding-horizontal: 0.6rem;
+  --ifm-menu-link-sublist-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16px" height="16px" viewBox="0 0 24 24"><path fill="%23a8a49d" d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>');
+  --ifm-menu-link-sublist-icon-filter: none;
+
+  --ifm-toc-border-color: var(--line);
+  --ifm-toc-link-color: var(--muted);
+  --ifm-toc-padding-horizontal: 0.7rem;
+  --ifm-toc-padding-vertical: 0.3rem;
+
+  --ifm-breadcrumb-color-active: var(--text);
+  --ifm-breadcrumb-item-background-active: transparent;
+  --ifm-breadcrumb-padding-horizontal: 0.5rem;
+  --ifm-breadcrumb-padding-vertical: 0.2rem;
+  --ifm-breadcrumb-separator: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" viewBox="0 0 256 256"><polygon fill="%236f6c65" points="79.093,0 48.907,30.187 146.72,128 48.907,225.813 79.093,255.813 207.093,128"/></svg>');
+
+  --ifm-code-background: var(--panel-2);
+  --ifm-code-color: var(--text);
+  --ifm-pre-background: var(--code-bg);
+  --ifm-pre-color: #d9d5cd;
+  --ifm-pre-line-height: 1.62;
+  --ifm-pre-padding: 1rem;
+
+  --ifm-table-background: transparent;
+  --ifm-table-stripe-background: transparent;
+  --ifm-table-border-color: var(--border);
+  --ifm-table-head-background: transparent;
+  --ifm-table-head-color: var(--faint);
+  --ifm-table-cell-color: var(--text);
+  --ifm-table-cell-padding: 0.7rem 0.85rem;
+
+  --ifm-blockquote-color: var(--muted);
+  --ifm-blockquote-border-color: var(--line);
+  --ifm-hr-background-color: var(--border);
+  --ifm-hr-margin-vertical: 2.25rem;
+
+  --ifm-link-color: var(--text);
+  --ifm-link-hover-color: var(--text);
+  --ifm-link-decoration: none;
+  --ifm-link-hover-decoration: none;
+
+  --ifm-dropdown-background-color: var(--panel);
+  --ifm-dropdown-link-color: var(--text);
+  --ifm-dropdown-hover-background-color: var(--panel-2);
+
+  --ifm-footer-background-color: var(--bg);
+  --ifm-footer-color: var(--muted);
+  --ifm-footer-link-color: var(--muted);
+  --ifm-footer-link-hover-color: var(--text);
+  --ifm-footer-title-color: var(--faint);
+
+  --ifm-tabs-color: var(--muted);
+  --ifm-tabs-color-active: var(--text);
+  --ifm-tabs-color-active-border: var(--text);
+  --ifm-tabs-padding-horizontal: 0.9rem;
+  --ifm-tabs-padding-vertical: 0.5rem;
+
+  --ifm-scrollbar-track-background-color: transparent;
+  --ifm-scrollbar-thumb-background-color: var(--border-strong);
+
+  --ifm-transition-fast: 160ms;
+  --ifm-transition-slow: 320ms;
+  --ifm-transition-timing-default: cubic-bezier(0.2, 0.6, 0.3, 1);
+
+  /* Search (local plugin) */
+  --search-local-modal-background: var(--panel);
+  --search-local-modal-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 24px 48px -24px rgba(0, 0, 0, 0.9);
+  --search-local-modal-width: 520px;
+  --search-local-hit-background: transparent;
+  --search-local-hit-shadow: none;
+  --search-local-hit-color: var(--text);
+  --search-local-hit-active-color: var(--accent-contrast);
+  --search-local-highlight-color: var(--accent);
+  --search-local-muted-color: var(--faint);
+  --search-local-hit-height: 3.1rem;
+  --search-local-spacing: 10px;
 }
+
+html[data-theme='light'] {
+  --ifm-color-emphasis-0: #ffffff;
+  --ifm-color-emphasis-100: #f4f2ee;
+  --ifm-color-emphasis-200: #eae7e1;
+  --ifm-color-emphasis-300: var(--border-strong);
+  --ifm-color-emphasis-400: #b8b3a9;
+  --ifm-color-emphasis-500: #8f8b84;
+  --ifm-color-emphasis-600: var(--faint);
+  --ifm-color-emphasis-700: var(--muted);
+  --ifm-color-emphasis-800: #33312c;
+  --ifm-color-emphasis-900: var(--text);
+  --ifm-color-emphasis-1000: #000000;
+
+  --ifm-color-secondary: #f2f0ec;
+  --ifm-color-secondary-dark: #e3dfd8;
+  --ifm-color-secondary-darker: #d3cfc6;
+  --ifm-color-secondary-darkest: #b8b3a9;
+  --ifm-color-secondary-light: #f7f5f2;
+  --ifm-color-secondary-lighter: #faf9f7;
+  --ifm-color-secondary-lightest: #ffffff;
+
+  --ifm-navbar-background-color: rgba(250, 249, 247, 0.78);
+  --ifm-menu-link-sublist-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16px" height="16px" viewBox="0 0 24 24"><path fill="%2357534c" d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>');
+  --ifm-breadcrumb-separator: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" viewBox="0 0 256 256"><polygon fill="%238f8b84" points="79.093,0 48.907,30.187 146.72,128 48.907,225.813 79.093,255.813 207.093,128"/></svg>');
+  --ifm-pre-color: #2a2825;
+  --search-local-modal-shadow: 0 1px 2px rgba(26, 25, 23, 0.06), 0 24px 48px -28px rgba(26, 25, 23, 0.24);
+}
+
+/* ---------------------------------------------------------------------------
+   3. Ground, browser surfaces, focus.
+   --------------------------------------------------------------------------- */
+
+body {
+  background-color: var(--bg);
+  /* One fixed radar of warm light so wide sections are not flat black. */
+  background-image: radial-gradient(1100px 520px at 82% -8%, rgba(236, 233, 228, 0.035), transparent 62%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+html[data-theme='light'] body {
+  background-image: radial-gradient(1100px 520px at 82% -8%, rgba(26, 25, 23, 0.025), transparent 62%);
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3733;
+  background-clip: padding-box;
+}
+
+html[data-theme='light'] ::-webkit-scrollbar-thumb:hover {
+  background: #b8b3a9;
+}
+
+/* Product focus treatment: an ink ring, not the browser default. */
+:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.theme-back-to-top-button {
+  border: 1px solid var(--line-strong) !important;
+  background-color: var(--panel) !important;
+  color: var(--text) !important;
+  box-shadow: var(--shadow) !important;
+}
+
+.theme-back-to-top-button:hover {
+  background-color: var(--panel-2) !important;
+}
+
+/* ---------------------------------------------------------------------------
+   4. Typography — the reading layer.
+   --------------------------------------------------------------------------- */
+
+.theme-doc-markdown,
+.markdown {
+  --ifm-h1-vertical-rhythm-top: 2.25;
+  --ifm-h2-vertical-rhythm-top: 2.1;
+  --ifm-h3-vertical-rhythm-top: 1.5;
+  --ifm-heading-vertical-rhythm-top: 1.25;
+  --ifm-h1-vertical-rhythm-bottom: 1;
+  --ifm-heading-vertical-rhythm-bottom: 0.85;
+}
+
+.theme-doc-markdown h1,
+.theme-doc-markdown > header > h1 {
+  --ifm-h1-font-size: 2.5rem;
+  font-family: var(--serif);
+  font-weight: 500;
+  letter-spacing: -0.021em;
+  line-height: 1.1;
+}
+
+.theme-doc-markdown.markdown > h2 {
+  --ifm-h2-font-size: 1.45rem;
+  letter-spacing: -0.012em;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--border);
+}
+
+.theme-doc-markdown.markdown > h3 {
+  --ifm-h3-font-size: 1.12rem;
+  letter-spacing: -0.008em;
+}
+
+.theme-doc-markdown.markdown > h4 {
+  --ifm-h4-font-size: 0.98rem;
+}
+
+.theme-doc-markdown strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.markdown > p,
+.markdown > ul,
+.markdown > ol,
+.markdown > table,
+.markdown > blockquote {
+  margin-bottom: 1.1rem;
+}
+
+.markdown li > p {
+  margin-bottom: 0.5rem;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 1.35rem;
+}
+
+.markdown li::marker {
+  color: var(--faint);
+}
+
+.markdown > ul li::marker {
+  color: var(--muted);
+}
+
+/* Links carry a hairline underline that brightens on hover — the ink system
+   has no second hue to distinguish a link with. */
+.theme-doc-markdown a:not(.hash-link):not(.card) {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+  transition: text-decoration-color var(--ifm-transition-fast) var(--ifm-transition-timing-default);
+}
+
+.theme-doc-markdown a:not(.hash-link):not(.card):hover {
+  text-decoration-color: var(--text);
+}
+
+.theme-doc-markdown .hash-link {
+  color: var(--faint);
+  text-decoration: none;
+  padding-left: 0.35em;
+  font-weight: 400;
+}
+
+.theme-doc-markdown .hash-link:hover {
+  color: var(--text);
+}
+
+.markdown hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: none;
+}
+
+.markdown blockquote {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 0.85rem 1rem;
+  color: var(--muted);
+}
+
+.markdown blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   5. Navbar — translucent console topbar with a hairline base.
+   --------------------------------------------------------------------------- */
 
 .navbar {
   border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+}
+
+.navbar__inner {
+  gap: 0.25rem;
+}
+
+.navbar__brand {
+  gap: 0.55rem;
+  margin-right: 1.25rem;
+}
+
+.navbar__logo {
+  height: 1.5rem;
+  width: 1.5rem;
+}
+
+.navbar__title {
+  font-size: 0.98rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.navbar__link {
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--r-sm);
+  transition: background-color var(--ifm-transition-fast) var(--ifm-transition-timing-default),
+    color var(--ifm-transition-fast) var(--ifm-transition-timing-default);
+}
+
+.navbar__link--active,
+.navbar__link:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.navbar__items--right .navbar__link {
+  padding: 0.35rem 0.55rem;
+}
+
+.navbar__toggle {
+  color: var(--muted);
+}
+
+.navbar__toggle:hover {
+  color: var(--text);
+}
+
+.navbar__search {
+  margin-left: 0.5rem;
+}
+
+.navbar__search-input {
+  border: 1px solid var(--line) !important;
+  border-radius: var(--r-sm) !important;
+  height: 2.1rem;
+  padding-left: 2.1rem;
+  width: 13rem;
+  font-size: 0.85rem;
+  transition: border-color var(--ifm-transition-fast) var(--ifm-transition-timing-default),
+    background-color var(--ifm-transition-fast) var(--ifm-transition-timing-default);
+}
+
+.navbar__search-input:hover {
+  border-color: var(--line-strong) !important;
+}
+
+.navbar__search-input:focus {
+  border-color: var(--text) !important;
+  box-shadow: var(--ring);
+  outline: none;
+}
+
+.navbar__search-input::placeholder {
+  color: var(--faint);
+}
+
+/* Mobile / collapsed sidebar shell */
+.navbar-sidebar {
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+
+.navbar-sidebar__brand {
+  border-bottom: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.navbar-sidebar__items {
+  background: transparent;
+}
+
+.menu__list .menu__list {
+  border-left: 1px solid var(--line);
+  margin-left: 0.6rem;
+  padding-left: 0.35rem;
+}
+
+/* ---------------------------------------------------------------------------
+   5b. Buttons and cards — the product's embedded-control vocabulary.
+   --------------------------------------------------------------------------- */
+
+.button {
+  border-radius: var(--r-sm);
+  font-weight: 500;
+  transition: background-color var(--ifm-transition-fast) var(--ifm-transition-timing-default),
+    border-color var(--ifm-transition-fast) var(--ifm-transition-timing-default),
+    color var(--ifm-transition-fast) var(--ifm-transition-timing-default),
+    transform var(--ifm-transition-fast) var(--ifm-transition-timing-default);
+}
+
+.button:active {
+  transform: scale(0.98);
+}
+
+/* Embedded control: a panel fill with a hairline edge, never an outlined box. */
+.button--secondary,
+.button--secondary.button--outline,
+.button--outline {
+  --ifm-button-background-color: var(--panel-2);
+  --ifm-button-border-color: var(--line-strong);
+  --ifm-button-color: var(--text);
+  background-color: var(--panel-2);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.button--secondary:hover,
+.button--secondary.button--outline:hover,
+.button--outline:hover {
+  background-color: var(--elev);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/* The only solid ink block. */
+.button--primary {
+  --ifm-button-background-color: var(--accent);
+  --ifm-button-border-color: var(--accent);
+  --ifm-button-color: var(--accent-contrast);
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.button--primary:hover {
+  background-color: var(--text);
+  border-color: var(--text);
+  color: var(--accent-contrast);
+}
+
+.card {
+  background-color: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: none;
+  transition: border-color var(--ifm-transition-fast) var(--ifm-transition-timing-default),
+    background-color var(--ifm-transition-fast) var(--ifm-transition-timing-default);
+}
+
+.card:hover {
+  border-color: var(--border-strong);
+  background-color: var(--panel-2);
+}
+
+.card h2,
+.card h3 {
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.35rem;
+}
+
+.card p {
+  font-size: 0.86rem;
+  color: var(--muted);
+  margin-bottom: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   6. Sidebar — the product's nav: muted items, panel fill, ink rule.
+   --------------------------------------------------------------------------- */
+
+.theme-doc-sidebar-container {
+  border-right: 1px solid var(--border) !important;
+}
+
+.theme-doc-sidebar-menu {
+  padding: 1.1rem 0.7rem;
+  font-size: 0.875rem;
+}
+
+.menu__link {
+  font-weight: 500;
+  border-radius: var(--r-sm);
+  transition: background-color var(--ifm-transition-fast) var(--ifm-transition-timing-default),
+    color var(--ifm-transition-fast) var(--ifm-transition-timing-default);
+}
+
+.menu__link:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.menu__link--active,
+.menu__link--active:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+/* Signature: a short centred ink rule at the active item's leading edge —
+   never a full-height bar, which reads as a bracket inside the pill radius. */
+.theme-doc-sidebar-menu .menu__link--active:not(.menu__link--sublist) {
+  position: relative;
+}
+
+.theme-doc-sidebar-menu .menu__link--active:not(.menu__link--sublist)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2px;
+  height: 58%;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+  transform: translateY(-50%);
+}
+
+/* Category labels read as console section labels. */
+.menu__link--sublist {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  padding-top: 0.6rem;
+  padding-bottom: 0.45rem;
+}
+
+.menu__link--sublist:hover {
+  color: var(--text);
+  background: transparent;
+}
+
+.menu__link--sublist.menu__link--active {
+  background: transparent;
+  color: var(--text);
+}
+
+.menu__list-item-collapsible:hover {
+  background: transparent;
+}
+
+.menu__caret::before {
+  background: var(--ifm-menu-link-sublist-icon) 50% / 1.4rem 1.4rem no-repeat;
+}
+
+.menu__list-item--collapsed .menu__link--sublist-caret::after,
+.menu__link--sublist-caret::after {
+  opacity: 0.7;
+}
+
+.theme-doc-sidebar-item-link-level-2 > .menu__link,
+.theme-doc-sidebar-item-link-level-3 > .menu__link {
+  font-size: 0.84rem;
+}
+
+.theme-doc-sidebar-item-category-level-1 > .menu__list-item-collapsible > .menu__link {
+  color: var(--faint);
+}
+
+/* ---------------------------------------------------------------------------
+   7. Table of contents (desktop + mobile) and breadcrumbs.
+   --------------------------------------------------------------------------- */
+
+.table-of-contents {
+  font-size: 0.8rem;
+  padding-left: 0.85rem;
+  border-left: 1px solid var(--line);
+}
+
+.table-of-contents__link {
+  display: block;
+  padding: 0.25rem 0;
+  color: var(--muted);
+  border-radius: 0;
+  transition: color var(--ifm-transition-fast) var(--ifm-transition-timing-default);
+}
+
+.table-of-contents__link:hover {
+  color: var(--text);
+}
+
+.table-of-contents__link--active,
+.table-of-contents__link--active code {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.table-of-contents ul {
+  padding-left: 0.85rem;
+}
+
+.table-of-contents__left-border {
+  border-left: 1px solid var(--line);
+}
+
+.theme-doc-toc-desktop::before {
+  content: 'On this page';
+  display: block;
+  margin: 0 0 0.5rem 0.85rem;
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--faint);
+}
+
+.theme-doc-breadcrumbs {
+  margin-bottom: 1.1rem;
+}
+
+.breadcrumbs__item .breadcrumbs__link {
+  background: transparent;
+  color: var(--faint);
+  font-size: 0.76rem;
+  font-weight: 500;
+  padding: 0;
+}
+
+.breadcrumbs__link:hover {
+  color: var(--text);
+  background: transparent;
+}
+
+.breadcrumbs__item--active .breadcrumbs__link {
+  color: var(--muted);
+  background: transparent;
+}
+
+.breadcrumbs__link::after {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   8. Code — recessed slabs with an uppercase language rail.
+   --------------------------------------------------------------------------- */
+
+.markdown code {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 0.1em 0.35em;
+  font-size: 0.875em;
+  color: var(--text);
+}
+
+.markdown a code {
+  color: inherit;
+  border-color: var(--line-strong);
+}
+
+.markdown h2 code,
+.markdown h3 code {
+  font-size: 0.95em;
+  border-color: transparent;
+  background: transparent;
+  padding: 0;
+}
+
+.markdown table code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.theme-code-block {
+  position: relative;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  box-shadow: none !important; /* elevation declared once: the hairline */
+  margin-bottom: 1.25rem;
+}
+
+.theme-code-block pre {
+  background: transparent !important;
+  border: 0;
+}
+
+/* Language rail: labels the slab the way the product labels a console pane,
+   and disambiguates the two install commands on the docs index. */
+.theme-code-block::before {
+  content: '';
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 0.68rem 0.95rem;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+  pointer-events: none;
+}
+
+.theme-code-block.language-powershell::before { display: block; content: 'PowerShell'; }
+.theme-code-block.language-bash::before { display: block; content: 'Shell'; }
+.theme-code-block.language-yaml::before { display: block; content: 'YAML'; }
+.theme-code-block.language-json::before { display: block; content: 'JSON'; }
+.theme-code-block.language-go::before { display: block; content: 'Go'; }
+.theme-code-block.language-docker::before { display: block; content: 'Dockerfile'; }
+.theme-code-block.language-text::before { display: block; content: 'Text'; }
+
+.theme-code-block.language-powershell pre,
+.theme-code-block.language-bash pre,
+.theme-code-block.language-yaml pre,
+.theme-code-block.language-json pre,
+.theme-code-block.language-go pre,
+.theme-code-block.language-docker pre,
+.theme-code-block.language-text pre {
+  padding-top: calc(var(--ifm-pre-padding) + 1.15rem);
+}
+
+.theme-code-block button.clean-btn {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  color: var(--muted);
+  padding: 0.4rem;
+  transition: opacity var(--ifm-transition-fast) var(--ifm-transition-timing-default),
+    color var(--ifm-transition-fast) var(--ifm-transition-timing-default),
+    border-color var(--ifm-transition-fast) var(--ifm-transition-timing-default);
+}
+
+.theme-code-block button.clean-btn:hover {
+  color: var(--text);
+  border-color: var(--text);
+}
+
+.theme-code-block button.clean-btn svg {
+  color: inherit;
+}
+
+.theme-code-block-highlighted-line {
+  background: var(--accent-soft) !important;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* ---------------------------------------------------------------------------
+   9. Tables — hairline rows, console headers, tabular numerals.
+   --------------------------------------------------------------------------- */
+
+.markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.markdown table thead {
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.markdown table thead th {
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  color: var(--faint);
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  white-space: nowrap;
+}
+
+.markdown table td,
+.markdown table th {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  background: transparent;
+}
+
+.markdown table tbody tr {
+  transition: background-color var(--ifm-transition-fast) var(--ifm-transition-timing-default);
+}
+
+.markdown table tbody tr:hover {
+  background: var(--panel-2);
+}
+
+.markdown table tbody tr:last-child td {
+  border-bottom: 1px solid var(--border);
+}
+
+.markdown table td:first-child {
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------------------
+   10. Admonitions — monochrome; failure is the only inverted chip.
+   --------------------------------------------------------------------------- */
+
+/* Read the variant vars rather than hardcoding, so .alert--success and friends
+   can retint through the custom properties Infima already uses. */
+.alert {
+  --ifm-alert-shadow: none;
+  border-color: var(--ifm-alert-border-color);
+  background-color: var(--ifm-alert-background-color);
+  color: var(--ifm-alert-foreground-color);
+}
+
+.alert__heading {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+
+.alert--success {
+  --ifm-alert-background-color: var(--ok-soft);
+}
+.alert--info {
+  --ifm-alert-background-color: var(--info-soft);
+}
+.alert--warning {
+  --ifm-alert-background-color: var(--warn-soft);
+}
+
+/* The single inverted chip in the whole system. */
+.alert--danger,
+.alert--danger .alert__heading {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.alert--danger a,
+.alert--danger code {
+  color: var(--accent-contrast);
+}
+
+.alert--danger code {
+  background: rgba(10, 10, 9, 0.12);
+  border-color: rgba(10, 10, 9, 0.24);
+}
+
+/* ---------------------------------------------------------------------------
+   11. Mermaid diagrams — slab containers, warm grayscale internals.
+   --------------------------------------------------------------------------- */
+
+.docusaurus-mermaid-container {
+  position: relative;
+  margin: 0 0 1.5rem;
+  padding: 1.4rem 1rem 1rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow-x: auto;
+}
+
+.docusaurus-mermaid-container svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+  background: transparent !important;
+}
+
+.docusaurus-mermaid-container text,
+.docusaurus-mermaid-container .label,
+.docusaurus-mermaid-container .nodeLabel,
+.docusaurus-mermaid-container .edgeLabel {
+  font-family: var(--sans) !important;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container .node rect,
+[data-theme='dark'] .docusaurus-mermaid-container .node circle,
+[data-theme='dark'] .docusaurus-mermaid-container .node polygon,
+[data-theme='dark'] .docusaurus-mermaid-container .node path {
+  fill: var(--panel-2) !important;
+  stroke: var(--border-strong) !important;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container .cluster rect {
+  fill: var(--bg) !important;
+  stroke: var(--border) !important;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container .cluster-label,
+[data-theme='dark'] .docusaurus-mermaid-container .cluster span {
+  color: var(--muted) !important;
+  fill: var(--muted) !important;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container .edgePath .path,
+[data-theme='dark'] .docusaurus-mermaid-container .flowchart-link,
+[data-theme='dark'] .docusaurus-mermaid-container .messageLine0,
+[data-theme='dark'] .docusaurus-mermaid-container .messageLine1 {
+  stroke: var(--muted) !important;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container .marker,
+[data-theme='dark'] .docusaurus-mermaid-container marker path {
+  fill: var(--muted) !important;
+  stroke: var(--muted) !important;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container .edgeLabel rect,
+[data-theme='dark'] .docusaurus-mermaid-container .edgeLabel foreignObject div {
+  fill: var(--panel) !important;
+  background-color: var(--panel) !important;
+  color: var(--text) !important;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container .nodeLabel,
+[data-theme='dark'] .docusaurus-mermaid-container .nodeLabel p,
+[data-theme='dark'] .docusaurus-mermaid-container .label {
+  color: var(--text) !important;
+  fill: var(--text) !important;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container .actor {
+  fill: var(--panel-2) !important;
+  stroke: var(--border-strong) !important;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container .note {
+  fill: var(--panel-2) !important;
+  stroke: var(--border-strong) !important;
+}
+
+/* ---------------------------------------------------------------------------
+   12. Doc footer, pagination, edit link, back-to-top.
+   --------------------------------------------------------------------------- */
+
+.theme-doc-footer {
+  margin-top: 2.5rem;
+}
+
+.theme-doc-footer-edit-meta-row {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+  font-size: 0.8rem;
+}
+
+.theme-edit-this-page {
+  color: var(--muted);
+}
+
+.theme-edit-this-page:hover {
+  color: var(--text);
+}
+
+.theme-last-updated {
+  color: var(--faint);
+  font-style: normal;
+}
+
+.pagination-nav {
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.pagination-nav__link {
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 0.9rem 1rem;
+  background: transparent;
+  transition: border-color var(--ifm-transition-fast) var(--ifm-transition-timing-default),
+    background-color var(--ifm-transition-fast) var(--ifm-transition-timing-default);
+}
+
+.pagination-nav__link:hover {
+  border-color: var(--border-strong);
+  background: var(--panel);
+}
+
+.pagination-nav__sublabel {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  margin-bottom: 0.35rem;
+}
+
+.pagination-nav__label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------------------
+   13. Footer.
+   --------------------------------------------------------------------------- */
+
+.footer--dark {
+  --ifm-footer-background-color: var(--bg);
+  --ifm-footer-color: var(--muted);
+  --ifm-footer-link-color: var(--muted);
+  --ifm-footer-link-hover-color: var(--text);
+  --ifm-footer-title-color: var(--faint);
 }
 
 .footer {
   border-top: 1px solid var(--border);
+  background-image: none;
 }
 
-.card {
-  border: 1px solid var(--border);
-  border-radius: 8px;
+.footer__title {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
 }
 
-/* Status vocabulary: failure is the only inverted chip. */
-.badge--danger {
-  background: #ece9e4;
-  color: #0a0a09;
-  border: 1px solid #ece9e4;
+.footer__link-item {
+  font-size: 0.86rem;
 }
 
-code {
-  border: 1px solid rgba(236, 233, 228, 0.08);
-  border-radius: 4px;
+.footer__copyright {
+  font-size: 0.8rem;
+  color: var(--faint);
+  margin-top: 1.75rem;
 }
 
-/* Visible focus for keyboard operators. */
-a:focus-visible,
-button:focus-visible {
-  outline: 2px solid #ece9e4;
-  outline-offset: 2px;
+/* ---------------------------------------------------------------------------
+   14. Search results.
+   --------------------------------------------------------------------------- */
+
+.navbar__search .dropdownMenu {
+  border: 1px solid var(--border-strong);
+}
+
+.navbar__search .dropdownMenu .suggestion {
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+}
+
+.navbar__search .dropdownMenu .suggestion.cursor {
+  border-color: var(--accent);
+}
+
+.navbar__search .dropdownMenu .suggestion.cursor .hitWrapper mark {
+  text-decoration-color: var(--accent-contrast);
+}
+
+/* ---------------------------------------------------------------------------
+   15. Docs home.
+   The index is a Read landing, not a marketing hero: a wide opening, then the
+   install commands and the two reading paths.
+   --------------------------------------------------------------------------- */
+
+.docs-doc-id-index .theme-doc-markdown > header > h1 {
+  --ifm-h1-font-size: 2.9rem;
+}
+
+.docs-doc-id-index .theme-doc-markdown > p:first-of-type {
+  font-size: 1.1rem;
+  color: var(--muted);
+  max-width: 60ch;
+}
+
+.docs-doc-id-index .theme-doc-markdown > h2 {
+  margin-top: 3rem;
+}
+
+.docs-doc-id-index .theme-doc-markdown > ul {
+  list-style: none;
+  padding-left: 0;
+  margin-left: 0;
+}
+
+.docs-doc-id-index .theme-doc-markdown > ul > li {
+  position: relative;
+  padding-left: 1.1rem;
+  margin-bottom: 0.5rem;
+}
+
+.docs-doc-id-index .theme-doc-markdown > ul > li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.62em;
+  width: 6px;
+  height: 1px;
+  background: var(--border-strong);
+}
+
+/* ---------------------------------------------------------------------------
+   16. Responsive.
+   --------------------------------------------------------------------------- */
+
+@media (max-width: 996px) {
+  .theme-doc-sidebar-menu {
+    padding: 0.75rem 0.5rem;
+  }
+
+  .theme-doc-markdown h1,
+  .theme-doc-markdown > header > h1,
+  .docs-doc-id-index .theme-doc-markdown > header > h1 {
+    --ifm-h1-font-size: 2.05rem;
+  }
+
+  .theme-doc-markdown.markdown > h2 {
+    --ifm-h2-font-size: 1.3rem;
+  }
+
+  .theme-doc-sidebar-container {
+    border-right: 0 !important;
+  }
+}
+
+@media (max-width: 576px) {
+  .theme-doc-markdown h1,
+  .theme-doc-markdown > header > h1,
+  .docs-doc-id-index .theme-doc-markdown > header > h1 {
+    --ifm-h1-font-size: 1.85rem;
+  }
+
+  .navbar__title {
+    display: none;
+  }
+
+  .markdown table {
+    font-size: 0.84rem;
+  }
+
+  .docusaurus-mermaid-container {
+    padding: 1rem 0.5rem 0.5rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     transition: none !important;
     animation: none !important;
   }

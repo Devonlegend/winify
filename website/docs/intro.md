@@ -2,12 +2,12 @@
 id: intro
 title: Introduction
 sidebar_position: 1
-description: What DevOps Control Center is, what it owns, and what it deliberately does not do.
+description: What Winify is, what it owns, and what it deliberately does not do.
 ---
 
 # Introduction
 
-DevOps Control Center (`winify`) is a **self-hosted deployment platform for environments that mix Windows and Docker**. It owns the deployment lifecycle: it connects directly to target servers, builds and deploys on a signed webhook or a manual action, fronts each deployment with a reverse proxy and automatic TLS, and polls metrics over the same connections.
+Winify is a **self-hosted deployment platform for environments that mix Windows and Docker**. It owns the deployment lifecycle: it connects directly to target servers, builds and deploys on a signed webhook or a manual action, fronts each deployment with a reverse proxy and automatic TLS, and polls metrics over the same connections.
 
 It is **not** a dashboard that watches an external CI system. GitHub Actions is at most an optional trigger, never the engine.
 

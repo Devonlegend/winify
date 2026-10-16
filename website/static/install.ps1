@@ -194,7 +194,7 @@ bootstrap:
 
 # --- install and start the service ---
 $bin = '"' + $exe + '" serve -config "' + $Config + '"'
-New-Service -Name $ServiceName -BinaryPathName $bin -StartupType Automatic -DisplayName "winify (DevOps Control Center)" | Out-Null
+New-Service -Name $ServiceName -BinaryPathName $bin -StartupType Automatic -DisplayName "Winify" | Out-Null
 & sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null
 Start-Service -Name $ServiceName
 

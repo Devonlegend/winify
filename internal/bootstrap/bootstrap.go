@@ -1,5 +1,5 @@
 // Package bootstrap provisions the machine winify is installed on (and, later,
-// remote Windows servers) so it is immediately usable as a control center and
+// remote Windows servers) so it is immediately usable as a Winify console and
 // a native-service deploy target: directories, NSSM, WinRM, the winify service
 // itself and Caddy.
 //

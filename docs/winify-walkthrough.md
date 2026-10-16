@@ -8,7 +8,7 @@
 
 ## 0. The 30-second pitch
 
-> **winify is a self-hosted DevOps Control Center that owns the whole deployment
+> **Winify is a self-hosted deployment platform that owns the whole deployment
 > lifecycle — for environments that mix Windows/IIS and Docker. You point it at a
 > git repo; it builds, deploys to your server, fronts it with an automatic HTTPS
 > URL, monitors it, and keeps a command-level audit trail. It runs as one Go

@@ -24,7 +24,7 @@ SolidCompression=yes
 PrivilegesRequired=admin
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
-UninstallDisplayName=winify (DevOps Control Center)
+UninstallDisplayName=Winify
 
 [Files]
 Source: "payload\winify.exe"; DestDir: "{app}"; Flags: ignoreversion

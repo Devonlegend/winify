@@ -1,4 +1,4 @@
-// Command control-center runs the DevOps Control Center server, and provides
+// Command control-center runs the Winify server, and provides
 // small admin subcommands for hashing the admin password and managing
 // encrypted credentials.
 //
@@ -124,7 +124,7 @@ func needsProvisioning(cfg config.Config, configPath string) bool {
 	return err != nil || !complete
 }
 
-// serve runs the control center until ctx is cancelled. It is shared by the
+// serve runs Winify until ctx is cancelled. It is shared by the
 // interactive and Windows-service entry points.
 func serve(cfg config.Config, configPath string, ctx context.Context) error {
 	if abs, err := filepath.Abs(configPath); err == nil {
