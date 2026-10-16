@@ -18,6 +18,8 @@ on:
       - 'scripts/sync-assistant-docs.sh'
       - 'internal/assistant/docs/**'
       - '.github/workflows/docs.yml'
+  # Allow manual re-deploys from the Actions UI (e.g. after DNS or cache changes).
+  workflow_dispatch:
 
 permissions:
   contents: read
