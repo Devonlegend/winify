@@ -10,6 +10,14 @@ This file is maintained by
 [release-please](https://github.com/googleapis/release-please); see
 [RELEASING.md](RELEASING.md).
 
+## [0.1.2](https://github.com/Devonlegend/winify/compare/v0.1.1...v0.1.2) (2026-10-16)
+
+
+### Documentation
+
+* lead with the problem Winify solves and fix the mobile nav ([c4c1c5d](https://github.com/Devonlegend/winify/commit/c4c1c5d0a696013097035706019131708986505a))
+* replace em dashes with commas and colons in prose ([732c7ee](https://github.com/Devonlegend/winify/commit/732c7eec1af465cd146a331b2280df7ce50c399e))
+
 ## [0.1.1](https://github.com/Devonlegend/winify/compare/v0.1.0...v0.1.1) (2026-10-16)
 
 
