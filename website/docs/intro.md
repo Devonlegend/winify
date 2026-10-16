@@ -2,14 +2,28 @@
 id: intro
 title: Introduction
 sidebar_position: 1
-description: What Winify is, what it owns, and what it deliberately does not do.
+description: The problem Winify solves for Windows deployments, what it owns, and what it deliberately does not do.
 ---
 
 # Introduction
 
-Winify is a **self-hosted deployment platform for environments that mix Windows and Docker**. It owns the deployment lifecycle: it connects directly to target servers, builds and deploys on a signed webhook or a manual action, fronts each deployment with a reverse proxy and automatic TLS, and polls metrics over the same connections.
+Winify is a **self-hosted deployment platform built for Windows and Docker environments**. It owns the deployment lifecycle: it connects directly to target servers, builds and deploys on a signed webhook or a manual action, fronts each deployment with a reverse proxy and automatic TLS, and polls metrics over the same connections.
 
 It is **not** a dashboard that watches an external CI system. GitHub Actions is at most an optional trigger, never the engine.
+
+## The problem
+
+Most deployment tooling was designed for Linux and containers. When production runs on Windows, on IIS sites, .NET services, or classic ASP, every practical option is some shade of painful:
+
+- a Jenkins box wired together with your own WinRM and PowerShell scripts,
+- a heavier release tool (Octopus, Azure DevOps agents, Ansible) that you now have to run and learn,
+- or the quiet default: RDP in, stop the service, copy the files across, start it again, and hope.
+
+The result is familiar. Deploys are manual and unaudited, rollbacks are best-effort, HTTPS depends on certificates somebody remembers to renew, and monitoring means installing an agent on every host. Containers and Kubernetes solve this well on Linux, but plenty of Windows workloads cannot be containerized at all: IIS applications, legacy .NET, and standalone Windows services.
+
+## What Winify is for
+
+Winify gives Windows the one-push workflow that Linux and Docker teams already take for granted, without asking you to containerize anything. It is self-hosted and agentless, and built so a single operator can ship and monitor a mixed Windows and Docker estate from one place.
 
 ## What it does
 
@@ -18,14 +32,14 @@ It is **not** a dashboard that watches an external CI system. GitHub Actions is 
 - Exposes a scoped **REST API at `/api/v1`** for automation and CI.
 - Verifies push webhooks per-project with HMAC and keeps **deploy history with rollback**.
 - Registers every successful deploy with **Caddy for automatic HTTPS** (Let's Encrypt, no certbot step).
-- Polls **CPU, memory, disk, uptime, and service state** over the existing SSH/WinRM connections — no agent to install.
+- Polls **CPU, memory, disk, uptime, and service state** over the existing SSH/WinRM connections, no agent to install.
 - Runs a **local assistant** (ChromaDB + Ollama) grounded in these guides plus live deploy/monitoring data. No cloud LLM.
 - Encrypts credentials with **AES-256-GCM**; never logs or returns them.
 - Records a **command-level audit log** of every remote command.
 
 ## The operator
 
-A single self-hosting operator who runs Windows and Linux/Docker workloads and wants one place to ship and monitor them. They arrive mid-task — ship an app, check whether a deploy succeeded, add a server — not to browse. V1 is **single admin, no RBAC**.
+A single self-hosting operator who runs Windows and Linux/Docker workloads and wants one place to ship and monitor them. They arrive mid-task, ship an app, check whether a deploy succeeded, add a server, not to browse. V1 is **single admin, no RBAC**.
 
 ## What it does not do (V1 scope)
 
@@ -40,14 +54,14 @@ If you need those, track them as V2. Do not work around their absence with manua
 
 ## Install in one line
 
-Windows (elevated PowerShell — downloads the latest GitHub Release, verifies
+Windows (elevated PowerShell, downloads the latest GitHub Release, verifies
 SHA-256, installs + starts the `winify` service):
 
 ```powershell
 irm https://winify.space/install.ps1 | iex
 ```
 
-Linux (systemd — installs to `/usr/local/bin/winify`, writes
+Linux (systemd, installs to `/usr/local/bin/winify`, writes
 `/etc/winify/config.yaml`, starts the service):
 
 ```bash
@@ -60,13 +74,13 @@ at the same first-run registration (loopback-first + one-time setup token).
 
 ## How to read these docs
 
-- **Quickstart** — go from zero to a live HTTPS URL.
-- **Concepts** — targets, lifecycle states, proxy/TLS/tunnel, monitoring, assistant.
-- **How-to** — task guides (add a server, wire a webhook, roll back).
-- **Reference** — exact `config.yaml` keys, `CC_*` env vars, CLI flags, API routes.
-- **Operations** — run winify itself in production (install, backup, upgrade).
-- **Security** — credential store, transport trust, web hardening.
-- **Troubleshooting / FAQ** — failure matrices that are never silent.
+- **Quickstart**: go from zero to a live HTTPS URL.
+- **Concepts**: targets, lifecycle states, proxy/TLS/tunnel, monitoring, assistant.
+- **How-to**: task guides (add a server, wire a webhook, roll back).
+- **Reference**: exact `config.yaml` keys, `CC_*` env vars, CLI flags, API routes.
+- **Operations**: run winify itself in production (install, backup, upgrade).
+- **Security**: credential store, transport trust, web hardening.
+- **Troubleshooting / FAQ**: failure matrices that are never silent.
 
 ## Next
 

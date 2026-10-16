@@ -6,7 +6,7 @@
 
 <p align="center">
   Self-hosted deployments for environments that mix Windows IIS/services and
-  Docker — git push to a live HTTPS URL.
+  Docker, git push to a live HTTPS URL.
 </p>
 
 <p align="center">
@@ -27,11 +27,23 @@ dashboard that watches an external CI system.
 - **Docs:** <https://winify.space>
 - **Source:** <https://github.com/Devonlegend/winify>
 
+## Why Winify
+
+Most deployment tooling assumes Linux and containers. When production runs on
+Windows, on IIS sites, .NET services, or classic ASP, the practical choices are
+a Jenkins box plus hand-written WinRM scripts, a heavier release tool to run and
+learn, or RDP and a manual file copy. Either way, deploys end up manual and
+unaudited, rollbacks are best-effort, and TLS and monitoring are per-host chores.
+Winify brings the one-push workflow Linux and Docker teams already take for
+granted to Windows, without containerizing anything: git push, build, deploy to
+a live HTTPS URL, monitor, and roll back from one self-hosted binary, with no
+agent on the target.
+
 ## Features
 
 - **In-dashboard management** of servers, projects and encrypted credentials;
   deploy from the UI or on a signed push webhook.
-- **Windows and Docker as first-class targets** — native service (`winsvc`),
+- **Windows and Docker as first-class targets**: native service (`winsvc`),
   IIS (`iis`), and Docker/Linux (`docker`) share one lifecycle.
 - **REST API with scoped tokens** (`/api/v1`) for automation and CI.
 - **Webhook-driven deploys** with per-project HMAC verification and deploy
@@ -41,7 +53,7 @@ dashboard that watches an external CI system.
 - **Automatic HTTPS** via Caddy's admin API; Let's Encrypt certificates are
   issued and renewed with no certbot step.
 - **Monitoring** of CPU, memory, disk, uptime and service state over the
-  existing connections — no agent to install.
+  existing connections, no agent to install.
 - **Local assistant** (ChromaDB + Ollama) grounded in the guides and live
   deploy/monitoring data. No cloud LLM.
 - **Encrypted credentials** (AES-256-GCM), never logged or returned by the API.

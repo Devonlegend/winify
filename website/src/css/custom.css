@@ -526,6 +526,17 @@ html[data-theme='light'] ::-webkit-scrollbar-thumb:hover {
 
 .navbar {
   border-bottom: 1px solid var(--border);
+}
+
+/* The blur lives on a pseudo-element. backdrop-filter on .navbar itself would
+   make it the containing block for the fixed mobile drawer and its backdrop,
+   collapsing both to the navbar's height and clipping the menu. */
+.navbar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   backdrop-filter: blur(12px) saturate(140%);
   -webkit-backdrop-filter: blur(12px) saturate(140%);
 }
@@ -1341,6 +1352,13 @@ html[data-theme='light'] ::-webkit-scrollbar-thumb:hover {
 
   .theme-doc-sidebar-container {
     border-right: 0 !important;
+  }
+
+  /* The search keycap hint (ctrl/K) is absolutely positioned at the input's
+     right edge and overlaps the placeholder once the input shrinks on narrow
+     navbars. It is meaningless on touch, so hide it below the desktop width. */
+  .navbar__search kbd {
+    display: none;
   }
 }
 
