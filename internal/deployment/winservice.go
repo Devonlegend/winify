@@ -494,10 +494,23 @@ func fileExistsScript(path string) string {
 		psQuote(path), psQuote("not found: "+path))
 }
 
+// fileHashScript prints the SHA-256 of path, or nothing when it is absent. It
+// computes the digest with System.Security.Cryptography instead of Get-FileHash:
+// some Windows PowerShell 5.1 hosts (notably Windows Server CI images) do not
+// expose the Get-FileHash cmdlet, which made verification fail with an opaque
+// "exit status 1".
 func fileHashScript(path string) string {
+	q := psQuote(path)
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'\n")
-	fmt.Fprintf(&b, "if (Test-Path -LiteralPath %s) { (Get-FileHash -Algorithm SHA256 -LiteralPath %s).Hash }\n", psQuote(path), psQuote(path))
+	fmt.Fprintf(&b, "if (Test-Path -LiteralPath %s) {\n", q)
+	fmt.Fprintf(&b, "  $fs = [IO.File]::OpenRead(%s)\n", q)
+	b.WriteString("  try {\n")
+	b.WriteString("    $sha = [Security.Cryptography.SHA256]::Create()\n")
+	b.WriteString("    try { ($sha.ComputeHash($fs) | ForEach-Object { $_.ToString('x2') }) -join '' }\n")
+	b.WriteString("    finally { $sha.Dispose() }\n")
+	b.WriteString("  } finally { $fs.Dispose() }\n")
+	b.WriteString("}\n")
 	return b.String()
 }
 

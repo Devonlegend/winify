@@ -264,7 +264,7 @@ func TestCaddyStepFromLocalSource(t *testing.T) {
 
 	hashCalls := 0
 	runner := &fakeRunner{outputs: func(cmd string) string {
-		if strings.Contains(cmd, "Get-FileHash") {
+		if strings.Contains(cmd, "ComputeHash") {
 			hashCalls++
 			if hashCalls == 1 {
 				return ""
@@ -351,7 +351,7 @@ func TestNSSMStepHashAware(t *testing.T) {
 	want := hex.EncodeToString(sum[:])
 
 	runner := &fakeRunner{outputs: func(cmd string) string {
-		if strings.Contains(cmd, "Get-FileHash") {
+		if strings.Contains(cmd, "ComputeHash") {
 			return want + "\n"
 		}
 		return ""

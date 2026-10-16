@@ -74,7 +74,7 @@ still override every path.
 | # | Step | What it does | Idempotency probe |
 | --- | --- | --- | --- |
 | 1 | `dirs` | Create the tree above; grant the service account modify rights | `Test-Path` each dir |
-| 2 | `nssm` | Ensure `tools\nssm.exe` (local `deploy.nssm_source` → else download + hash check) | `Get-FileHash` matches pin |
+| 2 | `nssm` | Ensure `tools\nssm.exe` (local `deploy.nssm_source` → else download + hash check) | SHA-256 matches pin |
 | 3 | `winrm` | `Enable-PSRemoting -Force`; set network profile Private if needed; firewall rule | service running + listener on 5985 |
 | 4 | `self-service` | Install **winify itself as a native Windows service** (`x/sys/windows/svc` + `sc.exe create`), auto-start, recovery | `sc query winify` |
 | 5 | `caddy` | Ensure `tools\caddy.exe` (pinned hash); write base Caddyfile; install Caddy service (NSSM); open 80/443 | service + config present |

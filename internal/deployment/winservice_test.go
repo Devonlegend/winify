@@ -141,7 +141,7 @@ func TestWindowsServiceUploadsNSSM(t *testing.T) {
 	hashCalls := 0
 	runner := &fakeRunner{outputs: func(cmd string) string {
 		switch {
-		case strings.Contains(cmd, "Get-FileHash"):
+		case strings.Contains(cmd, "ComputeHash"):
 			hashCalls++
 			if hashCalls == 1 {
 				return "" // not present yet on the target
@@ -194,7 +194,7 @@ func TestInstallServiceScriptClearsOptionalSettings(t *testing.T) {
 func TestEnsureNSSMFallsBackToTargetCopy(t *testing.T) {
 	// The configured source is missing, but the target already has nssm.exe.
 	runner := &fakeRunner{outputs: func(cmd string) string {
-		if strings.Contains(cmd, "Get-FileHash") {
+		if strings.Contains(cmd, "ComputeHash") {
 			return "abc123\n"
 		}
 		return ""
