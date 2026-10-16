@@ -53,7 +53,7 @@ jobs:
             $tokens = $null; $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count -gt 0) {
-              $errors | ForEach-Object { Write-Host "$f: $($_.Message) (line $($_.Extent.StartLineNumber))" }
+              $errors | ForEach-Object { Write-Host "${f}: $($_.Message) (line $($_.Extent.StartLineNumber))" }
               exit 1
             }
             Write-Host "$f parses cleanly"
