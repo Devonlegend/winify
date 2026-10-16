@@ -1,18 +1,49 @@
 name: Release
 
+# release-please owns tagging and the changelog. It runs on every push to main:
+# it keeps a "chore(main): release X.Y.Z" PR open, and when that PR is merged it
+# creates the tag and the GitHub Release. The build job below then attaches the
+# Windows/Linux artifacts in the same run.
+#
+# The tag is created with the workflow's GITHUB_TOKEN, which does not trigger a
+# separate workflow run, so the build must live here rather than on a tag push.
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build:
+  release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  build:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
 
       - uses: actions/setup-go@v5
         with:
@@ -20,34 +51,35 @@ jobs:
           cache: true
 
       - name: Build all targets
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
           set -euo pipefail
           mkdir -p dist
           # Windows controller/service binary (this is what install.ps1 fetches).
-          GOOS=windows GOARCH=amd64 go build -o "dist/winify-${{ github.ref_name }}-windows-amd64.exe" ./cmd/control-center
+          GOOS=windows GOARCH=amd64 go build -o "dist/winify-${TAG}-windows-amd64.exe" ./cmd/control-center
           # Linux controller binaries (this is what install.sh fetches).
           GOOS=linux GOARCH=amd64 go build -o dist/winify ./cmd/control-center
-          tar -czf "dist/winify-${{ github.ref_name }}-linux-amd64.tar.gz" -C dist winify
+          tar -czf "dist/winify-${TAG}-linux-amd64.tar.gz" -C dist winify
           rm dist/winify
           GOOS=linux GOARCH=arm64 go build -o dist/winify ./cmd/control-center
-          tar -czf "dist/winify-${{ github.ref_name }}-linux-arm64.tar.gz" -C dist winify
+          tar -czf "dist/winify-${TAG}-linux-arm64.tar.gz" -C dist winify
           rm dist/winify
-          cp packaging/install.sh "dist/install-${{ github.ref_name }}.sh"
-          cp packaging/install.ps1 "dist/install-${{ github.ref_name }}.ps1"
+          cp packaging/install.sh "dist/install-${TAG}.sh"
+          cp packaging/install.ps1 "dist/install-${TAG}.ps1"
 
       - name: Checksums
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
+          set -euo pipefail
           cd dist
-          sha256sum "winify-${{ github.ref_name }}-windows-amd64.exe" > "winify-${{ github.ref_name }}-windows-amd64.exe.sha256"
-          sha256sum "winify-${{ github.ref_name }}-linux-amd64.tar.gz" > "winify-${{ github.ref_name }}-linux-amd64.tar.gz.sha256"
-          sha256sum "winify-${{ github.ref_name }}-linux-arm64.tar.gz" > "winify-${{ github.ref_name }}-linux-arm64.tar.gz.sha256"
+          sha256sum "winify-${TAG}-windows-amd64.exe" > "winify-${TAG}-windows-amd64.exe.sha256"
+          sha256sum "winify-${TAG}-linux-amd64.tar.gz" > "winify-${TAG}-linux-amd64.tar.gz.sha256"
+          sha256sum "winify-${TAG}-linux-arm64.tar.gz" > "winify-${TAG}-linux-arm64.tar.gz.sha256"
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/winify-*-windows-amd64.exe
-            dist/winify-*-windows-amd64.exe.sha256
-            dist/winify-*-linux-*.tar.gz
-            dist/winify-*-linux-*.tar.gz.sha256
-          generate_release_notes: true
+      - name: Attach assets to the release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: gh release upload "$TAG" dist/* --clobber

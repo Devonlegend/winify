@@ -11,7 +11,7 @@ By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 - Report a reproducible bug (use the bug report template).
 - Propose a feature or a design change (use the feature request template).
-- Improve the documentation in [`website/docs/`](website/docs/) — it is the
+- Improve the documentation in [`website/docs/`](website/docs/): it is the
   canonical source for both the public site and the in-app assistant.
 - Fix a bug or land an agreed feature with tests.
 
@@ -79,7 +79,7 @@ Then keep the change focused:
 - Include tests for behavior changes; bugs should come with a regression test.
 - Update the docs when you change config keys, CLI flags, API routes, or any
   user-visible behavior.
-- Do not reformat or refactor unrelated code — it makes review harder.
+- Do not reformat or refactor unrelated code, it makes review harder.
 
 ## Coding guidelines
 
@@ -106,6 +106,9 @@ ci(docs): add website lockfile
 ```
 
 Common types: `feat`, `fix`, `docs`, `ci`, `chore`, `ui`, `refactor`, `test`.
+
+Commit types drive automated versioning and the changelog, so choose them
+deliberately. See [RELEASING.md](RELEASING.md).
 
 ## Pull request review
 
