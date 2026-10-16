@@ -83,7 +83,7 @@ func TestIISPipelineCreatesSiteAndPool(t *testing.T) {
 }
 
 func TestSyncRepoScriptTrustsDirectoryAndGuardsFailures(t *testing.T) {
-	script := syncRepoScript(`C:\control-center\app`, "https://example.com/app.git", "main")
+	script := syncRepoScript(`C:\control-center\app`, "https://example.com/app.git", "main", nil)
 	for _, want := range []string{
 		`-c safe.directory='C:\control-center\app'`,
 		"throw 'git fetch: exit ",

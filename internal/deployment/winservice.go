@@ -38,13 +38,20 @@ const (
 // executables as LocalSystem by default. Treat the credential as highly
 // privileged. Env values and the uploaded binary are kept out of the audit log.
 type windowsServiceTarget struct {
-	cfg    config.Config
-	runner Runner
+	cfg     config.Config
+	runner  Runner
+	secrets SecretResolver
 }
 
-// NewWindowsServiceTarget builds the native-service pipeline over an open Runner.
-func NewWindowsServiceTarget(cfg config.Config, runner Runner) Target {
-	return &windowsServiceTarget{cfg: cfg, runner: runner}
+// NewWindowsServiceTarget builds the native-service pipeline over an open
+// Runner. secrets resolves credential refs (WinRM at connection time; git
+// credentials at clone time).
+func NewWindowsServiceTarget(cfg config.Config, runner Runner, secrets ...SecretResolver) Target {
+	var s SecretResolver
+	if len(secrets) > 0 {
+		s = secrets[0]
+	}
+	return &windowsServiceTarget{cfg: cfg, runner: runner, secrets: s}
 }
 
 func (t *windowsServiceTarget) Close() error { return t.runner.Close() }
@@ -87,8 +94,17 @@ func (t *windowsServiceTarget) Deploy(ctx context.Context, job deployJob, logf l
 
 	logf("winsvc pipeline: repo=%s source=%s install=%s service=%s", repoDir, source, p.ServiceWorkDir, p.ServiceName)
 
-	// 1. Fetch the requested revision.
-	if _, err := execCmd(ctx, t.runner, syncRepoScript(repoDir, p.RepoURL, deployRevision(p, job.commit)), "git clone/fetch + checkout "+shortSHA(deployRevision(p, job.commit)), logf); err != nil {
+	// 1. Fetch the requested revision. A private repo credential (deploy key or
+	// token) is staged first; the key/token never appears in repo_url or logs.
+	gitAuth, err := PrepareGitAuth(ctx, t.runner, t.secrets, p, winPath(t.cfg.Deploy.IISWorkDir, p.ID+".gitkey"), true, logf)
+	if err != nil {
+		return "", err
+	}
+	syncCtx := ctx
+	if gitAuth.Sensitive() {
+		syncCtx = withAuditRedaction(ctx, "git clone/fetch + checkout (credential redacted)")
+	}
+	if _, err := execCmd(syncCtx, t.runner, syncRepoScript(repoDir, p.RepoURL, deployRevision(p, job.commit), gitAuth), "git clone/fetch + checkout "+shortSHA(deployRevision(p, job.commit)), logf); err != nil {
 		return "", fmt.Errorf("clone/checkout: %w", err)
 	}
 

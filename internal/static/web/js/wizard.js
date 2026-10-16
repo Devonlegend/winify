@@ -257,6 +257,7 @@
         { label: 'Repository', value: field('repo_url'), mono: true },
         { label: 'Branch', value: field('branch') || 'main', mono: true },
         { label: 'GitHub repo', value: field('github_repo'), mono: true, skip: !field('github_repo') },
+        { label: 'Git credential', value: field('git_credential_ref'), mono: true, skip: !field('git_credential_ref') },
         { label: 'Webhook', value: field('webhook_secret_ref'), mono: true, skip: !field('webhook_secret_ref') }
       ]));
     }
@@ -498,6 +499,7 @@
       body.set('repo_url', repo);
       body.set('branch', value('branch'));
       body.set('server_id', server);
+      body.set('git_credential_ref', value('git_credential_ref'));
       if (runtimeSelect && runtimeSelect.value) body.set('language', runtimeSelect.value);
 
       detectBtn.disabled = true;

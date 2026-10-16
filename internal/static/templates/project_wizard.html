@@ -70,6 +70,7 @@
         <label>Repository URL<input name="repo_url" id="wz-repo" value="{{if .Form}}{{.Form.RepoURL}}{{end}}" placeholder="https://github.com/you/app"></label>
         <label>Branch<input name="branch" value="{{if .Form}}{{.Form.Branch}}{{end}}" placeholder="main"></label>
         <label>GitHub repository (owner/repo, optional &mdash; enables App auto-webhook)<input name="github_repo" value="{{if .Form}}{{.Form.GitHubRepo}}{{end}}" placeholder="acme/app"></label>
+        <label>Git credential ref (private repos)<input name="git_credential_ref" value="{{if .Form}}{{.Form.GitCredentialRef}}{{end}}" placeholder="vault:app-git"></label>
         <label>Webhook secret ref<input name="webhook_secret_ref" value="{{if .Form}}{{.Form.WebhookSecretRef}}{{end}}" placeholder="vault:app-webhook"></label>
       </div>
     </section>

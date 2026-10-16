@@ -12,11 +12,12 @@ Secrets are never stored in plaintext. Add from the **Credentials** tab or CLI; 
 ./control-center cred list   # names only
 ```
 
-Reference from a server (`ssh_key_ref` / `credential_ref`) and from a project (`webhook_secret_ref`) as `vault:<name>`:
+Reference from a server (`ssh_key_ref` / `credential_ref`) and from a project (`webhook_secret_ref` / `git_credential_ref`) as `vault:<name>`:
 
 ```yaml
 ssh_key_ref: "vault:server-002-ssh"
 webhook_secret_ref: "vault:proj-001-webhook"
+git_credential_ref: "vault:proj-001-git"   # private repos: deploy key or HTTPS token
 ```
 
 ## Store

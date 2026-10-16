@@ -16,13 +16,19 @@ import (
 // & recycle app pool -> HTTP smoke test. Validation and backup happen before
 // any live change, so a bad build never takes the site down.
 type iisTarget struct {
-	cfg    config.Config
-	runner Runner
+	cfg     config.Config
+	runner  Runner
+	secrets SecretResolver
 }
 
-// NewIISTarget builds the IIS pipeline over an open Runner.
-func NewIISTarget(cfg config.Config, runner Runner) Target {
-	return &iisTarget{cfg: cfg, runner: runner}
+// NewIISTarget builds the IIS pipeline over an open Runner. secrets resolves
+// credential refs (WinRM at connection time; git credentials at clone time).
+func NewIISTarget(cfg config.Config, runner Runner, secrets ...SecretResolver) Target {
+	var s SecretResolver
+	if len(secrets) > 0 {
+		s = secrets[0]
+	}
+	return &iisTarget{cfg: cfg, runner: runner, secrets: s}
 }
 
 func (t *iisTarget) Close() error { return t.runner.Close() }
@@ -51,8 +57,17 @@ func (t *iisTarget) Deploy(ctx context.Context, job deployJob, logf loggerFunc) 
 
 	logf("iis pipeline: repo=%s source=%s physical=%s pool=%s", repoDir, source, p.IISPhysicalPath, p.IISAppPool)
 
-	// 1. Fetch the requested revision.
-	if _, err := execCmd(ctx, t.runner, syncRepoScript(repoDir, p.RepoURL, deployRevision(p, job.commit)), "git clone/fetch + checkout "+shortSHA(deployRevision(p, job.commit)), logf); err != nil {
+	// 1. Fetch the requested revision. A private repo credential (deploy key or
+	// token) is staged first; the key/token never appears in repo_url or logs.
+	gitAuth, err := PrepareGitAuth(ctx, t.runner, t.secrets, p, winPath(t.cfg.Deploy.IISWorkDir, p.ID+".gitkey"), true, logf)
+	if err != nil {
+		return "", err
+	}
+	syncCtx := ctx
+	if gitAuth.Sensitive() {
+		syncCtx = withAuditRedaction(ctx, "git clone/fetch + checkout (credential redacted)")
+	}
+	if _, err := execCmd(syncCtx, t.runner, syncRepoScript(repoDir, p.RepoURL, deployRevision(p, job.commit), gitAuth), "git clone/fetch + checkout "+shortSHA(deployRevision(p, job.commit)), logf); err != nil {
 		return "", fmt.Errorf("clone/checkout: %w", err)
 	}
 
@@ -352,17 +367,21 @@ func gitSafe(dir string) string {
 	return "-c safe.directory=" + psQuote(dir)
 }
 
-func syncRepoScript(repoDir, repoURL, commit string) string {
+func syncRepoScript(repoDir, repoURL, commit string, auth *GitAuth) string {
 	var b strings.Builder
 	checkout := gitCheckoutRef(commit)
+	opt := auth.gitOption(psQuote)
+	if opt != "" {
+		opt = " " + opt
+	}
 	b.WriteString("$ErrorActionPreference='Stop'\n")
 	fmt.Fprintf(&b, "New-Item -ItemType Directory -Force -Path %s | Out-Null\n", psQuote(repoDir))
 	fmt.Fprintf(&b, "if (Test-Path (Join-Path %s '.git')) {\n", psQuote(repoDir))
-	fmt.Fprintf(&b, "  git %s -C %s fetch --all --prune%s", gitSafe(repoDir), psQuote(repoDir), exitGuard("git fetch"))
-	fmt.Fprintf(&b, "  git %s -C %s checkout --force %s --%s", gitSafe(repoDir), psQuote(repoDir), psQuote(checkout), exitGuard("git checkout"))
+	fmt.Fprintf(&b, "  git%s %s -C %s fetch --all --prune%s", opt, gitSafe(repoDir), psQuote(repoDir), exitGuard("git fetch"))
+	fmt.Fprintf(&b, "  git%s %s -C %s checkout --force %s --%s", opt, gitSafe(repoDir), psQuote(repoDir), psQuote(checkout), exitGuard("git checkout"))
 	b.WriteString("} else {\n")
-	fmt.Fprintf(&b, "  git clone %s %s%s", psQuote(repoURL), psQuote(repoDir), exitGuard("git clone"))
-	fmt.Fprintf(&b, "  git %s -C %s checkout --force %s --%s", gitSafe(repoDir), psQuote(repoDir), psQuote(checkout), exitGuard("git checkout"))
+	fmt.Fprintf(&b, "  git%s clone %s %s%s", opt, psQuote(repoURL), psQuote(repoDir), exitGuard("git clone"))
+	fmt.Fprintf(&b, "  git%s %s -C %s checkout --force %s --%s", opt, gitSafe(repoDir), psQuote(repoDir), psQuote(checkout), exitGuard("git checkout"))
 	b.WriteString("}\n")
 	b.WriteString("git clean -fdx\n")
 	b.WriteString("git rev-parse HEAD\n")

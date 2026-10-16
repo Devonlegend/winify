@@ -72,6 +72,7 @@ Use **Projects → New** (guided wizard with smart defaults) or `POST /api/v1/pr
 | `health_path` | Must return 2xx/3xx, e.g. `/healthz` |
 | `disable_health_check` | `true` for workers/cron with no HTTP endpoint |
 | `webhook_secret_ref` | `vault:<name>` of the HMAC secret |
+| `git_credential_ref` | `vault:<name>` for private repos (see below) |
 | `env`, `build_env` | Runtime env vs build-time args; write-only in UI/API (`[redacted]`) |
 | `project_group`, `environment` | Coolify-style grouping; default when empty |
 | `github_repo` | `owner/repo` for GitHub App auto-registration |
@@ -125,3 +126,12 @@ Enable **Blue-green** (`iis_blue_green: true`) for near-zero downtime: build goe
 ```
 
 Reference by name (`ssh_key_ref` / `credential_ref` / `webhook_secret_ref`). Values are AES-256-GCM encrypted, decrypted only in memory at connection time.
+
+## Private repositories
+
+Set a project's `git_credential_ref` to a credential holding either:
+
+- an **SSH private key** (a GitHub/GitLab deploy key) — use it with an SSH repo URL (`git@github.com:org/app.git`); winify uploads the key to the target with owner-only permissions and points git at it, or
+- an **HTTPS access token** (a PAT) — use it with an HTTPS repo URL; the token is passed as an `http.extraHeader`, never embedded in the URL or logged.
+
+Either way the secret never appears in `repo_url`, deploy logs, or the audit log, and repository detection uses it too (pass `git_credential_ref` alongside `repo_url` in the Detect step).

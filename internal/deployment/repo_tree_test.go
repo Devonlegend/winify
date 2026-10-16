@@ -43,7 +43,7 @@ func TestRepoTreeListErrorIsReturned(t *testing.T) {
 
 func TestCloneShallowScript(t *testing.T) {
 	runner := &fakeRunner{}
-	if err := CloneShallow(context.Background(), runner, `C:\control-center\detect\local`, "https://example.com/app.git", "main", nil); err != nil {
+	if err := CloneShallow(context.Background(), runner, `C:\control-center\detect\local`, "https://example.com/app.git", "main", nil, nil); err != nil {
 		t.Fatalf("CloneShallow: %v", err)
 	}
 	cmd := runner.joined()
@@ -56,7 +56,7 @@ func TestCloneShallowScript(t *testing.T) {
 
 func TestCloneShallowWithoutBranch(t *testing.T) {
 	runner := &fakeRunner{}
-	if err := CloneShallow(context.Background(), runner, `C:\x`, "url", "", nil); err != nil {
+	if err := CloneShallow(context.Background(), runner, `C:\x`, "url", "", nil, nil); err != nil {
 		t.Fatalf("CloneShallow: %v", err)
 	}
 	if strings.Contains(runner.joined(), "--branch") {

@@ -69,7 +69,8 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
     "domain": "myapp.example.com",
     "port": 8080,
     "health_path": "/healthz",
-    "webhook_secret_ref": "vault:my-app-webhook"
+    "webhook_secret_ref": "vault:my-app-webhook",
+    "git_credential_ref": "vault:my-app-git"
   }' \
   https://cc.example.com/api/v1/projects
 ```
