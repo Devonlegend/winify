@@ -1,0 +1,82 @@
+name: Bug report
+description: Something in winify is broken or behaves incorrectly.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Before you continue, please make sure this is not
+        a security issue — those go through [SECURITY.md](https://github.com/Devonlegend/winify/blob/main/SECURITY.md).
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checks
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The winify version or the commit you are running.
+      placeholder: v0.1.0 or e7155bd
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install winify?
+      options:
+        - Windows installer (install.ps1)
+        - Linux installer (install.sh)
+        - Built from source
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: Host and target OS
+      description: Where winify runs and where it deploys.
+      placeholder: winify on Windows Server 2022, target IIS on Windows Server 2019
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what actually happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or errors
+      description: >
+        Paste the error banner, the deploy log, or the service log. Remove
+        secrets, hostnames, and credentials first.
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: >
+        Paste the relevant `config.yaml` keys (redact credentials) if the issue
+        involves configuration.
+      render: yaml
+    validations:
+      required: false

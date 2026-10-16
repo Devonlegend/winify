@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://winify.space
+    about: Install, configure, and operate winify.
+  - name: Troubleshooting
+    url: https://winify.space/troubleshooting/
+    about: Failure matrix and FAQ for common problems.
+  - name: Security vulnerability
+    url: https://github.com/Devonlegend/winify/security/advisories/new
+    about: Report a security issue privately. Do not open a public issue.

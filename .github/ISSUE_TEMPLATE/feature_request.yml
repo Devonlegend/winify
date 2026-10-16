@@ -1,0 +1,54 @@
+name: Feature request
+description: Suggest an idea or improvement for winify.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [documentation](https://winify.space) and existing issues
+        first. Some capabilities are deliberately deferred to v2 — see the
+        [introduction](https://winify.space/intro) for the current scope.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checks
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the need, not the implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which target or area does this touch?
+      options:
+        - Windows IIS
+        - Windows service (winsvc)
+        - Docker/Linux
+        - Dashboard / UI
+        - REST API
+        - Monitoring
+        - Proxy / TLS
+        - Assistant
+        - Documentation
+        - Other
+    validations:
+      required: false
