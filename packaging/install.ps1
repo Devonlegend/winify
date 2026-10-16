@@ -78,7 +78,11 @@ function Get-ExpectedHash([string]$Url, [string]$Pinned) {
     if ($Pinned) { return $Pinned }
     foreach ($candidate in @("$Url.sha256", "$Url.SHA256")) {
         try {
-            $text = (Invoke-WebRequest -Uri $candidate -UseBasicParsing).Content.Trim()
+            $content = (Invoke-WebRequest -Uri $candidate -UseBasicParsing).Content
+            # GitHub serves release assets as application/octet-stream, so
+            # Windows PowerShell 5.1 returns a byte[] here rather than text.
+            if ($content -is [byte[]]) { $content = [Text.Encoding]::UTF8.GetString($content) }
+            $text = ([string]$content).Trim()
             if ($text -match '^[0-9a-fA-F]{64}') { return $Matches[0] }
         } catch { }
     }
