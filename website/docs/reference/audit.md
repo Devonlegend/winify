@@ -5,7 +5,7 @@ description: Every remote command with server, action, deployment, and redacted 
 
 # Audit log
 
-Every remote command — deploy, rollback, monitor, bootstrap, onboard — is recorded in `remote_commands`: **server id, server type, action, deployment id, command, error, timestamp**. Sensitive payloads (env, build args, binary uploads) are replaced by a label via redaction.
+Every remote command, deploy, rollback, monitor, bootstrap, onboard, is recorded in `remote_commands`: **server id, server type, action, deployment id, command, error, timestamp**. Sensitive payloads (env, build args, binary uploads) are replaced by a label via redaction.
 
 Open the **Audit log** page (filter by server, action, time window, free-text search, paginated) or:
 

@@ -5,7 +5,7 @@ description: Login, sessions, CSRF, tokens, input validation, and response heade
 
 # Hardening
 
-This module category can run arbitrary commands on remote servers — boundaries are explicit.
+This module category can run arbitrary commands on remote servers; boundaries are explicit.
 
 | Concern | Control |
 | ------- | ------- |

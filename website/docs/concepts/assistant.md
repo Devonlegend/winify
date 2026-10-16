@@ -20,7 +20,7 @@ flowchart LR
   FB --> A
 ```
 
-- **Knowledge base**: these guides. The in-app subset (`internal/assistant/docs/*.md`) is generated from this site by `scripts/sync-assistant-docs.sh` — same content, chunked per `##` section for retrieval.
+- **Knowledge base**: these guides. The in-app subset (`internal/assistant/docs/*.md`) is generated from this site by `scripts/sync-assistant-docs.sh`: same content, chunked per `##` section for retrieval.
 - **Intent routing**: `docs` | `deploy` | `server`. A named project/server plus a live keyword (`cpu`, `rollback`) routes to live data; `how do I…` routes to docs.
 - **Grounding**: doc chunks + live deploy history and monitoring samples go into the prompt. The response includes `sources`, `intent`, `model`, `live`, `docs_used`, `latency_ms`, rendered in the UI so a claim can be traced.
 - **Degradation**: stopping Ollama still returns a grounded answer from docs/live data instead of hanging. This is why the assistant works in demos without Ollama installed.

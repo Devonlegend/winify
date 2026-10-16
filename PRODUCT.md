@@ -10,15 +10,15 @@ web
 
 Existing: Go (net/http + chi) server-rendered `html/template` with embedded static
 assets (vanilla CSS + minimal JS). The redesign keeps this stack and adds
-progressive enhancement (fetch + SSE) — no JS framework, no build step. Binding
+progressive enhancement (fetch + SSE), no JS framework, no build step. Binding
 for all UI work in this repo.
 
 ## Users
 
 A single self-hosting operator (technical, comfortable on the command line,
 learning Go) who runs a mix of Windows/IIS and Linux/Docker workloads and wants
-to deploy and monitor them from one place. They arrive to *do a job* — ship an
-app, check whether a deploy succeeded, add a server — usually mid-task and
+to deploy and monitor them from one place. They arrive to *do a job*, ship an
+app, check whether a deploy succeeded, add a server, usually mid-task and
 impatient, not to browse. Secondary: the same person acting as admin
 (credentials, API tokens, audit).
 
@@ -83,7 +83,7 @@ deployments, logs, metrics, audit rows, servers, projects, credentials, tokens.
    fields; expose advanced options only on demand.
 2. **The operator is mid-task.** Fast, scannable, consistent; status is always
    visible; failures explain themselves.
-3. **Honest state.** Never show stale or guessed data — down is down, pending is
+3. **Honest state.** Never show stale or guessed data, down is down, pending is
    pending, and errors are surfaced, not swallowed.
 4. **Server-rendered and dependency-light.** No framework; enhancement is
    progressive and degrades to plain HTML.

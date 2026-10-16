@@ -59,7 +59,7 @@ Prompts for a password, prints a bcrypt hash for `auth.admin_password_hash`. Pre
 ```
 
 - `cred add <name>` reads the value from stdin (pipe a key file or paste a secret) and stores it AES-256-GCM encrypted.
-- `cred list` shows names only — never values.
+- `cred list` shows names only, never values.
 - `cred get` decrypts for provisioning scripts; avoid logging its output.
 
 Examples:

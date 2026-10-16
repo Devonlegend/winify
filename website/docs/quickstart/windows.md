@@ -30,7 +30,7 @@ $env:WINIFY_VERSION = "v0.1.0"
 irm https://winify.space/install.ps1 | iex
 ```
 
-Manual path — from an **elevated** PowerShell with a local binary:
+Manual path, from an **elevated** PowerShell with a local binary:
 
 ```powershell
 .\winify.exe bootstrap
@@ -46,7 +46,7 @@ What it does, in order (`dirs` → `nssm` → `winrm` → `self-service` → `lo
 | `self-service` | Installs winify itself as the `winify` Windows service, auto-start with recovery |
 | `local-target` | Creates the local `winsvc` server entry (no credential, in-process PowerShell) |
 | `caddy` | Ensures `caddy.exe`, writes base config, installs `winify-caddy`, opens 80/443 |
-| `tunnel` | Only when `tunnel.enabled: true` — provisions Cloudflare ingress |
+| `tunnel` | Only when `tunnel.enabled: true`, provisions Cloudflare ingress |
 
 Preview without changing anything:
 
@@ -76,7 +76,7 @@ bootstrap:
   enabled: true
 ```
 
-All fields are optional; built-in defaults apply when the file is absent. Every section also has a `CC_*` env override — see [Configuration reference](../reference/config.md).
+All fields are optional; built-in defaults apply when the file is absent. Every section also has a `CC_*` env override, see [Configuration reference](../reference/config.md).
 
 ## 3. Start and register
 

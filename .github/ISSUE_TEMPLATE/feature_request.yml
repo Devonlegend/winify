@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Check the [documentation](https://winify.space) and existing issues
-        first. Some capabilities are deliberately deferred to v2 — see the
+        first. Some capabilities are deliberately deferred to v2; see the
         [introduction](https://winify.space/intro) for the current scope.
   - type: checkboxes
     id: preflight

@@ -76,7 +76,7 @@ const codeInkLight: PrismTheme = {
 
 const config: Config = {
   title: 'Winify',
-  tagline: 'Self-hosted deployments for Windows and Docker — git push to live HTTPS URL.',
+  tagline: 'Self-hosted deployments for Windows and Docker: git push to live HTTPS URL.',
   favicon: 'img/favicon.svg',
 
   // Production URL: custom domain winify.space (CNAME in static/).

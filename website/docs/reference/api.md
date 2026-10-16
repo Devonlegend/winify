@@ -1,6 +1,6 @@
 ---
 title: REST API
-description: Bearer-token API at /api/v1 — servers, projects, deploys, metrics, audit.
+description: Bearer-token API at /api/v1, servers, projects, deploys, metrics, audit.
 ---
 
 # REST API

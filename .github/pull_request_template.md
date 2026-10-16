@@ -1,6 +1,6 @@
 <!--
 Thanks for the pull request. Please fill in the sections below and make sure CI
-is green. For security issues, see SECURITY.md — do not open a public PR.
+is green. For security issues, see SECURITY.md; do not open a public PR.
 -->
 
 ## What this changes

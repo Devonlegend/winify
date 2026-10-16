@@ -2,7 +2,7 @@
 
 The visual system for the Winify dashboard. It is a **monochrome
 operator console**: warm-neutral black surfaces, a fixed left sidebar, dense but
-breathable panels, hairline borders, and one source of emphasis — light ink.
+breathable panels, hairline borders, and one source of emphasis, light ink.
 There is no brand hue. State is carried by value, weight, and one inverted chip,
 not by color. Tokens live in `internal/static/web/css/app.css` under `:root`.
 
@@ -51,7 +51,7 @@ without a red hue. `--ok` / `--warn` / `--err` / `--info` are gray values; the
 
 - Radius: `--r-sm` 4px (controls, badges), `--r` 8px (panels), `--r-lg` 10px
   (cards). Crisp, never pill-shaped for containers or primary buttons.
-- Depth is declared once per element — either a 1px hairline or the single soft
+- Depth is declared once per element, either a 1px hairline or the single soft
   `--shadow`; never both.
 - More space above a heading than below it; tight groups, generous separation.
 
@@ -63,31 +63,31 @@ background-image layer, never a scrolling element.
 
 ## Components
 
-- **Sidebar** — brand mark (geometric stack glyph), nav, a `Settings` group, and
+- **Sidebar**: brand mark (geometric stack glyph), nav, a `Settings` group, and
   account/logout pinned to the bottom. Active items use a `--panel-2` fill with
-  a short centred ink rule at the leading edge — never a full-height bar, which
+  a short centred ink rule at the leading edge, never a full-height bar, which
   reads as a bracket artifact inside the pill radius.
-- **Topbar** — sticky, translucent (`backdrop-filter`), mobile menu toggle, and
+- **Topbar**: sticky, translucent (`backdrop-filter`), mobile menu toggle, and
   the current section label.
-- **Buttons** — `btn` (secondary), `btn-primary` (ink), `btn-ghost`,
+- **Buttons**: `btn` (secondary), `btn-primary` (ink), `btn-ghost`,
   `btn-danger`, `btn-sm`. Secondary and danger buttons are **embedded**: a
   `--panel-2` fill with a `--line` edge, not an outlined box; only the primary
   button is a solid ink block. Buttons depress with `scale(0.98)` on `:active`.
-- **Forms** — `.admin-form` grid of labelled rows, `fieldset` groups, help
+- **Forms**: `.admin-form` grid of labelled rows, `fieldset` groups, help
   placeholders. Fields use a `--bg` well and a `--line` edge so they read as
   recessed into the panel; focus is an ink border plus `--ring`.
-- **Cards** — `.card` / `.metric-card`; resource cards are links with a status
+- **Cards**: `.card` / `.metric-card`; resource cards are links with a status
   pill and a Deploy action. Hover shifts the hairline, not a shadow.
-- **Tables** — `.deploys`, faint uppercase headers, hairline rows, row hover.
-- **Pills / badges** — `.status`, `.pill`, `.badge`, `.chip`, `.svc` for deploy
+- **Tables**: `.deploys`, faint uppercase headers, hairline rows, row hover.
+- **Pills / badges**: `.status`, `.pill`, `.badge`, `.chip`, `.svc` for deploy
   status, target type, token scope, and service state.
-- **Tabs** — in-page `.tabs` (Overview / Deployments / Environment / Settings).
-- **Wizard** — `.wizard` with a step rail (active step is an ink chip),
+- **Tabs**: in-page `.tabs` (Overview / Deployments / Environment / Settings).
+- **Wizard**: `.wizard` with a step rail (active step is an ink chip),
   `.choice` cards, a `.review` summary and a collapsed `.advanced` block.
   Degrades to a plain form without JS.
-- **Deploy drawer** — fixed bottom console (`#deploy-drawer`) that streams the
+- **Deploy drawer**: fixed bottom console (`#deploy-drawer`) that streams the
   deploy log over SSE and shows live status.
-- **Onboarding** — `.onboard` checklist shown on an empty dashboard.
+- **Onboarding**: `.onboard` checklist shown on an empty dashboard.
 
 ## States
 
@@ -95,7 +95,7 @@ Every interactive element has hover, focus-visible (`--ring`), and disabled
 states. Data surfaces have empty (`.placeholder`), loading (status `running` /
 gauges at `--`), success, and error states; errors name the problem and appear
 above the relevant log. Errors read distinctly from neutral notices through a
-stronger ink border and heavier text — deliberately not a thick left tab. The
+stronger ink border and heavier text, deliberately not a thick left tab. The
 deploy drawer is `aria-live="polite"`.
 
 ## Motion

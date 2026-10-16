@@ -27,10 +27,10 @@ Created on first run if missing.
 | Key | Default | Env | Notes |
 | --- | ------- | --- | ----- |
 | `auth.admin_user` | `admin` | `CC_ADMIN_USER` | |
-| `auth.admin_password_hash` | `""` | — (use `CC_ADMIN_PASSWORD` plaintext, hashed at startup) | Generate with `control-center hash-password` |
+| `auth.admin_password_hash` | `""` | (use `CC_ADMIN_PASSWORD` plaintext, hashed at startup) | Generate with `control-center hash-password` |
 | `auth.setup_token` | generated + logged | `CC_SETUP_TOKEN` | One-time first-run token when no admin exists |
 | `auth.cookie_secure` | `true` | `CC_COOKIE_SECURE` | Keep true in production; localhost browsers still accept Secure cookies |
-| `auth.session_ttl_hours` | `12` | — | |
+| `auth.session_ttl_hours` | `12` | - | |
 
 ## credentials
 
@@ -50,25 +50,25 @@ Created on first run if missing.
 | Key | Default | Env | Notes |
 | --- | ------- | --- | ----- |
 | `proxy.enabled` | `true` | `CC_PROXY_ENABLED` | `false` = deploys run, no public URL |
-| `proxy.admin_url` | `http://127.0.0.1:2019` | `CC_PROXY_ADMIN_URL` | Unauthenticated — loopback/management net only |
-| `proxy.server_name` | `srv0` | — | |
+| `proxy.admin_url` | `http://127.0.0.1:2019` | `CC_PROXY_ADMIN_URL` | Unauthenticated, loopback/management net only |
+| `proxy.server_name` | `srv0` | - | |
 | `proxy.public_ip` | `""` | `CC_PROXY_PUBLIC_IP` | Expected Caddy host address for DNS warnings |
-| `proxy.acme_skip` | `["*.sslip.io"]` | — | Host patterns served HTTP without a certificate |
+| `proxy.acme_skip` | `["*.sslip.io"]` | - | Host patterns served HTTP without a certificate |
 
 ## tunnel
 
 | Key | Default | Env |
 | --- | ------- | --- |
 | `tunnel.enabled` | `false` | `CC_TUNNEL_ENABLED` |
-| `tunnel.provider` | `cloudflare` | — |
+| `tunnel.provider` | `cloudflare` | - |
 | `tunnel.domain` | `""` | `CC_TUNNEL_DOMAIN` |
 | `tunnel.account_id` | `""` | `CC_TUNNEL_ACCOUNT_ID` |
-| `tunnel.zone_id` | `""` (resolved) | — |
-| `tunnel.tunnel_name` | `winify` | — |
+| `tunnel.zone_id` | `""` (resolved) | - |
+| `tunnel.tunnel_name` | `winify` | - |
 | `tunnel.api_token_ref` | `vault:cloudflare-api` | `CC_TUNNEL_API_TOKEN_REF` |
-| `tunnel.origin` | `http://localhost:80` | — |
-| `tunnel.connector_source/url/sha256` | `""` | — |
-| `tunnel.service_name` | `winify-tunnel` | — |
+| `tunnel.origin` | `http://localhost:80` | - |
+| `tunnel.connector_source/url/sha256` | `""` | - |
+| `tunnel.service_name` | `winify-tunnel` | - |
 
 ## deploy
 
@@ -83,8 +83,8 @@ Created on first run if missing.
 | `deploy.nssm_sha256` | `""` | `CC_DEPLOY_NSSM_SHA256` | Pinned hash; mismatch aborts |
 | `deploy.known_hosts_file` | `""` | `CC_DEPLOY_KNOWN_HOSTS` | Required in production; fail-closed |
 | `deploy.allow_insecure_host_key` | `false` | `CC_ALLOW_INSECURE_SSH` | Dev-only escape hatch |
-| `deploy.health_timeout_seconds` | `60` | — | |
-| `deploy.health_interval_seconds` | `3` | — | |
+| `deploy.health_timeout_seconds` | `60` | - | |
+| `deploy.health_interval_seconds` | `3` | - | |
 | `deploy.retention_days` | `90` | `CC_DEPLOY_RETENTION_DAYS` | |
 | `deploy.timeout_minutes` | `30` | `CC_DEPLOY_TIMEOUT_MINUTES` | Whole-deploy bound |
 
@@ -94,13 +94,13 @@ Created on first run if missing.
 | --- | ------- | --- |
 | `bootstrap.enabled` | `true` | `CC_BOOTSTRAP_ENABLED` |
 | `bootstrap.install_dir` | `%ProgramData%\winify` / `/var/lib/winify` | `CC_BOOTSTRAP_INSTALL_DIR` |
-| `bootstrap.service_name` | `winify` | — |
+| `bootstrap.service_name` | `winify` | - |
 | `bootstrap.enable_winrm` | `false` | `CC_BOOTSTRAP_ENABLE_WINRM` |
 | `bootstrap.caddy.enabled` | `false` | `CC_BOOTSTRAP_CADDY_ENABLED` |
 | `bootstrap.caddy.source` | `""` | `CC_BOOTSTRAP_CADDY_SOURCE` |
 | `bootstrap.caddy.url` | `""` | `CC_BOOTSTRAP_CADDY_URL` |
 | `bootstrap.caddy.sha256` | `""` | `CC_BOOTSTRAP_CADDY_SHA256` |
-| `bootstrap.caddy.admin` | `127.0.0.1:2019` | — |
+| `bootstrap.caddy.admin` | `127.0.0.1:2019` | - |
 
 ## github
 
@@ -126,7 +126,7 @@ Created on first run if missing.
 | `monitoring.interval_seconds` | `30` | `CC_MONITOR_INTERVAL` |
 | `monitoring.timeout_seconds` | `15` | `CC_MONITOR_TIMEOUT` |
 | `monitoring.retention_hours` | `24` | `CC_MONITOR_RETENTION_HOURS` |
-| `monitoring.history_points` | `200` | — |
+| `monitoring.history_points` | `200` | - |
 
 ## assistant
 

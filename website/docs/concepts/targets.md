@@ -5,7 +5,7 @@ description: winsvc, IIS, and Docker pipelines, sources, health checks, and roll
 
 # Targets
 
-One branch point — `NewTargetFactory` — selects the pipeline from `server.type`. Everything downstream of a `Target` is target-specific by design.
+One branch point, `NewTargetFactory`, selects the pipeline from `server.type`. Everything downstream of a `Target` is target-specific by design.
 
 ```mermaid
 flowchart LR
@@ -25,12 +25,12 @@ flowchart LR
 
 Every runner is wrapped by an audit recorder persisting each remote command to `remote_commands`.
 
-## winsvc — native Windows service (default, recommended)
+## winsvc: native Windows service (default, recommended)
 
 A built executable run as a Windows service via **NSSM**.
 
 1. `git clone/fetch` + checkout (`origin/*` branch resolution, `git clean -fdx`, `-c safe.directory` for LocalSystem vs user-owned clones).
-2. Ensure build runtime (`python` / `node` / `go` / `dotnet`) — installs if missing.
+2. Ensure build runtime (`python` / `node` / `go` / `dotnet`): installs if missing.
 3. Optional build (`service_build_command`, e.g. `go build`, `dotnet publish`).
 4. Ensure NSSM on target (chunked base64 upload from `deploy.nssm_source` if missing; SHA-256 verified).
 5. Validate before touching live: NSSM present, source dir exists, service exe exists.
@@ -46,7 +46,7 @@ A built executable run as a Windows service via **NSSM**.
 
 **Rollback**: restore newest timestamped backup on target and restart.
 
-## iis — IIS application (advanced/legacy)
+## iis: IIS application (advanced/legacy)
 
 Same shape plus IIS specifics. Zero-touch IIS: winify creates the app pool and site if missing.
 
@@ -56,12 +56,12 @@ Pipeline: clone → runtime → optional build → ensure site/app pool → vali
 
 - Live directory is never overwritten. Build goes to the inactive slot (`<path>` / `<path>.blue`), validated there, then the site's `physicalPath` is repointed atomically and the pool recycled.
 - Marker file (`<path>.active`) records the live slot.
-- Rollback repoints to the other slot — no file copy, effectively instant.
+- Rollback repoints to the other slot, no file copy, effectively instant.
 - Failed swap/smoke test swaps back.
 
 Use IIS only for ASP.NET Framework, Windows auth, classic ASP, or an existing IIS site. Prefer `winsvc` otherwise.
 
-## docker — Linux target over SSH
+## docker: Linux target over SSH
 
 | `source` | Behavior |
 | -------- | -------- |
@@ -73,7 +73,7 @@ Use IIS only for ASP.NET Framework, Windows auth, classic ASP, or an existing II
 
 **Rollback**:
 
-- `dockerfile`/`image`: re-run previous image tag — no rebuild.
+- `dockerfile`/`image`: re-run previous image tag, no rebuild.
 - `compose`: check out previous commit and re-run its compose file.
 
 On failure winify attempts to restore the previous successful release automatically when one exists.

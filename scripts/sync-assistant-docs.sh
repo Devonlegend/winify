@@ -18,7 +18,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 # Generated-file banner (Go-embed safe: Markdown comment).
 banner() {
-  printf '<!-- GENERATED from website/docs — do not edit by hand. Edit the source and run scripts/sync-assistant-docs.sh. -->\n\n'
+  printf '<!-- GENERATED from website/docs; do not edit by hand. Edit the source and run scripts/sync-assistant-docs.sh. -->\n\n'
 }
 
 # Strip YAML frontmatter, drop the source H1 title (callers emit their own),
@@ -82,7 +82,7 @@ if [[ "$CHECK" == "1" ]]; then
   status=0
   for f in setup-guide.md adding-project-server.md troubleshooting.md faq.md api.md; do
     if ! diff -q "$tmp/$f" "$DST/$f" >/dev/null 2>&1; then
-      echo "stale: internal/assistant/docs/$f — run ./scripts/sync-assistant-docs.sh"
+      echo "stale: internal/assistant/docs/$f; run ./scripts/sync-assistant-docs.sh"
       status=1
     fi
   done

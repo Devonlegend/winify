@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Thanks for the report. Before you continue, please make sure this is not
-        a security issue — those go through [SECURITY.md](https://github.com/Devonlegend/winify/blob/main/SECURITY.md).
+        a security issue; those go through [SECURITY.md](https://github.com/Devonlegend/winify/blob/main/SECURITY.md).
   - type: checkboxes
     id: preflight
     attributes:

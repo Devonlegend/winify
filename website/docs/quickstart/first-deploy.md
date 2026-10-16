@@ -40,7 +40,7 @@ What you should see:
 
 On success winify upserts a Caddy route (`host` matcher → `reverse_proxy` to upstream) with a deterministic `@id`. Caddy issues/renews the Let's Encrypt certificate automatically. Open `https://<domain>`.
 
-If DNS does not point at the Caddy host, winify warns after registering — fix the `A`/wildcard record.
+If DNS does not point at the Caddy host, winify warns after registering, fix the `A`/wildcard record.
 
 ## 4. Verify the audit
 
@@ -57,9 +57,9 @@ Or open the **Audit log** page and filter by server, action, or free text. Secre
 
 Deploy a known-good version, then a bad one. On the Deployment tab click **Roll back**:
 
-- **Dockerfile/image**: re-runs the previous image tag — no rebuild.
+- **Dockerfile/image**: re-runs the previous image tag, no rebuild.
 - **Compose**: checks out the previous commit and re-runs its compose file.
-- **winsvc/IIS**: restores the newest timestamped backup on the target (IIS blue-green repoints to the other slot — effectively instant).
+- **winsvc/IIS**: restores the newest timestamped backup on the target (IIS blue-green repoints to the other slot, effectively instant).
 - Every rollback creates a new history entry with `trigger=rollback`.
 
 Re-open the site; the previous version is live.

@@ -30,9 +30,9 @@ Use **Projects → New** (guided wizard with smart defaults) or `POST /api/v1/pr
 
 Pick the Docker server, then the **deploy source**:
 
-- **dockerfile** — build from repo. `repo_url`, `branch`, `dockerfile_path` (default `Dockerfile`).
-- **compose** — deploy the repo's own compose file. `repo_url`, `branch`, `compose_path` (default `docker-compose.yml`). Project `env` is written to `.env` next to the compose file.
-- **image** — run a prebuilt registry image. `image` (e.g. `nginx:1.27`), optional `ports_exposes`/`ports_mappings`; `repo_url` not needed.
+- **dockerfile**: build from repo. `repo_url`, `branch`, `dockerfile_path` (default `Dockerfile`).
+- **compose**: deploy the repo's own compose file. `repo_url`, `branch`, `compose_path` (default `docker-compose.yml`). Project `env` is written to `.env` next to the compose file.
+- **image**: run a prebuilt registry image. `image` (e.g. `nginx:1.27`), optional `ports_exposes`/`ports_mappings`; `repo_url` not needed.
 
 Health timing overrides: `health_interval_seconds`, `health_timeout_seconds`, `health_retries`, `health_start_period_seconds` (fall back to global `deploy.*`).
 
@@ -43,7 +43,7 @@ Pick the `winsvc` server. Fill in:
 - `service_name`, `service_exe`, `service_work_dir` (required except static sites)
 - `service_build_command`, `service_source_subdir` (default `.`), `service_args`, `service_log_dir`, `service_account`
 - `runtime`: `python` | `node` | `go` | `dotnet` (empty = none provisioned; winify installs a missing runtime)
-- `caddy_mode`: `none` | `proxy` | `static` — `static` needs no service name/exe; per-target Caddy serves files
+- `caddy_mode`: `none` | `proxy` | `static`: `static` needs no service name/exe; per-target Caddy serves files
 
 Pipeline validates before touching live, backs up, copies, installs/updates NSSM service, starts, smoke-tests, and compensates (restore + restart) on failure.
 
@@ -51,7 +51,7 @@ Pipeline validates before touching live, backs up, copies, installs/updates NSSM
 
 Pick the IIS server. Fill in `iis_site` (created if missing), `iis_physical_path`, `iis_app_pool` (created if missing), plus optional `iis_service`, `iis_build_command`, `iis_source_subdir`.
 
-Enable **Blue-green** (`iis_blue_green: true`) for near-zero downtime: build goes to the inactive slot (`<path>.blue`), is validated there, then the site is repointed without stopping the pool. Rollback repoints — no copy.
+Enable **Blue-green** (`iis_blue_green: true`) for near-zero downtime: build goes to the inactive slot (`<path>.blue`), is validated there, then the site is repointed without stopping the pool. Rollback repoints, no copy.
 
 ## Repo auto-detection
 
@@ -80,7 +80,7 @@ Reference by name (`ssh_key_ref` / `credential_ref` / `webhook_secret_ref`). Val
 
 Set a project's `git_credential_ref` to a credential holding either:
 
-- an **SSH private key** (a GitHub/GitLab deploy key) — use it with an SSH repo URL (`git@github.com:org/app.git`); winify uploads the key to the target with owner-only permissions and points git at it, or
-- an **HTTPS access token** (a PAT) — use it with an HTTPS repo URL; the token is passed as an `http.extraHeader`, never embedded in the URL or logged.
+- an **SSH private key** (a GitHub/GitLab deploy key): use it with an SSH repo URL (`git@github.com:org/app.git`); winify uploads the key to the target with owner-only permissions and points git at it, or
+- an **HTTPS access token** (a PAT): use it with an HTTPS repo URL; the token is passed as an `http.extraHeader`, never embedded in the URL or logged.
 
 Either way the secret never appears in `repo_url`, deploy logs, or the audit log, and repository detection uses it too (pass `git_credential_ref` alongside `repo_url` in the Detect step).

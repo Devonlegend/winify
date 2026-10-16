@@ -1,6 +1,6 @@
 ---
 title: Production install
-description: Run winify itself hardened — loopback-first, service, firewall, Caddy admin.
+description: Run winify itself hardened, loopback-first, service, firewall, Caddy admin.
 ---
 
 # Production install
@@ -24,7 +24,7 @@ Installs `winify` (the app), `winify-caddy`, and optionally `winify-tunnel` via 
 
 ## 3. Harden the edges
 
-- Caddy admin (`proxy.admin_url`, default `http://127.0.0.1:2019`) is unauthenticated — keep it on loopback or a protected management network. Never publish 2019 publicly.
+- Caddy admin (`proxy.admin_url`, default `http://127.0.0.1:2019`) is unauthenticated, keep it on loopback or a protected management network. Never publish 2019 publicly.
 - `auth.cookie_secure: true` in production (localhost browsers still accept Secure cookies).
 - `deploy.known_hosts_file` populated; `allow_insecure_host_key: false`.
 - `bootstrap.enable_winrm: false` unless the host is on a trusted management network.
@@ -40,7 +40,7 @@ Installs `winify` (the app), `winify-caddy`, and optionally `winify-tunnel` via 
 ## 5. What to back up
 
 - SQLite file (`database.path`, default `data/control-center.db`).
-- `data/master.key` (or `CC_MASTER_KEY` / `credentials.master_key` source) — without it, credentials cannot be decrypted.
+- `data/master.key` (or `CC_MASTER_KEY` / `credentials.master_key` source): without it, credentials cannot be decrypted.
 - `config.yaml` (no secrets if you use `vault:` refs + env).
 
 See [Backup and restore](./backup-restore.md).

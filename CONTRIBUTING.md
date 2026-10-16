@@ -79,7 +79,7 @@ Then keep the change focused:
 - Include tests for behavior changes; bugs should come with a regression test.
 - Update the docs when you change config keys, CLI flags, API routes, or any
   user-visible behavior.
-- Do not reformat or refactor unrelated code, it makes review harder.
+- Do not reformat or refactor unrelated code; it makes review harder.
 
 ## Coding guidelines
 

@@ -13,6 +13,6 @@ notifications:
   slack_webhook_url: ""  # Slack incoming webhook
 ```
 
-GitHub commit statuses are posted automatically for projects linked via `github_repo` once the [GitHub App](./github-app.md) is configured — no extra config here.
+GitHub commit statuses are posted automatically for projects linked via `github_repo` once the [GitHub App](./github-app.md) is configured, no extra config here.
 
 `DeployEvent` carries project, deployment id, status, commit/ref, domain, and timestamps. Point `webhook_url` at your automation to drive ChatOps or secondary pipelines.

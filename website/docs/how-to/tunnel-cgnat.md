@@ -5,7 +5,7 @@ description: Give a host behind CGNAT a public HTTPS URL with a Cloudflare tunne
 
 # Tunnel for CGNAT
 
-Behind CGNAT or a private ISP link, the machine cannot accept inbound connections. Public-IP schemes (`sslip.io`) cannot work — the carrier's NAT address never reaches you, and no certificate can be issued. A tunnel makes an **outbound** connection and gives you a public HTTPS URL.
+Behind CGNAT or a private ISP link, the machine cannot accept inbound connections. Public-IP schemes (`sslip.io`) cannot work; the carrier's NAT address never reaches you, and no certificate can be issued. A tunnel makes an **outbound** connection and gives you a public HTTPS URL.
 
 ## What winify provisions (once)
 
@@ -19,7 +19,7 @@ Given an API token + domain, winify:
 6. Installs `cloudflared` as an NSSM service (`tunnel run --token-file <file>`).
 7. Auto-adds `*.domain` to Caddy's `acme_skip` (served HTTP behind the tunnel terminator, avoiding redirect loops).
 
-Everything is idempotent: re-running reuses tunnel, ingress, and DNS. Because wildcard ingress + DNS are created **once at setup**, per-deploy winify never calls the provider — it only registers the host in Caddy.
+Everything is idempotent: re-running reuses tunnel, ingress, and DNS. Because wildcard ingress + DNS are created **once at setup**, per-deploy winify never calls the provider; it only registers the host in Caddy.
 
 ## Configure
 
@@ -47,8 +47,8 @@ Required token scopes: Account `Cloudflare Tunnel:Edit` + Zone `DNS:Edit` on the
 
 ## Operate
 
-- Deploy apps with `domain: app.example.com` — they resolve through the wildcard and route in Caddy like any other host.
-- The control-center UI itself is **not** auto-routed by the tunnel step. Exposing the admin panel publicly is a deliberate operator choice — keep it loopback/internal, or put Cloudflare Access (email OTP) in front.
+- Deploy apps with `domain: app.example.com`: they resolve through the wildcard and route in Caddy like any other host.
+- The control-center UI itself is **not** auto-routed by the tunnel step. Exposing the admin panel publicly is a deliberate operator choice, keep it loopback/internal, or put Cloudflare Access (email OTP) in front.
 - To un-publish, remove the ingress rule or stop the `winify-tunnel` service.
 
 ## Limits (V1)

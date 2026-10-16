@@ -44,7 +44,7 @@ Registration failure → `proxy.admin_url` unreachable, or `domain` does not res
 
 ## Monitoring shows down
 
-SSH/WinRM open failed or the metrics command failed/timed out (`monitoring.timeout_seconds`). Same connection as deploys — if deploys work, read the card error for the metrics-specific cause.
+SSH/WinRM open failed or the metrics command failed/timed out (`monitoring.timeout_seconds`). Same connection as deploys, if deploys work, read the card error for the metrics-specific cause.
 
 ## Assistant is unavailable
 

@@ -23,7 +23,7 @@ Windows resources.
 
 ## 2. Research: NSSM
 
-**What it is.** Non-Sucking Service Manager — a single native `.exe` (~300 KB,
+**What it is.** Non-Sucking Service Manager, a single native `.exe` (~300 KB,
 public domain, no installer, no runtime dependencies) that wraps any
 executable/script as a real Windows service with supervision. It registers
 *itself* as the service binary, so the exe must live at a stable path and must
@@ -59,7 +59,7 @@ with `nssm reset <name> <parameter>`.
 | --- | --- | --- | --- |
 | **NSSM** | ~300 KB, no deps | CLI/registry | stale (2017) |
 | WinSW | tens of MB, needs .NET 4.6.1+ | XML file | active |
-| `sc.exe create` | built-in | none | n/a — only works if the exe implements the SCM handler API; no supervision, no log redirect |
+| `sc.exe create` | built-in | none | n/a, only works if the exe implements the SCM handler API; no supervision, no log redirect |
 | srvany / shawl | small | varies | legacy / niche |
 
 NSSM wins on the stated goal (lightweight, fast, no runtime). We keep the
@@ -106,7 +106,7 @@ the Docker path.
 `internal/config/config.go`
 - add `ServerTypeWindowsService = "winsvc"`.
 
-`internal/config/entities.go` — `Server` (reuse all WinRM fields):
+`internal/config/entities.go`, `Server` (reuse all WinRM fields):
 - `NSSMPath` (default `C:\ProgramData\winify\tools\nssm.exe`)
 - `CaddyPath` (optional; default `C:\ProgramData\winify\tools\caddy.exe`)
 
@@ -127,23 +127,23 @@ New `internal/deployment/winservice.go`, mirroring `iis.go` structure (PowerShel
 script builders + a `Target` implementation), reusing `syncRepoScript`,
 `buildScript`, `copyScript`, `backupScript`, `smokeScript` where possible.
 
-1. **Sync** — clone/fetch repo, checkout revision.
-2. **Build** — optional `ServiceBuildCommand` (`dotnet publish`, `go build`,
+1. **Sync**: clone/fetch repo, checkout revision.
+2. **Build**: optional `ServiceBuildCommand` (`dotnet publish`, `go build`,
    `npm ci && npm run build`).
-3. **Validate before touching live** — nssm present at `NSSMPath`; `ServiceExe`
+3. **Validate before touching live**: nssm present at `NSSMPath`; `ServiceExe`
    exists in the build output; port free or owned by the target service.
-4. **Backup** — timestamped copy of the live install dir (robocopy).
-5. **Stop** — `nssm stop <name>` (tolerate "not installed" on first deploy).
-6. **Deploy files** — copy build output into the install dir.
+4. **Backup**: timestamped copy of the live install dir (robocopy).
+5. **Stop**: `nssm stop <name>` (tolerate "not installed" on first deploy).
+6. **Deploy files**: copy build output into the install dir.
 7. **Install/update service**
    - absent: `nssm install <name> <exe>` then `nssm set` the params below
    - present: `nssm set` Application / AppDirectory / AppParameters
    - always: `AppEnvironmentExtra` (redacted in audit), `AppStdout`/`AppStderr`
      into `ServiceLogDir`, `AppExit Default Restart`, `AppThrottle`,
      `AppRotateFiles 1`, `Start SERVICE_AUTO_START`, `ObjectName` if set
-8. **Start** — `nssm start <name>`, poll `Get-Service` until `Running`.
-9. **Health check** — reuse `smokeScript` against `127.0.0.1:<port>`.
-10. **Per-target Caddy** (if `CaddyMode != none`) — push Caddyfile, `caddy reload`;
+8. **Start**: `nssm start <name>`, poll `Get-Service` until `Running`.
+9. **Health check**: reuse `smokeScript` against `127.0.0.1:<port>`.
+10. **Per-target Caddy** (if `CaddyMode != none`): push Caddyfile, `caddy reload`;
     ensure the Caddy service is installed via NSSM on first use.
 
 ## 6. NSSM bootstrap (platform uploads the binary)
@@ -159,7 +159,7 @@ On first deploy to a `winsvc` target, upload `nssm.exe` to `NSSMToolsDir`:
 - Verify a pinned **SHA-256** after assembly; abort on mismatch.
 - Store the 64-bit build only (Server targets are x64).
 - Never re-upload if the hash already matches (idempotent, fast redeploys).
-- The tools path is permanent — NSSM's service `ImagePath` points at it.
+- The tools path is permanent, NSSM's service `ImagePath` points at it.
 - Caddy binary bootstrapped the same way when per-target Caddy is enabled.
 
 _Alternative if chunking proves awkward:_ host the binary at a token-protected
@@ -175,24 +175,24 @@ start, health-check. No dependency on deploy history.
 
 ## 8. What is reused for free
 
-- **Monitoring** — `windowsScript` already reports Windows service status via
+- **Monitoring**: `windowsScript` already reports Windows service status via
   `Get-Service`; add the NSSM service name to `Server.Services`.
-- **Audit** — the WinRM runner is already wrapped by `WithAuditRecorder`.
-- **Proxy** — central Caddy registration and `targetHost` need no change.
-- **Health** — `smokeScript` / `healthTiming` reused as-is.
-- **UI** — server type dropdown, project form fields, and the resource wizard
+- **Audit**: the WinRM runner is already wrapped by `WithAuditRecorder`.
+- **Proxy**: central Caddy registration and `targetHost` need no change.
+- **Health**: `smokeScript` / `healthTiming` reused as-is.
+- **UI**: server type dropdown, project form fields, and the resource wizard
   gain the `winsvc` option; templates follow the IIS form pattern.
 
 ## 9. Phased implementation
 
-- **Phase 1 — MVP:** config/model constants, `winservice.go` target, factory
+- **Phase 1: MVP:** config/model constants, `winservice.go` target, factory
   branch in `target.go`, NSSM chunked bootstrap + hash check, install/run a
   prebuilt exe, start, health check.
-- **Phase 2 — Build & rollback:** `ServiceBuildCommand`, timestamped backup and
+- **Phase 2: Build & rollback:** `ServiceBuildCommand`, timestamped backup and
   rollback, env injection (audit-redacted), log rotation.
-- **Phase 3 — Per-target Caddy:** optional Caddy service via NSSM, static/SPA
+- **Phase 3: Per-target Caddy:** optional Caddy service via NSSM, static/SPA
   `file_server`, local reverse proxy on an internal port.
-- **Phase 4 — Product surface:** server/project validation, wizard fields,
+- **Phase 4: Product surface:** server/project validation, wizard fields,
   monitoring service names, docs + assistant ingestion, E2E on a Windows VM.
 
 ## 10. Open questions / deferred
@@ -209,5 +209,5 @@ start, health-check. No dependency on deploy history.
   `internal/deployment/iis_test.go`), including chunk assembly and hash
   verification.
 - Model: `config` load/round-trip for the new fields.
-- E2E: a Windows Server VM target in `E2E-CHECKLIST.md` — install service, verify
+- E2E: a Windows Server VM target in `E2E-CHECKLIST.md`: install service, verify
   it survives reboot, deploy a second revision, roll back.

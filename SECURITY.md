@@ -20,7 +20,7 @@ receive security fixes.
 **Do not open a public issue for a security problem.** Report it privately using
 either channel:
 
-- GitHub Private Vulnerability Reporting — open the **Security** tab of
+- GitHub Private Vulnerability Reporting, open the **Security** tab of
   [Devonlegend/winify](https://github.com/Devonlegend/winify) and choose
   **Report a vulnerability**.
 - Email **<randtequila@gmail.com>**.

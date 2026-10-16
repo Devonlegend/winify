@@ -22,7 +22,7 @@ The script resolves the latest GitHub Release, verifies SHA-256, installs to
 ## Prerequisites
 
 - Linux host reachable over SSH with `git`, `docker`, and the `docker compose` plugin.
-- A trusted `known_hosts` file — SSH verification is **fail-closed**.
+- A trusted `known_hosts` file, SSH verification is **fail-closed**.
 - A repo with a `Dockerfile` (or compose file, or prebuilt image).
 - A DNS name pointing at the Caddy host, with ports 80/443 reachable for Let's Encrypt.
 - Local: Go 1.27+ to build, or a release binary.
@@ -46,7 +46,7 @@ deploy:
   known_hosts_file: "/etc/winify/known_hosts"  # populate from a trusted source
 ```
 
-Start Caddy with its admin API reachable from winify. The admin API is unauthenticated — keep it on loopback or a protected management network. Never publish port 2019 publicly:
+Start Caddy with its admin API reachable from winify. The admin API is unauthenticated, keep it on loopback or a protected management network. Never publish port 2019 publicly:
 
 ```bash
 docker run -d --name caddy --network host caddy:2 caddy run --admin 127.0.0.1:2019
@@ -65,7 +65,7 @@ Paste or pipe the value when prompted. Values are never logged or returned by th
 
 ## 3. Add server and project
 
-`servers.yaml` / `projects.yaml` seed the database **only on a fresh install**. After that the database is authoritative — manage everything in the UI.
+`servers.yaml` / `projects.yaml` seed the database **only on a fresh install**. After that the database is authoritative, manage everything in the UI.
 
 Minimal Docker server:
 

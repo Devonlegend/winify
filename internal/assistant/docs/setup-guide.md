@@ -1,4 +1,4 @@
-<!-- GENERATED from website/docs — do not edit by hand. Edit the source and run scripts/sync-assistant-docs.sh. -->
+<!-- GENERATED from website/docs; do not edit by hand. Edit the source and run scripts/sync-assistant-docs.sh. -->
 
 # Setup Guide
 
@@ -31,7 +31,7 @@ $env:WINIFY_VERSION = "v0.1.0"
 irm https://winify.space/install.ps1 | iex
 ```
 
-Manual path — from an **elevated** PowerShell with a local binary:
+Manual path, from an **elevated** PowerShell with a local binary:
 
 ```powershell
 .\winify.exe bootstrap
@@ -47,7 +47,7 @@ What it does, in order (`dirs` → `nssm` → `winrm` → `self-service` → `lo
 | `self-service` | Installs winify itself as the `winify` Windows service, auto-start with recovery |
 | `local-target` | Creates the local `winsvc` server entry (no credential, in-process PowerShell) |
 | `caddy` | Ensures `caddy.exe`, writes base config, installs `winify-caddy`, opens 80/443 |
-| `tunnel` | Only when `tunnel.enabled: true` — provisions Cloudflare ingress |
+| `tunnel` | Only when `tunnel.enabled: true`, provisions Cloudflare ingress |
 
 Preview without changing anything:
 
@@ -77,7 +77,7 @@ bootstrap:
   enabled: true
 ```
 
-All fields are optional; built-in defaults apply when the file is absent. Every section also has a `CC_*` env override — see [Configuration reference](../reference/config.md).
+All fields are optional; built-in defaults apply when the file is absent. Every section also has a `CC_*` env override, see [Configuration reference](../reference/config.md).
 
 ## 3. Start and register
 
@@ -148,10 +148,10 @@ flowchart LR
 
 | Target | Rollback artifact |
 | ------ | ----------------- |
-| Docker `dockerfile` / `image` | Re-run previous image tag — no rebuild |
+| Docker `dockerfile` / `image` | Re-run previous image tag, no rebuild |
 | Docker `compose` | Check out previous commit, re-run its compose file |
 | `winsvc` / `iis` | Restore newest timestamped backup on target, restart service / recycle pool |
-| `iis` blue-green | Repoint site to the other slot — no file copy |
+| `iis` blue-green | Repoint site to the other slot, no file copy |
 
 On deploy failure winify attempts to restore the previous successful release automatically when one exists; the deploy is still marked `failed` with the full log and error banner.
 

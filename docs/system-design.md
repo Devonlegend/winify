@@ -1,4 +1,4 @@
-# System Design — Winify
+# System Design: Winify
 
 A self-hosted deployment platform that owns the deployment lifecycle for
 environments that mix **Windows/IIS** and **Linux/Docker**. One operator, one Go
@@ -57,7 +57,7 @@ flowchart TB
     GIT["GitHub / GitLab<br/>push webhook"]
   end
 
-  subgraph cc["Winify — single Go binary"]
+  subgraph cc["Winify: single Go binary"]
     HTTP["HTTP server (chi)<br/>session + bearer auth"]
     DEP["Deployer<br/>pipeline + history"]
     MON["Monitoring scheduler"]
@@ -161,12 +161,12 @@ flowchart LR
     L["/login, /register"]
   end
 
-  subgraph WH["Webhook — public, HMAC-verified"]
+  subgraph WH["Webhook: public, HMAC-verified"]
     GH["/webhooks/github/{id}"]
     GL["/webhooks/gitlab/{id}"]
   end
 
-  subgraph API["/api/v1 — bearer token"]
+  subgraph API["/api/v1: bearer token"]
     S1["servers, projects"]
     D1["deploy, rollback, deployments"]
     M1["metrics, audit"]
@@ -259,7 +259,7 @@ on the target. An in-flight guard (`sync.Map` keyed by project id) returns
 
 ## 6. Target pipelines
 
-A single branch point — `NewTargetFactory` — selects the pipeline from
+A single branch point, `NewTargetFactory`, selects the pipeline from
 `server.Type`. Everything downstream of a `Target` is target-specific by design.
 
 ```mermaid
@@ -300,7 +300,7 @@ Caddy is driven through its **admin API** (`127.0.0.1:2019`), not a config file.
   redeploying replaces the route instead of duplicating it.
 - Route = `host` matcher → `reverse_proxy` to `upstream` (`host:port`).
 - Automatic HTTPS issues and renews certificates; `automatic_https.skip` covers
-  hosts that cannot pass ACME — the shared `*.sslip.io` zone and any
+  hosts that cannot pass ACME, the shared `*.sslip.io` zone and any
   tunnel-fronted apex domain (e.g. `*.example.com`).
 - Registration is **compensated**: the previous route is snapshotted and restored
   if the replacement is rejected, so a project does not go offline on failure.
@@ -319,7 +319,7 @@ For hosts that cannot accept inbound connections (CGNAT, private link), the
 **tunnel** module provisions a Cloudflare tunnel once: it creates the tunnel,
 sets ingress (`*.domain → http://localhost:80`), creates the wildcard DNS
 record, and installs `cloudflared` as an NSSM service (`winify-tunnel`).
-Per-deploy, winify still only registers routes in Caddy — no provider call.
+Per-deploy, winify still only registers routes in Caddy, no provider call.
 
 ---
 

@@ -29,7 +29,7 @@ monitoring:
 
 ## Down means down
 
-An unreachable target records `reachable=0` with the connection error — never stale numbers. The card turns red with a `down` pill within `monitoring.timeout_seconds` and shows the specific error (unreachable host, firewall, bad credential, collection timeout).
+An unreachable target records `reachable=0` with the connection error, never stale numbers. The card turns red with a `down` pill within `monitoring.timeout_seconds` and shows the specific error (unreachable host, firewall, bad credential, collection timeout).
 
 If deploys work but monitoring is down, read the card error: same connection, different remote command.
 

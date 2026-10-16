@@ -28,7 +28,7 @@ Public, HMAC/token-verified. No session or bearer token required.
 | Code | Meaning |
 | ---- | ------- |
 | `202 {"status":"accepted","deployment_id":N}` | Deploy started |
-| `202 {"status":"ignored","reason":"..."}` | Non-push, branch mismatch, or duplicate delivery — no deploy |
+| `202 {"status":"ignored","reason":"..."}` | Non-push, branch mismatch, or duplicate delivery, no deploy |
 | `401` | Invalid signature / unknown project (no secret) |
 | `409` | Deploy already running for this project |
 | `413` | Body over 1 MiB |

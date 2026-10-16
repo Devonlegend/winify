@@ -14,7 +14,7 @@ flowchart TB
     AUTO["CI / automation<br/>bearer token"]
     GIT["GitHub / GitLab<br/>push webhook"]
   end
-  subgraph cc["Winify — single Go binary"]
+  subgraph cc["Winify: single Go binary"]
     HTTP["HTTP server (chi)<br/>session + bearer auth"]
     DEP["Deployer<br/>pipeline + history"]
     MON["Monitoring scheduler"]
@@ -112,11 +112,11 @@ flowchart LR
     H["/healthz"]
     L["/login, /register"]
   end
-  subgraph WH["Webhook — public, HMAC-verified"]
+  subgraph WH["Webhook: public, HMAC-verified"]
     GH["/webhooks/github/{id}"]
     GL["/webhooks/gitlab/{id}"]
   end
-  subgraph API["/api/v1 — bearer token"]
+  subgraph API["/api/v1: bearer token"]
     S1["servers, projects"]
     D1["deploy, rollback, deployments"]
     M1["metrics, audit"]

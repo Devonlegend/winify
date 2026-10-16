@@ -23,5 +23,5 @@ npm run typecheck
 
 - One `h1` per page, Docusaurus frontmatter (`title`, `description`) required.
 - Relative links only (`../how-to/...`), fenced code blocks with a language tag.
-- `##` sections are the RAG chunk unit — keep them task-sized.
+- `##` sections are the RAG chunk unit, keep them task-sized.
 - Never hand-edit `internal/assistant/docs/*.md`; edit here and re-sync.

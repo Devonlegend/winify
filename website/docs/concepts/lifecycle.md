@@ -50,7 +50,7 @@ stateDiagram-v2
 
 - `trigger` is `manual` | `webhook` | `api` | `rollback`.
 - Each `Trigger`/`Rollback` writes a row, then spawns a goroutine bounded by `context.WithTimeout(deploy.timeout_minutes)` (default 30). A `sync.WaitGroup` tracks workers; `Stop()` cancels and waits (hard cap 30s) before the database closes.
-- An in-flight guard (`sync.Map` keyed by project id) returns `ErrDeployInProgress` for a second concurrent deploy of the same project — surfaced as `409`.
+- An in-flight guard (`sync.Map` keyed by project id) returns `ErrDeployInProgress` for a second concurrent deploy of the same project, surfaced as `409`.
 - On boot, sessions are pruned, deployments left `running` by a crash are marked `failed`, and history is pruned by `deploy.retention_days` (default 90). The UI never shows a stale `running`.
 
 ## Rollback

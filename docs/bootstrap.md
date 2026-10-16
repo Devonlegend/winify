@@ -18,7 +18,7 @@ it is immediately usable, with no manual setup.
 
 | Decision | Choice |
 | --- | --- |
-| Install model | **Both** — self-provision the local Windows box, and offer remote bootstrap |
+| Install model | **Both**, self-provision the local Windows box, and offer remote bootstrap |
 | Trigger | **Automatic on first start**, idempotent and re-runnable |
 | Local target auth | **Prompt once** for an account/password; winify stores it encrypted |
 | Local `winsvc` server | **Created by winify automatically** (not manual) |
@@ -81,10 +81,10 @@ still override every path.
 | 6 | `local-target` | **Create the local `winsvc` server** (no credential) | server `local` exists |
 
 Step 4 uses native service support (`golang.org/x/sys/windows/svc`, already an
-indirect dependency), so winify does not depend on NSSM to run itself — NSSM is
+indirect dependency), so winify does not depend on NSSM to run itself; NSSM is
 only used for user workloads and for Caddy.
 
-### Step 6 detail — the auto-created local server
+### Step 6 detail: the auto-created local server
 
 The local target uses a **local executor**: for the host winify runs on, the
 deploy and monitoring paths run PowerShell in-process (`deployment.LocalRunner`)
@@ -184,7 +184,7 @@ Reuses `deploy.nssm_source` / `deploy.nssm_sha256`.
 
 ## Open questions
 
-1. Binaries: download with pinned hashes (chosen) — confirm no requirement for
+1. Binaries: download with pinned hashes (chosen): confirm no requirement for
    fully offline/embedded installs.
 2. Remote bootstrap when WinRM is off on the remote: accept the one-time manual
    snippet for v1, or invest in a WMI/PsExec fallback?

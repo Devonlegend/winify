@@ -17,8 +17,8 @@ Three layers, resolved in order. Secret values are write-only (`[redacted]` in U
 
 Before connecting, the Deployer expands:
 
-- `{{project.KEY}}` — this project's env
-- `{{environment.KEY}}` — shared variables for the project's environment
+- `{{project.KEY}}`: this project's env
+- `{{environment.KEY}}`: shared variables for the project's environment
 
 Use them in commands, paths, and compose files to avoid duplicating secrets per project.
 
@@ -33,6 +33,6 @@ Service environment is set via NSSM `AppEnvironmentExtra`. An empty env **explic
 
 ## Rules
 
-- Never put secrets in `servers.yaml` / `projects.yaml` — use `vault:<name>` refs.
+- Never put secrets in `servers.yaml` / `projects.yaml`: use `vault:<name>` refs.
 - Binary payloads and env values are marked sensitive; audit stores a label, not the payload.
 - API list/get responses redact `env`/`build_env` values and repo credentials.

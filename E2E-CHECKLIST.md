@@ -9,7 +9,7 @@ Placeholders: replace `CC_HOST` (e.g. `http://127.0.0.1:8090`), `DOCKER_HOST`
 
 ---
 
-## Part 0 — Prerequisites
+## Part 0: Prerequisites
 
 - [ ] Docker target: reachable over SSH; `git`, `docker`, and the `docker compose`
       plugin installed.
@@ -21,7 +21,7 @@ Placeholders: replace `CC_HOST` (e.g. `http://127.0.0.1:8090`), `DOCKER_HOST`
 - [ ] A DNS name for each app pointing at the Caddy host, and ports 80/443
       reachable from the internet (required for Let's Encrypt).
 
-## Part 1 — Winify setup
+## Part 1: Winify setup
 
 - [ ] Build and configure:
 
@@ -56,7 +56,7 @@ Placeholders: replace `CC_HOST` (e.g. `http://127.0.0.1:8090`), `DOCKER_HOST`
 
 ---
 
-## Part 2 — Docker project (push → build → deploy → HTTPS)
+## Part 2: Docker project (push → build → deploy → HTTPS)
 
 - [ ] Push a commit to the project's branch.
 - [ ] Simulate the webhook (replace the secret and repo values):
@@ -81,7 +81,7 @@ Placeholders: replace `CC_HOST` (e.g. `http://127.0.0.1:8090`), `DOCKER_HOST`
 - [ ] `curl -s -H "Authorization: Bearer $API_TOKEN" $CC_HOST/api/v1/audit | ConvertFrom-Json | Select -First 5` shows the
       clone/build/compose commands with `action=deploy` and the deployment id.
 
-## Part 3 — IIS project (push → validate → backup → deploy → HTTPS)
+## Part 3: IIS project (push → validate → backup → deploy → HTTPS)
 
 - [ ] Push a commit to the IIS project's branch.
 - [ ] Send the signed webhook as above, but for `proj-002` and the IIS secret.
@@ -94,7 +94,7 @@ Placeholders: replace `CC_HOST` (e.g. `http://127.0.0.1:8090`), `DOCKER_HOST`
 
 ---
 
-## Part 4 — Failure paths (must be clear, never silent)
+## Part 4: Failure paths (must be clear, never silent)
 
 - [ ] **Bad signature:** resend the webhook with `X-Hub-Signature-256: sha256=deadbeef`.
       Expect `401 Unauthorized` and no deployment started.
@@ -110,7 +110,7 @@ Placeholders: replace `CC_HOST` (e.g. `http://127.0.0.1:8090`), `DOCKER_HOST`
       returns a grounded answer (from docs or live data) rather than hanging or
       erroring.
 
-## Part 5 — Rollback
+## Part 5: Rollback
 
 - [ ] Deploy a known-good version, then deploy a bad one (or make a change you
       want to revert).
@@ -119,7 +119,7 @@ Placeholders: replace `CC_HOST` (e.g. `http://127.0.0.1:8090`), `DOCKER_HOST`
       previous image tag (no rebuild), IIS restores the latest backup.
 - [ ] Re-open the site; the previous version is live again.
 
-## Part 6 — Cleanup
+## Part 6: Cleanup
 
 - [ ] Stop the control-center (Ctrl-C) and remove the Caddy container if you no
       longer need it.

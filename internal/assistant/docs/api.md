@@ -1,4 +1,4 @@
-<!-- GENERATED from website/docs — do not edit by hand. Edit the source and run scripts/sync-assistant-docs.sh. -->
+<!-- GENERATED from website/docs; do not edit by hand. Edit the source and run scripts/sync-assistant-docs.sh. -->
 
 # REST API
 

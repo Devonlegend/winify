@@ -1,4 +1,4 @@
-# winify — Complete Walkthrough & Q&A Bank
+# winify: Complete Walkthrough & Q&A Bank
 
 > Everything you need to present winify: the problem, the design, every component,
 > the live demo, and an answer for (almost) every question a lecturer or student
@@ -9,10 +9,10 @@
 ## 0. The 30-second pitch
 
 > **Winify is a self-hosted deployment platform that owns the whole deployment
-> lifecycle — for environments that mix Windows/IIS and Docker. You point it at a
+> lifecycle, for environments that mix Windows/IIS and Docker. You point it at a
 > git repo; it builds, deploys to your server, fronts it with an automatic HTTPS
 > URL, monitors it, and keeps a command-level audit trail. It runs as one Go
-> binary on your own machine, with a local AI assistant — no cloud, no agent, no
+> binary on your own machine, with a local AI assistant, no cloud, no agent, no
 > external CI.**
 
 Three things make it different from Coolify/Portainer/Render:
@@ -50,7 +50,7 @@ In the real environment (mixed Windows + Docker, behind an ISP that uses **CGNAT
 ### 1.3 The one-sentence thesis
 > The deployment lifecycle should be owned by a single self-hosted control plane
 > that treats **Windows/IIS and Docker as equals**, works **behind CGNAT**, and
-> keeps an **auditable record of every remote command** — with **no agent to
+> keeps an **auditable record of every remote command**: with **no agent to
 > install** on the targets.
 
 ---
@@ -68,12 +68,12 @@ In the real environment (mixed Windows + Docker, behind an ISP that uses **CGNAT
 
 ## 3. Who it's for
 
-A **single self-hosting operator** — technical, comfortable on the command line,
-learning Go — who runs a mix of Windows and Linux/Docker workloads and wants one
+A **single self-hosting operator**, technical, comfortable on the command line,
+learning Go, who runs a mix of Windows and Linux/Docker workloads and wants one
 place to deploy and monitor them. They arrive **mid-task and impatient**: ship an
 app, check whether a deploy succeeded, add a server. Not to browse.
 
-Secondary role: the same person as **admin** — credentials, API tokens, audit.
+Secondary role: the same person as **admin**, credentials, API tokens, audit.
 
 V1 is explicitly **single admin, no multi-tenant / RBAC**.
 
@@ -98,7 +98,7 @@ These come from real design review (see `DESIGN.md` and `.impeccable/`), not mar
 |---|---|---|
 | Language | **Go 1.27** | Single static binary, great concurrency for long deploys/streams, easy cross-compile |
 | HTTP | **net/http + chi** | stdlib-first; chi adds small routing niceties |
-| DB | **SQLite via `modernc.org/sqlite`** | Pure Go — no C toolchain on Windows |
+| DB | **SQLite via `modernc.org/sqlite`** | Pure Go, no C toolchain on Windows |
 | SSH | **`golang.org/x/crypto/ssh`** | Docker/Linux targets |
 | WinRM | **`github.com/masterzen/winrm`** | Windows/IIS/service targets, NTLM |
 | Reverse proxy / TLS | **Caddy admin API** | Automatic HTTPS, one JSON API |
@@ -172,12 +172,12 @@ remote command is written to the **audit log**.
 
 winify has three target types, all sharing one lifecycle.
 
-### 7.1 `winsvc` — native Windows service (the default, recommended)
+### 7.1 `winsvc`: native Windows service (the default, recommended)
 A built executable run as a Windows service, managed by **NSSM**.
 
 **Pipeline (in order):**
 1. `git clone/fetch` + checkout the requested revision (branch resolved via `origin/*`; `git clean -fdx`; `-c safe.directory` for LocalSystem vs user-owned clones).
-2. **Ensure the build runtime** (`python` / `node` / `go` / `dotnet`) — installs it if missing (winget/choco), so the build self-heals.
+2. **Ensure the build runtime** (`python` / `node` / `go` / `dotnet`): installs it if missing (winget/choco), so the build self-heals.
 3. **Optional build** (`service_build_command`, e.g. `go build`, `dotnet publish`, `pip install -r requirements.txt`). Build env is redacted from audit.
 4. **Ensure NSSM** on the target (upload from `deploy.nssm_source` in chunked base64 if missing; SHA-256 verified).
 5. **Validate before touching anything live**: NSSM present, source dir exists, the service exe exists inside the build output.
@@ -185,7 +185,7 @@ A built executable run as a Windows service, managed by **NSSM**.
 7. **Timestamped backup** of the install directory (`NO_BACKUP` if it's the first deploy).
 8. **Deploy files** (robocopy `/MIR`).
 9. **Install/update the service** (idempotent `nssm install`/`nssm set Application/AppDirectory/AppParameters/AppEnvironmentExtra/AppExit/Start`).
-10. **Set service environment** (`AppEnvironmentExtra`) — reset to empty if no env, so removed secrets don't survive.
+10. **Set service environment** (`AppEnvironmentExtra`): reset to empty if no env, so removed secrets don't survive.
 11. **Start and wait for `Running`** (30s deadline).
 12. **Optional per-target Caddy** (static file serving; central Caddy still owns public TLS).
 13. **HTTP smoke test**.
@@ -193,7 +193,7 @@ A built executable run as a Windows service, managed by **NSSM**.
 
 **Rollback**: restore the newest timestamped backup on the target and restart. Discovered on the target, so it doesn't depend on history.
 
-### 7.2 `iis` — IIS application (advanced/legacy)
+### 7.2 `iis`: IIS application (advanced/legacy)
 Same shape, plus IIS specifics. **Zero-touch IIS**: winify creates the app pool
 and site if missing and points an existing site at the project's path and pool.
 
@@ -202,15 +202,15 @@ validate (`web.config` XML + app pool + optional service) → choose normal or
 blue-green → stop service+pool → backup → robocopy files → start+recycle pool →
 smoke test.
 
-**Blue-green (slot swap)** — the differentiator:
+**Blue-green (slot swap)**, the differentiator:
 - The live directory is **never overwritten**. The build is copied to the **inactive slot** (`<path>` / `<path>.blue`), validated there, then the site's `physicalPath` is repointed atomically and the app pool is recycled.
 - A marker file (`<path>.active`) records which slot is live.
-- **Rollback = repoint to the other slot** — no file copy, effectively instant.
+- **Rollback = repoint to the other slot**: no file copy, effectively instant.
 - On a failed swap/smoke test it swaps back.
 
 **Rollback (non-blue-green)**: restore the newest timestamped backup.
 
-### 7.3 `docker` — Linux target over SSH
+### 7.3 `docker`: Linux target over SSH
 Three sources:
 
 | `source` | What it does |
@@ -224,7 +224,7 @@ Three sources:
 published 1:1 so the central proxy can reach it. The proxy dials `EffectiveHostPort()`.
 
 **Rollback**:
-- `dockerfile`/`image`: re-run the previous image tag — **no rebuild**.
+- `dockerfile`/`image`: re-run the previous image tag, **no rebuild**.
 - `compose`: check out the previous commit and re-run its compose file.
 
 **On deploy failure**: winify attempts to **restore the previous successful release** automatically (if one exists).
@@ -270,7 +270,7 @@ rule.
 ### 9.3 WinRM security
 - `winrm_transport`: `ntlm` (default) or `basic` (basic requires HTTPS).
 - HTTP endpoints require explicit `winrm_insecure: true`.
-- The WinRM account can install/manage services and write the filesystem — treated as highly privileged and documented as such.
+- The WinRM account can install/manage services and write the filesystem, treated as highly privileged and documented as such.
 
 ### 9.4 Web app security
 - bcrypt admin password; sessions are random 32-byte tokens stored only as SHA-256 hashes.
@@ -301,7 +301,7 @@ rule.
 
 ---
 
-## 11. Tunnel (`internal/tunnel`) — the CGNAT solution
+## 11. Tunnel (`internal/tunnel`): the CGNAT solution
 
 ### 11.1 Why it exists
 Behind CGNAT/private ISP, the machine cannot accept inbound connections. Public-IP
@@ -321,7 +321,7 @@ Given an API token + domain, winify:
 
 Everything is **idempotent**: re-running reuses the tunnel, ingress and DNS record.
 Because a wildcard ingress + wildcard DNS are created **once at setup**, per-deploy
-winify never calls the provider again — it just registers the host in Caddy.
+winify never calls the provider again; it just registers the host in Caddy.
 
 ### 11.3 Config
 ```yaml
@@ -339,7 +339,7 @@ tunnel:
 ```
 
 ### 11.4 Security
-The API token can create tunnels and DNS records for its account/zone — stored
+The API token can create tunnels and DNS records for its account/zone, stored
 encrypted, least-privilege scopes, never logged. The **connector token** is a
 bearer credential for the tunnel, written only to a protected token file.
 
@@ -350,7 +350,7 @@ bearer credential for the tunnel, written only to a protected token file.
 
 ---
 
-## 12. Bootstrap — zero-touch host provisioning (`internal/bootstrap`)
+## 12. Bootstrap: zero-touch host provisioning (`internal/bootstrap`)
 
 An idempotent step engine. Each step has `Check` (already satisfied?) and `Apply`
 (do it), and the result is recorded in `app_meta` so re-runs skip done steps and
@@ -363,7 +363,7 @@ LocalSystem).
 | `nssm` | Ensure `tools\nssm.exe` (upload from source or download + SHA-256 pin) |
 | `winrm` | `Enable-PSRemoting -Force` (only if enabled; refuses public profiles) |
 | `self-service` | Install winify itself as a native Windows service (`sc create`, auto-start, recovery) |
-| `local-target` | Create the local `winsvc` server entry (no credential — runs in-process) |
+| `local-target` | Create the local `winsvc` server entry (no credential, runs in-process) |
 | `caddy` | Ensure `caddy.exe`, write the base Caddyfile, install the NSSM Caddy service, open 80/443 |
 | `firewall` | `New-NetFirewallRule` for 80/443 |
 | `tunnel` | (when enabled) install cloudflared + provision the public ingress |
@@ -378,7 +378,7 @@ tools `tools\`; clones `work\`; installs `apps\`; backups `backups\`; logs `logs
 
 ---
 
-## 13. Monitoring — agentless (`internal/monitoring`)
+## 13. Monitoring: agentless (`internal/monitoring`)
 
 No agent. The scheduler polls each registered server over the **same SSH/WinRM
 connection** the deployer uses.
@@ -392,16 +392,16 @@ per-service `service:<name>=<state>`.
 
 **Persistence & retention**: `metrics` table; retention (default 24h) and history
 points (default 200) are config. A failed collection is stored as an
-**unreachable** sample with the error — never stale numbers. The dashboard shows a
+**unreachable** sample with the error, never stale numbers. The dashboard shows a
 red `down` pill within `monitoring.timeout_seconds`.
 
 ---
 
-## 14. AI assistant — local RAG (`internal/assistant`)
+## 14. AI assistant: local RAG (`internal/assistant`)
 
-- **Knowledge base**: curated docs in `internal/assistant/docs/*.md` (Setup Guide, Adding a Project/Server, Troubleshooting, FAQ, API) — the same docs linked from the README.
+- **Knowledge base**: curated docs in `internal/assistant/docs/*.md` (Setup Guide, Adding a Project/Server, Troubleshooting, FAQ, API): the same docs linked from the README.
 - **Vector store**: **ChromaDB** (`chroma_url`), with an automatic **in-memory** fallback if Chroma is unreachable. Ingestion is idempotent.
-- **Generation**: **Ollama** (`ollama_url`, default model `gemma3:1b`, alt `qwen3:1.7b`). Deliberately local — no cloud LLM.
+- **Generation**: **Ollama** (`ollama_url`, default model `gemma3:1b`, alt `qwen3:1.7b`). Deliberately local, no cloud LLM.
 - **Intent routing**: `docs` | `deploy` | `server`. A named project/server plus a live keyword ("cpu", "rollback") routes to live data; "how do I…" routes to docs.
 - **Grounding**: doc chunks + **live** deploy history and monitoring samples are put in the prompt. The response includes `sources`, `intent`, `model`, `live`, `docs_used`, `latency_ms`.
 - **Graceful degradation**: if Ollama is down, winify returns a **deterministic, grounded answer** (live data and/or the top retrieved chunk) instead of hanging or erroring. This is why the assistant still works during a demo without Ollama installed.
@@ -426,7 +426,7 @@ red `down` pill within `monitoring.timeout_seconds`.
 - **Notifications** (all optional, all **non-fatal**, fired async):
   - generic JSON **webhook**,
   - **Slack** incoming webhook,
-  - **GitHub commit statuses** via the App (`winify/deploy`: pending/success/failure) — only when the project is linked to a repo and the event has a full commit SHA.
+  - **GitHub commit statuses** via the App (`winify/deploy`: pending/success/failure): only when the project is linked to a repo and the event has a full commit SHA.
 
 ---
 
@@ -456,7 +456,7 @@ Base `/api/v1`, bearer tokens, scopes `read` / `write`.
 
 ## 18. Audit log (`internal/deployment/audit.go`, `remote_commands`)
 
-Every remote command winify runs — deploy, rollback, monitor, bootstrap, onboard —
+Every remote command winify runs, deploy, rollback, monitor, bootstrap, onboard,
 is recorded: **server id, server type, action, deployment id, command, error,
 timestamp**. Sensitive payloads (env, build args, binary uploads) are replaced by a
 label via `RedactAuditText`/`withAuditRedaction`. The **Audit log** page (and
@@ -493,7 +493,7 @@ answer that CI-only tools can't give.
 
 A **monochrome operator console**: warm-neutral black surfaces, a fixed left
 sidebar, dense panels, hairline borders, one source of emphasis (light ink). No
-brand hue — state is carried by value, weight, and one inverted chip.
+brand hue, state is carried by value, weight, and one inverted chip.
 
 - Type: **IBM Plex Sans/Mono** + **Newsreader** serif for display headings; full local fallback (works offline).
 - Components: sidebar, sticky topbar, cards, tables, status pills, tabs, the **wizard** (guided New Resource flow), the **deploy drawer** (SSE log, `aria-live`).
@@ -557,7 +557,7 @@ off-site backups; private-registry auth; Git OAuth; preview environments.
 
 ## 24. Testing & CI
 
-- `go test ./...` across `config`, `deployment`, `proxy`, `server`, `models`, `assistant`, `monitoring`, `bootstrap`, `tunnel`, and more — including **Windows-specific** `LocalRunner`/PowerShell tests.
+- `go test ./...` across `config`, `deployment`, `proxy`, `server`, `models`, `assistant`, `monitoring`, `bootstrap`, `tunnel`, and more, including **Windows-specific** `LocalRunner`/PowerShell tests.
 - **CI** (`.github/workflows`):
   - Ubuntu job: `go mod verify`, `gofmt -l`, `go test ./...`, `go vet`, build for Linux **and** `GOOS=windows`, `govulncheck`.
   - Windows job: full test suite on `windows-latest`, PowerShell script parse, and a **smoke test** (build → boot → `/healthz` → login).
@@ -571,20 +571,20 @@ Caddy, the `cleaner` app (a FastAPI Windows service), and a Cloudflare Tunnel so
 `cleaner.edlegend.dev` is publicly reachable over HTTPS despite CGNAT.
 
 1. **Sign in** at `https://winify.edlegend.dev` (or `http://127.0.0.1:8090`).
-2. **Dashboard** — recent deployments + server health at a glance.
-3. **Projects → cleaner** — show repo, target type (`winsvc`), domain, last deploy.
-4. **Click Deploy** — the **deploy drawer** streams over SSE: clone → build → backup → deploy → start → smoke test → proxy register. (If PR #6 hasn't been merged, `main` may be broken — merge it first.)
-5. **Open the public URL** `https://cleaner.edlegend.dev` — served through Caddy, reached via the tunnel.
-6. **Audit log** — filter to `deploy`; show the actual remote commands (git/nssm/python) with server, action, deployment id.
-7. **Monitoring** — CPU/mem/disk/uptime and service state, no agent.
-8. **Roll back** — restore the previous timestamped backup; show the new `trigger=rollback` history entry.
-9. **Assistant** — ask "What does the last deployment for cleaner do?" — grounded answer with sources (works even without Ollama).
+2. **Dashboard**: recent deployments + server health at a glance.
+3. **Projects → cleaner**: show repo, target type (`winsvc`), domain, last deploy.
+4. **Click Deploy**: the **deploy drawer** streams over SSE: clone → build → backup → deploy → start → smoke test → proxy register. (If PR #6 hasn't been merged, `main` may be broken, merge it first.)
+5. **Open the public URL** `https://cleaner.edlegend.dev`: served through Caddy, reached via the tunnel.
+6. **Audit log**: filter to `deploy`; show the actual remote commands (git/nssm/python) with server, action, deployment id.
+7. **Monitoring**: CPU/mem/disk/uptime and service state, no agent.
+8. **Roll back**: restore the previous timestamped backup; show the new `trigger=rollback` history entry.
+9. **Assistant**: ask "What does the last deployment for cleaner do?", grounded answer with sources (works even without Ollama).
 
 ---
 
 ## 26. Q&A bank (every question I can think of)
 
-### Category A — "What is this?"
+### Category A: "What is this?"
 **Q: In one sentence?**
 A: A self-hosted deployment platform that owns your build→deploy→proxy→monitor→audit loop and treats Windows/IIS and Docker as equals.
 
@@ -597,7 +597,7 @@ A: Actions builds on their runners; it can't manage IIS app pools, install a Win
 **Q: Is it a dashboard that watches CI?**
 A: No. It connects directly to targets, builds, and deploys itself. That's the core principle.
 
-### Category B — "How does it work?"
+### Category B: "How does it work?"
 **Q: How do you reach Windows?**
 A: WinRM / PowerShell Remoting (`masterzen/winrm`), NTLM by default. Docker/Linux over SSH (`x/crypto/ssh`).
 
@@ -614,12 +614,12 @@ A: A signed push webhook (GitHub/GitLab), the UI Deploy button, or the REST API.
 A: Docker re-runs the previous image tag (no rebuild); compose re-checks out the previous commit; IIS/winsvc restore the newest timestamped backup on the target. IIS blue-green just repoints the site to the other slot.
 
 **Q: What languages can it deploy?**
-A: Anything you can build with a command: Go, .NET, Python, Node, static — with auto-detection — plus any Dockerfile/compose/prebuilt image.
+A: Anything you can build with a command: Go, .NET, Python, Node, static, with auto-detection, plus any Dockerfile/compose/prebuilt image.
 
 **Q: What does it run on?**
 A: One Go binary + SQLite. Windows or Linux. No external database or queue.
 
-### Category C — "Is it secure?"
+### Category C: "Is it secure?"
 **Q: How are secrets stored?**
 A: AES-256-GCM in SQLite, key from env/file; referenced as `vault:<name>` and decrypted only in memory at connection time. Never logged, never returned by the API.
 
@@ -635,17 +635,17 @@ A: No. The assistant is local (ChromaDB + Ollama). The only outbound calls are t
 **Q: Who can log in?**
 A: One admin (V1), bcrypt + sessions with Secure/HttpOnly/SameSite cookies. API has scoped read/write bearer tokens (hashed at rest). RBAC is V2.
 
-### Category D — "The CGNAT / public-IP problem"
-**Q: My ISP uses CGNAT — can you still give a URL?**
+### Category D: "The CGNAT / public-IP problem"
+**Q: My ISP uses CGNAT: can you still give a URL?**
 A: Yes. winify provisions a **Cloudflare Tunnel**: it creates the tunnel, points `*.yourdomain` at Caddy, creates the wildcard DNS record, and runs the connector. Public HTTPS, no inbound port needed.
 
 **Q: Why not sslip.io?**
 A: sslip.io maps a hostname to an IP; behind CGNAT that IP has no inbound path. It also can't get certs, hence winify serves it HTTP-only. The tunnel is the real answer.
 
 **Q: How do you keep it stable across a live deploy?**
-A: The wildcard ingress + DNS are created once at setup, so per-deploy winify only registers the host in Caddy — no provider calls, and the domain never changes.
+A: The wildcard ingress + DNS are created once at setup, so per-deploy winify only registers the host in Caddy, no provider calls, and the domain never changes.
 
-### Category E — "Reliability"
+### Category E: "Reliability"
 **Q: What if a deploy fails?**
 A: Nothing live is touched until validation passes. On failure winify **restores the previous release** (backup or previous image) and marks the deploy `failed` with the full log. The old version keeps serving.
 
@@ -656,15 +656,15 @@ A: The deploy is failed and compensated; Docker additionally dumps `compose ps`/
 A: winify warns at startup; deploys without a domain still run. Routes require Caddy.
 
 **Q: What if the target is unreachable?**
-A: Monitoring marks it `down` with the connection error within the timeout — it never shows stale numbers.
+A: Monitoring marks it `down` with the connection error within the timeout; it never shows stale numbers.
 
 **Q: Is a bad deploy able to take the site down mid-request?**
-A: For IIS blue-green, no — the live directory is never overwritten; the swap is a physicalPath repoint. For others, validation-then-backup-then-deploy limits the window.
+A: For IIS blue-green, no, the live directory is never overwritten; the swap is a physicalPath repoint. For others, validation-then-backup-then-deploy limits the window.
 
 **Q: Can two people deploy at once?**
-A: Per project, no — one in-flight deploy is enforced. (Multi-user/RBAC is V2.)
+A: Per project, no, one in-flight deploy is enforced. (Multi-user/RBAC is V2.)
 
-### Category F — "Operations & scale"
+### Category F: "Operations & scale"
 **Q: Does it scale / multi-server?**
 A: V1 is one server per target type; multi-server orchestration and Swarm are explicitly V2.
 
@@ -680,7 +680,7 @@ A: V2. Today: public repos, or SSH URLs you can authenticate at the target level
 **Q: Retention?**
 A: Deployments/audit pruned after `deploy.retention_days` (default 90); metrics after `monitoring.retention_hours` (default 24).
 
-### Category G — "The AI assistant"
+### Category G: "The AI assistant"
 **Q: Does it use ChatGPT?**
 A: No. Local **Ollama** generation + **ChromaDB** retrieval, grounded in winify's own docs and live deploy/monitoring data. No cloud LLM.
 
@@ -688,9 +688,9 @@ A: No. Local **Ollama** generation + **ChromaDB** retrieval, grounded in winify'
 A: winify still answers from retrieval and live data (deterministic fallback), citing sources. It never hangs or errors on stage.
 
 **Q: Can it answer about my last deploy?**
-A: Yes — intent `deploy` pulls live history; intent `server` pulls live metrics.
+A: Yes, intent `deploy` pulls live history; intent `server` pulls live metrics.
 
-### Category H — "Engineering choices"
+### Category H: "Engineering choices"
 **Q: Why Go?**
 A: Single static binary, easy cross-compile, strong concurrency for long deploys and SSE streams, and a rich SSH/WinRM ecosystem. Works on Windows and Linux.
 
@@ -698,7 +698,7 @@ A: Single static binary, easy cross-compile, strong concurrency for long deploys
 A: One-file DB, zero ops, pure-Go driver (`modernc.org/sqlite`) so no C toolchain on Windows. PostgreSQL-compatible schema noted for later.
 
 **Q: Why Caddy?**
-A: Automatic HTTPS and an admin API winify can drive for per-deploy route registration — no certbot, no config reloads by hand.
+A: Automatic HTTPS and an admin API winify can drive for per-deploy route registration, no certbot, no config reloads by hand.
 
 **Q: Why no JS framework?**
 A: Progressive enhancement keeps it offline-friendly, fast, and debuggable. The deploy drawer uses SSE and degrades to a plain POST.
@@ -706,27 +706,27 @@ A: Progressive enhancement keeps it offline-friendly, fast, and debuggable. The 
 **Q: How is it tested?**
 A: `go test ./...` plus a Windows CI job that runs the full suite, parses the packaging scripts, and smoke-boots the binary (health + login). `govulncheck` runs in CI.
 
-### Category I — "The demo / practical"
+### Category I: "The demo / practical"
 **Q: How fast is install?**
-A: Drop the binary + config, run `winify bootstrap` once (elevated). It creates dirs, NSSM, Caddy, firewall, the local target — and the tunnel if configured.
+A: Drop the binary + config, run `winify bootstrap` once (elevated). It creates dirs, NSSM, Caddy, firewall, the local target, and the tunnel if configured.
 
 **Q: Cost?**
 A: Self-hosted; the software is free to run. External costs: your server, a domain, and (optionally) a tunnel provider (Cloudflare's free tier works).
 
 **Q: What's the license?**
-A: Not declared in the repo yet — decide before publishing/sharing.
+A: Not declared in the repo yet; decide before publishing/sharing.
 
 **Q: What's the demo app?**
 A: The **AKIRS Data Cleaner** (FastAPI) deployed as a native Windows service, live at `cleaner.edlegend.dev` through Caddy + Cloudflare Tunnel.
 
-### Category J — "Tough / gotcha"
+### Category J: "Tough / gotcha"
 **Q: Isn't exposing an admin panel publicly dangerous?**
 A: It is, and it's a choice. Remove the tunnel ingress rule to un-publish it, stop the service to take it down, or put **Cloudflare Access** (email OTP) in front. Keep it loopback/internal for production.
 
 **Q: What if the current branch is broken?**
-A: winify deploys exactly what's in the repo — so a broken `main` deploys and fails the health check, then compensates back to the previous release. Fix the repo (or pin a good ref).
+A: winify deploys exactly what's in the repo, so a broken `main` deploys and fails the health check, then compensates back to the previous release. Fix the repo (or pin a good ref).
 
-**Q: What about Windows service env updates — do removed secrets linger?**
+**Q: What about Windows service env updates: do removed secrets linger?**
 A: No. An empty env explicitly resets NSSM's `AppEnvironmentExtra`.
 
 **Q: Clones made by a different user ("dubious ownership")?**
@@ -739,15 +739,15 @@ A: Multi-server orchestration, RBAC/multi-user, off-site backups, service catalo
 
 ## 27. Glossary & one-liners
 
-- **Target** — a deploy destination: `winsvc`, `iis`, or `docker`.
-- **Project / Resource** — a deployable unit bound to a target.
-- **Pipeline** — the ordered remote steps for a target type.
-- **Registrar** — the reverse-proxy adapter (Caddy) that maps a domain to an upstream.
-- **Artifact** — what a deploy records for rollback: a Docker image tag, a commit, or a Windows backup path.
-- **Bootstrap** — idempotent, elevated host provisioning.
-- **Vault ref** — `vault:<name>`, an encrypted credential resolved only at connection time.
-- **ACME skip** — Caddy hosts served over plain HTTP behind an external TLS terminator.
-- **Tunnel** — outbound connector that publishes a public URL for CGNAT hosts.
+- **Target**: a deploy destination: `winsvc`, `iis`, or `docker`.
+- **Project / Resource**: a deployable unit bound to a target.
+- **Pipeline**: the ordered remote steps for a target type.
+- **Registrar**: the reverse-proxy adapter (Caddy) that maps a domain to an upstream.
+- **Artifact**: what a deploy records for rollback: a Docker image tag, a commit, or a Windows backup path.
+- **Bootstrap**: idempotent, elevated host provisioning.
+- **Vault ref**: `vault:<name>`, an encrypted credential resolved only at connection time.
+- **ACME skip**: Caddy hosts served over plain HTTP behind an external TLS terminator.
+- **Tunnel**: outbound connector that publishes a public URL for CGNAT hosts.
 
 **Elevator pitch (10s):** "Coolify for Windows and Docker, that works behind CGNAT."
 
@@ -762,8 +762,8 @@ puts you behind CGNAT, via a Cloudflare Tunnel."
 ## 28. Closing statement
 
 > winify proves you don't need a cloud platform or an external CI system to get a
-> modern deployment experience. By owning the lifecycle — connecting to targets
-> directly, building, deploying, proxying, monitoring, and auditing — it brings
+> modern deployment experience. By owning the lifecycle, connecting to targets
+> directly, building, deploying, proxying, monitoring, and auditing, it brings
 > `git push → live HTTPS URL` to the environments that big tools ignore: **mixed
 > Windows/IIS and Docker, self-hosted, and often behind CGNAT.** Windows isn't a
 > second-class citizen here, secrets are encrypted and never logged, failures

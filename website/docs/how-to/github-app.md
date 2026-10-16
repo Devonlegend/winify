@@ -31,4 +31,4 @@ Store the private key encrypted:
 
 ## Commit statuses
 
-Once linked, deploys post `winify/deploy` statuses (`pending` / `success` / `failure`) — only when the project is linked to a repo and the event has a full commit SHA. Failures to post are non-fatal and never fail the deploy.
+Once linked, deploys post `winify/deploy` statuses (`pending` / `success` / `failure`), only when the project is linked to a repo and the event has a full commit SHA. Failures to post are non-fatal and never fail the deploy.

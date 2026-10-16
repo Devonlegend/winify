@@ -3,15 +3,15 @@
 This directory spins up a throwaway Linux "target server" on your machine so you
 can run the full Docker deploy pipeline without a real VM:
 
-- `target/` — a container running a real Docker daemon (privileged) plus `sshd`,
+- `target/`: a container running a real Docker daemon (privileged) plus `sshd`,
   `git` and the Docker Compose plugin.
-- `sample-app/` — a tiny Python HTTP app with a Dockerfile and a `/healthz`
+- `sample-app/`: a tiny Python HTTP app with a Dockerfile and a `/healthz`
   endpoint, committed to a git repo inside the target.
-- `config.yaml` — a self-contained control-center config using `dev/data/` for
+- `config.yaml`: a self-contained control-center config using `dev/data/` for
   its database, so your real data is untouched.
-- `setup.ps1` — builds the target, creates the sample repo, installs an SSH key
+- `setup.ps1`: builds the target, creates the sample repo, installs an SSH key
   and stores the credentials.
-- `deploy.ps1` — sends a signed push webhook to trigger a deploy.
+- `deploy.ps1`: sends a signed push webhook to trigger a deploy.
 
 ## Run it
 

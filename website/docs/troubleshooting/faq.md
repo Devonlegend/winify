@@ -31,7 +31,7 @@ No. Local ChromaDB + Ollama over these guides and live DB data, with cited sourc
 
 ## Why is a server down in Monitoring?
 
-SSH/WinRM open failed or the metrics command failed. Card shows the exact error — unreachable host, firewall, bad credential, or timeout.
+SSH/WinRM open failed or the metrics command failed. Card shows the exact error, unreachable host, firewall, bad credential, or timeout.
 
 ## What is deferred to V2?
 
