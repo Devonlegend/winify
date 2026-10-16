@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-16
+
 ### Added
 
 - Initial public release of the DevOps Control Center (`winify`): a self-hosted
@@ -29,4 +31,5 @@ and this project adheres to
   SHA-256 verification of release assets.
 - Public documentation site at [winify.space](https://winify.space).
 
-[Unreleased]: https://github.com/Devonlegend/winify/commits/main
+[Unreleased]: https://github.com/Devonlegend/winify/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Devonlegend/winify/releases/tag/v0.1.0

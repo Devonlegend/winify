@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/Devonlegend/winify/actions/workflows/ci.yml"><img src="https://github.com/Devonlegend/winify/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Devonlegend/winify/releases/latest"><img src="https://img.shields.io/github/v/release/Devonlegend/winify?color=2b2b2b&label=release" alt="Latest release"></a>
   <a href="https://winify.space"><img src="https://img.shields.io/badge/docs-winify.space-2b2b2b" alt="Documentation"></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/go-1.27%2B-2b2b2b?logo=go&logoColor=white" alt="Go 1.27+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2b2b2b" alt="License: MIT"></a>
